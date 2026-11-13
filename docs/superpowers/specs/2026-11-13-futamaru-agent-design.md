@@ -29,9 +29,9 @@
 |---|---|
 | 音声エージェントフレームワーク | LiveKit Agents (Python) |
 | LiveKit サーバー | LiveKit Cloud |
-| LLM | gemma4（GPU サーバー上の vLLM、OpenAI 互換 API） |
-| STT | Whisper（GPU サーバー、OpenAI 互換 API） |
-| TTS | kotoba 系 TTS（GPU サーバー、OpenAI 互換 API） |
+| LLM | Gemma 4（GPU サーバー上の vLLM ≥ 0.19、OpenAI 互換 API）。モデルサイズは §8.1 |
+| STT | kotoba-whisper v2.0（GPU サーバー上の Speaches、OpenAI 互換 API） |
+| TTS | Kotoba TTS v2（fal.ai のホスト型 API。自前ホスト不可） |
 | VAD | Silero VAD（エージェント内で実行） |
 | エージェント実行場所 | GPU サーバー（開発時はローカル PC） |
 | 個体の単位 | 1デバイス = 1株。`plant_id` で識別 |
@@ -50,9 +50,9 @@
    マイク(常時送信)            ルーム: plant-<id>         │
    スピーカー                                           │
    ディスプレイ <── RPC: 表情 ──────────────────────────┤
-                                                       ├─> vLLM (gemma4)
-                                                       ├─> Whisper API (STT)
-                                                       ├─> kotoba TTS API
+                                                       ├─> vLLM (Gemma 4)          [GPU サーバー]
+                                                       ├─> Speaches (kotoba-whisper) [GPU サーバー]
+                                                       ├─> fal.ai (Kotoba TTS v2)   [外部 API]
                                                        └─> SQLite (性格・記憶)
 ```
 
@@ -73,8 +73,8 @@ agent/
   main.py              エントリポイント。AgentSession の組み立て、イベント配線
   config.py            環境変数の読み込み（各 API の URL、DB パス、タイムアウト等）
   plugins/
-    whisper_stt.py     STT の生成（OpenAI 互換 STT プラグインに base_url を渡す薄いラッパー）
-    kotoba_tts.py      TTS の生成（同上。互換でない場合はここに独自実装を置く）
+    whisper_stt.py     STT の生成（LiveKit の OpenAI 互換 STT プラグインに base_url を渡す薄いラッパー）
+    kotoba_tts.py      Kotoba TTS v2（fal.ai WebSocket）を呼ぶ独自 TTS プラグイン
   plant/
     store.py           SQLite の読み書き（plants / memories / sessions / utterances / trait_history）
     personality.py     性格パラメータの定義・クランプ・更新ルール
@@ -280,35 +280,76 @@ CREATE TABLE trait_history (
   - `talkativeness < 0.3` のときは話題を振らない
   - 話題を振った後もユーザーが話さなければ、60秒ルールで眠る（植物の発話終了時点から数え直す、§5.2）
 
-## 8. GPU サーバー API 契約
+## 8. モデル API 契約
 
-エージェントは以下の OpenAI 互換エンドポイントを前提とする。URL は環境変数で指定する。
+URL・モデル名はすべて環境変数で指定する。開発時はローカル PC 上のモデルやクラウド API に向けて同じ環境変数を設定して動かす。
 
-| 用途 | 環境変数 | エンドポイント | 備考 |
-|---|---|---|---|
-| LLM | `LLM_BASE_URL`, `LLM_MODEL` | `POST {LLM_BASE_URL}/chat/completions` | vLLM で gemma4 を提供。ストリーミング対応必須。reflection 用に JSON 出力（`response_format`）に対応していること |
-| STT | `STT_BASE_URL`, `STT_MODEL` | `POST {STT_BASE_URL}/audio/transcriptions` | multipart で音声ファイル、`language=ja`、`prompt` パラメータ対応 |
-| TTS | `TTS_BASE_URL`, `TTS_MODEL`, `TTS_VOICE` | `POST {TTS_BASE_URL}/audio/speech` | JSON `{"model","input","voice","response_format":"pcm"}` → 24kHz 16bit mono PCM |
+### 8.1 LLM: Gemma 4 on vLLM（GPU サーバー）
 
-- kotoba TTS が OpenAI 互換で提供できない場合は、`plugins/kotoba_tts.py` に独自の TTS プラグインを実装し、他のモジュールには影響させない。
-- 開発時は、ローカル PC 上のモデルまたはクラウド API に向けて同じ環境変数を設定して動かす。
+| 項目 | 内容 |
+|---|---|
+| 環境変数 | `LLM_BASE_URL`, `LLM_MODEL` |
+| エンドポイント | `POST {LLM_BASE_URL}/chat/completions`（OpenAI 互換、ストリーミング） |
+| vLLM バージョン | 0.19 以上（Gemma 4 のネイティブ実装が入った版） |
+| 起動例 | `vllm serve google/gemma-4-26B-A4B-it --max-model-len 32768 --gpu-memory-utilization 0.90` |
+| 思考モード | 使わない（`enable_thinking` を指定しない）。応答遅延を抑えるため |
 
-その他の環境変数:
+モデルサイズは GPU メモリで決める（BF16 の目安、vLLM 公式レシピより）。
+
+| GPU メモリ | モデル | 備考 |
+|---|---|---|
+| 80GB（A100/H100 等） | `google/gemma-4-26B-A4B-it`（MoE、アクティブ 4B） | **推奨**。日本語の会話品質と速度のバランスが良い |
+| 40GB 以上 | `google/gemma-4-12B-it` | 12B は stable 版 vLLM 未対応（nightly のみ）のため、使う場合は版を固定して事前検証する |
+| 24GB 以上 | `google/gemma-4-E4B-it` | 最小構成。性格の演じ分けの品質はデモ前に要確認 |
+
+**reflection の JSON 出力**: vLLM の構造化出力（`response_format: {"type": "json_schema", ...}`）で Gemma 4 がサポートされている。reflection では §6.3 の JSON スキーマを `json_schema` として渡し、加えてシステムメッセージにも出力形式を書く（公式レシピの推奨）。構造化出力を使っても、必須キー欠落などに備えて §6.3 の検証と1回再試行は残す。
+
+### 8.2 STT: kotoba-whisper on Speaches（GPU サーバー）
+
+| 項目 | 内容 |
+|---|---|
+| 環境変数 | `STT_BASE_URL`, `STT_MODEL` |
+| エンドポイント | `POST {STT_BASE_URL}/audio/transcriptions`（OpenAI 互換、multipart） |
+| パラメータ | `language=ja`、`prompt=ふたまる`（ウェイクワードの認識補助、§5.3） |
+| サーバー | Speaches（旧 faster-whisper-server）。faster-whisper ベースで OpenAI 互換 API を提供 |
+| モデル | `kotoba-tech/kotoba-whisper-v2.0-faster`（kotoba-whisper v2.0 の CTranslate2 変換版、MIT ライセンス、日本語特化） |
+| 代替 | Speaches で上記モデルが読めない場合は `vllm serve kotoba-tech/kotoba-whisper-v2.0`（vLLM の Transcriptions API、`vllm[audio]` が必要）、それも不可なら Speaches 標準の `large-v3` 系 Whisper |
+
+### 8.3 TTS: Kotoba TTS v2 on fal.ai（外部 API）
+
+Kotoba TTS v2 は Kotoba Technologies が fal.ai 上で提供するホスト型 API であり、モデルの重みは公開されておらず自前の GPU サーバーには置けない。OpenAI 互換でもないため、`plugins/kotoba_tts.py` に独自の LiveKit TTS プラグインを実装する。
+
+| 項目 | 内容 |
+|---|---|
+| 環境変数 | `FAL_KEY`, `TTS_SPEAKER_ID`（既定: `female-01`） |
+| 接続方式 | WebSocket ストリーミング `wss://fal.run/Kotoba-Technologies/kotoba-tts/v2/tts/ws`（音声を生成しながら base64 チャンクで受信）。一括取得の REST `https://fal.run/kotoba-technologies/kotoba-tts/v2/tts` もある |
+| 入力 | `text`（最大 400 文字）、`language`（`ja` のみ）、`speaker_id`（`male-01` / `female-01`） |
+| 出力 | 24kHz 16bit mono PCM（ストリーミング既定） |
+| 料金 | 入力テキストの UTF-8 1,000 バイトあたり $0.015。日本語は1文字約3バイトのため、30文字の応答で約 $0.0014、1,000 応答で約 $1.4 |
+
+- 1回の応答は 400 文字を超えない（§6.4 の長さ指示で最大 2〜3 文に抑えている）。万一超えた場合は句点で分割して順に送る。
+- 会場ネットワークから fal.ai への接続が必要になる。デモ前に会場回線で初回音声までの遅延を測る。
+- 代替: fal.ai が使えない・遅い場合に備え、`kotoba_tts.py` の生成関数を差し替えるだけで OpenAI 互換の自前 TTS（例: MioTTS、Kokoro-FastAPI）に切り替えられるようにする（環境変数 `TTS_PROVIDER=kotoba|openai`）。
+
+### 8.4 その他の環境変数
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（LiveKit Cloud）
 - `FUTAMARU_DB_PATH`（既定: `./data/futamaru.db`）
 - `WAKE_WORDS`（カンマ区切り、既定は §5.3）
 - `SLEEP_AFTER_SECONDS`（既定: 60）
 - `LLM_TIMEOUT` / `STT_TIMEOUT` / `TTS_TIMEOUT`（秒、既定: 15 / 10 / 10）
+- `TTS_PROVIDER`（`kotoba` | `openai`、既定: `kotoba`）。`openai` のときは `TTS_BASE_URL`, `TTS_MODEL`, `TTS_VOICE` を使い、`POST {TTS_BASE_URL}/audio/speech` に `{"model","input","voice","response_format":"pcm"}` を送る
 
 ## 9. ESP32 側への要件（ハード担当との取り決め）
+
+ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk-esp32`）で作る前提とする。この SDK は ESP32-S3 に対応し、Opus 音声の双方向送受信、エコーキャンセル（AEC）、RPC メソッドの登録（エージェントから呼び出される側）を備えている。ただし現在は Developer Preview で API が変わる可能性があるため、使う版を固定する。
 
 エージェントが正しく動くために、ESP32 ファームウェアに以下を求める。
 
 1. 起動時に Wi-Fi に接続し、書き込まれたトークンで `plant-<plant_id>` ルームに参加する。切断時は自動で再接続する。
 2. マイク音声を常時 publish する（ウェイクワードはサーバー側で検出するため）。
 3. エージェントの音声トラックを subscribe してスピーカーで再生する。
-4. **エコーキャンセル（AEC）を有効にする**。植物自身の声をマイクで拾うと、割り込みやウェイクワードの誤検出が起きるため（ESP-IDF の esp-sr / AFE などを想定）。
-5. RPC メソッド `set_expression` を登録し、§7.1 の8種の表情を表示する。未知の表情名は `neutral` として表示する。
+4. **エコーキャンセル（AEC）を有効にする**（SDK の AEC 機能を使う）。植物自身の声をマイクで拾うと、割り込みやウェイクワードの誤検出が起きるため。
+5. RPC メソッド `set_expression` を登録し（`livekit_room_rpc_register`）、§7.1 の8種の表情を表示する。未知の表情名は `neutral` として表示する。
 6. 起動直後の表示は `sleepy` とする。
 
 ## 10. エラー処理
@@ -338,3 +379,28 @@ CREATE TABLE trait_history (
   - 会話・表情ログ・DB への記録
   - 60秒無言で眠り、reflection で性格・記憶が更新されること
 - **デモ確認**: `scripts/simulate.py` で2株に異なる会話ログを流し、性格値・プロンプト・応答の違いを確認
+
+## 12. 前提の調査結果（2026-11-13 時点）
+
+| # | 確認した前提 | 結果 | 仕様への反映 |
+|---|---|---|---|
+| 1 | LiveKit ESP32 SDK が RPC と AEC に対応しているか | **対応**。ESP32-S3 / P4 対応、Opus 双方向、AEC、RPC メソッド登録あり。Developer Preview（API 変更の可能性あり）。既知の問題として「リモート参加者の退出で切断される場合がある」 | §9。表情はエージェントからの RPC 呼び出しで送る方式のまま |
+| 2a | kotoba TTS を OpenAI 互換で自前ホストできるか | **不可**。Kotoba TTS v2 は fal.ai 上のホスト型 API のみで、重みは非公開。独自の REST / WebSocket 形式 | §8.3。独自 TTS プラグインを実装し、OpenAI 互換の自前 TTS への切り替え口も用意 |
+| 2b | Whisper を OpenAI 互換で立てられるか | **可能**。Speaches（faster-whisper ベース）や vLLM の Transcriptions API が OpenAI 互換。日本語特化の `kotoba-whisper-v2.0-faster`（CTranslate2 版、MIT）がある | §8.2 |
+| 3 | vLLM の Gemma 4 で JSON 出力が使えるか | **使える**。vLLM ≥ 0.19 で Gemma 4 をネイティブ対応。公式レシピで `response_format` の `json_schema` による構造化出力がサポートされている | §8.1、§6.3 |
+
+### 実装の最初に実機で確かめること
+- Speaches が `kotoba-tech/kotoba-whisper-v2.0-faster` を読み込めるか（読めなければ §8.2 の代替）
+- Kotoba TTS v2（fal.ai）の初回音声までの遅延。会話のテンポを保つ目安は 1 秒以内
+- ESP32 SDK の AEC を有効にした状態で、植物の発話中に割り込み・ウェイクワードの誤検出が起きないか
+- ESP32 SDK の既知の問題（参加者の退出で切断）が、エージェントの再ディスパッチ時に影響しないか
+
+### 参考
+- LiveKit ESP32 SDK: https://github.com/livekit/client-sdk-esp32
+- Kotoba TTS v2（fal.ai）: https://fal.ai/models/kotoba-technologies/kotoba-tts/v2/tts/llms.txt
+- kotoba-whisper v2.0 faster: https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-faster
+- Speaches: https://speaches-ai.github.io/speaches
+- vLLM Speech-to-Text: https://docs.vllm.ai/en/v0.32.0/serving/online_serving/speech_to_text/
+- vLLM Gemma 4 レシピ: https://docs.vllm.ai/projects/recipes/en/latest/Google/Gemma4.html
+- vLLM Gemma 4 発表: https://vllm.ai/blog/2026-04-02-gemma4
+- vLLM 構造化出力: https://docs.vllm.ai/en/latest/features/structured_outputs/
