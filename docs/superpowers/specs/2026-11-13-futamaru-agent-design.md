@@ -29,9 +29,9 @@
 |---|---|
 | 音声エージェントフレームワーク | LiveKit Agents (Python) |
 | LiveKit サーバー | LiveKit Cloud |
-| LLM | Gemma 4（GPU サーバー上の vLLM ≥ 0.19、OpenAI 互換 API）。モデルサイズは §8.1 |
+| LLM | Gemma 4（GPU サーバー上の vLLM ≥ 0.19、OpenAI 互換 API）。モデルサイズは**未決**（§13） |
 | STT | kotoba-whisper v2.0（GPU サーバー上の Speaches、OpenAI 互換 API） |
-| TTS | Kotoba TTS v2（fal.ai のホスト型 API。自前ホスト不可） |
+| TTS | Kotoba TTS v2（fal.ai のホスト型 API。自前ホスト不可）。**仮決定**（§13） |
 | VAD | Silero VAD（エージェント内で実行） |
 | エージェント実行場所 | GPU サーバー（開発時はローカル PC） |
 | 個体の単位 | 1デバイス = 1株。`plant_id` で識別 |
@@ -404,3 +404,10 @@ ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk
 - vLLM Gemma 4 レシピ: https://docs.vllm.ai/projects/recipes/en/latest/Google/Gemma4.html
 - vLLM Gemma 4 発表: https://vllm.ai/blog/2026-04-02-gemma4
 - vLLM 構造化出力: https://docs.vllm.ai/en/latest/features/structured_outputs/
+
+## 13. 未決事項（チームで相談中）
+
+| # | 事項 | 現在の仮置き | 決まったら変わる箇所 |
+|---|---|---|---|
+| 1 | TTS に使うのは Kotoba TTS v2（fal.ai）でよいか。企画メモの「kotobaなんちゃら」が STT 側の kotoba-whisper を指していた可能性もある | Kotoba TTS v2（fal.ai）。`TTS_PROVIDER=openai` で自前 TTS に切り替え可能な設計にしてあるため、どちらに決まってもエージェントの構造は変わらない | §2、§8.3、`plugins/kotoba_tts.py` の要否 |
+| 2 | GPU サーバーのメモリ容量 | 未定。80GB なら `gemma-4-26B-A4B-it`、24GB なら `gemma-4-E4B-it`（§8.1 の表） | §2、§8.1 の `LLM_MODEL` |
