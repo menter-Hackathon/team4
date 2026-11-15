@@ -2,6 +2,7 @@
 
 育て方によって個性が変わる、話せる観葉植物「ふたまる」のサーバー側音声AIエージェントです。
 設計は [`docs/superpowers/specs/2026-11-13-futamaru-agent-design.md`](docs/superpowers/specs/2026-11-13-futamaru-agent-design.md) を参照してください。
+チーム開発のルール（ブランチ・レビュー・秘密情報など）は [`CONTRIBUTING.md`](CONTRIBUTING.md) にまとめています。
 
 ## セットアップ
 
