@@ -19,7 +19,18 @@ def test_normalize():
 
 
 @pytest.mark.parametrize(
-    "text", ["ふたまる", "フタマル", "ふた丸", "二丸", "2丸", "２丸", "ねえ、フタマル！", "ふ た ま る", "ふたまる。"]
+    "text",
+    [
+        "ふたまる",
+        "フタマル",
+        "ふた丸",
+        "二丸",
+        "2丸",
+        "２丸",
+        "ねえ、フタマル！",
+        "ふ た ま る",
+        "ふたまる。",
+    ],
 )
 def test_detects_variants(text):
     assert detect_wake(text, DEFAULT) is not None
@@ -93,7 +104,11 @@ def test_nudge_once_per_silence():
     c = WakeController()
     c.wake(T0)
     c.set_nudge_delay(25)
-    assert c.tick(T0 + s(24)) == "none" and c.tick(T0 + s(25)) == "nudge" and c.tick(T0 + s(26)) == "none"
+    assert (
+        c.tick(T0 + s(24)) == "none"
+        and c.tick(T0 + s(25)) == "nudge"
+        and c.tick(T0 + s(26)) == "none"
+    )
     c.on_user_activity(T0 + s(30))
     assert c.tick(T0 + s(55)) == "nudge"
 

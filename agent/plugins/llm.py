@@ -10,7 +10,9 @@ from agent.plant.reflection import JsonCompleter
 
 
 def _client(cfg: Config) -> AsyncOpenAI:
-    return AsyncOpenAI(base_url=cfg.llm_base_url, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout, max_retries=0)
+    return AsyncOpenAI(
+        base_url=cfg.llm_base_url, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout, max_retries=0
+    )
 
 
 def create_llm(cfg: Config) -> openai.LLM:
@@ -25,7 +27,10 @@ def create_json_completer(cfg: Config) -> JsonCompleter:
         resp = await client.chat.completions.create(
             model=cfg.llm_model,
             messages=messages,
-            response_format={"type": "json_schema", "json_schema": {"name": "reflection", "schema": schema}},
+            response_format={
+                "type": "json_schema",
+                "json_schema": {"name": "reflection", "schema": schema},
+            },
             temperature=0.3,
         )
         return resp.choices[0].message.content or ""

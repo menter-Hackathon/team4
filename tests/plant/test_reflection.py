@@ -3,14 +3,21 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from agent.plant.reflection import REFLECTION_SCHEMA, parse_reflection, recover, reflect_session, ReflectionError
+from agent.plant.reflection import (
+    REFLECTION_SCHEMA,
+    ReflectionError,
+    parse_reflection,
+    recover,
+    reflect_session,
+)
 from agent.plant.store import NewMemory, PlantStore
 from agent.plant.timeutil import JST
 from tests.fakes import FakeCompleter, reflection_json
 
 NOW = datetime(2026, 11, 15, 20, 0, tzinfo=JST)
 VALID = reflection_json(
-    new=[{"content": "明日数学のテスト", "kind": "event", "importance": 0.8}], deltas={"affection": 0.03}
+    new=[{"content": "明日数学のテスト", "kind": "event", "importance": 0.8}],
+    deltas={"affection": 0.03},
 )
 
 
@@ -40,7 +47,10 @@ async def test_success_updates_everything(store_with_session):
     assert [m.content for m in store.get_memories("a")] == ["明日数学のテスト"]
     msgs, schema = fake.calls[0]
     assert schema is REFLECTION_SCHEMA
-    assert "持ち主: 明日テストなんだ" in msgs[-1]["content"] and "ふたまる: がんばって！" in msgs[-1]["content"]
+    assert (
+        "持ち主: 明日テストなんだ" in msgs[-1]["content"]
+        and "ふたまる: がんばって！" in msgs[-1]["content"]
+    )
 
 
 async def test_talkativeness_uses_recent_user_turns(store_with_session):
@@ -54,10 +64,23 @@ async def test_existing_memories_are_listed_with_ids(store_with_session):
     store, sid = store_with_session
     seed = store.start_session("a", NOW - timedelta(days=1))
     store.end_session(seed, NOW - timedelta(days=1))
-    store.apply_reflection("a", seed, "s", [NewMemory("カレーが好き", "preference", 0.7)], [],
-                           store.get_plant("a").traits, NOW - timedelta(days=1))
+    store.apply_reflection(
+        "a",
+        seed,
+        "s",
+        [NewMemory("カレーが好き", "preference", 0.7)],
+        [],
+        store.get_plant("a").traits,
+        NOW - timedelta(days=1),
+    )
     mem_id = store.get_memories("a")[0].id
-    fake = FakeCompleter([reflection_json(updated=[{"id": mem_id, "content": "辛いカレーが好き", "importance": 0.8}])])
+    fake = FakeCompleter(
+        [
+            reflection_json(
+                updated=[{"id": mem_id, "content": "辛いカレーが好き", "importance": 0.8}]
+            )
+        ]
+    )
     assert await reflect_session(store, "a", sid, fake, NOW)
     assert f"[id={mem_id}] カレーが好き (importance=0.7)" in fake.calls[0][0][-1]["content"]
     assert store.get_memories("a")[0].content == "辛いカレーが好き"
@@ -117,8 +140,14 @@ def test_parse_cleans_items():
     assert [(u.id, u.importance) for u in r.updated_memories] == [(3, 0.5)]
 
 
-@pytest.mark.parametrize("raw", ["[]", '{"summary": 1, "new_memories": [], "updated_memories": [], "trait_deltas": {}}',
-                                 '{"summary": "s", "new_memories": {}, "updated_memories": [], "trait_deltas": {}}'])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "[]",
+        '{"summary": 1, "new_memories": [], "updated_memories": [], "trait_deltas": {}}',
+        '{"summary": "s", "new_memories": {}, "updated_memories": [], "trait_deltas": {}}',
+    ],
+)
 def test_parse_rejects_bad_shapes(raw):
     with pytest.raises(ReflectionError):
         parse_reflection(raw)
@@ -128,8 +157,15 @@ async def test_prompt_lists_at_most_30_memories(store_with_session):
     store, sid = store_with_session
     seed = store.start_session("a", NOW - timedelta(days=1))
     store.end_session(seed, NOW - timedelta(days=1))
-    store.apply_reflection("a", seed, "s", [NewMemory(f"記憶{i}", "event", 0.5) for i in range(35)], [],
-                           store.get_plant("a").traits, NOW - timedelta(days=1))
+    store.apply_reflection(
+        "a",
+        seed,
+        "s",
+        [NewMemory(f"記憶{i}", "event", 0.5) for i in range(35)],
+        [],
+        store.get_plant("a").traits,
+        NOW - timedelta(days=1),
+    )
     fake = FakeCompleter([VALID])
     await reflect_session(store, "a", sid, fake, NOW)
     assert fake.calls[0][0][-1]["content"].count("[id=") == 30

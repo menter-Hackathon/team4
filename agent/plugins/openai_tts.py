@@ -9,7 +9,12 @@ from agent.config import Config
 
 
 def create_tts(cfg: Config) -> openai.TTS:
-    client = AsyncOpenAI(base_url=cfg.tts_base_url or None, api_key=cfg.tts_api_key, timeout=cfg.tts_timeout, max_retries=0)
+    client = AsyncOpenAI(
+        base_url=cfg.tts_base_url or None,
+        api_key=cfg.tts_api_key,
+        timeout=cfg.tts_timeout,
+        max_retries=0,
+    )
     return openai.TTS(
         model=cfg.tts_model,
         voice=cfg.tts_voice,

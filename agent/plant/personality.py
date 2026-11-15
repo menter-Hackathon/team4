@@ -41,14 +41,18 @@ def _as_delta(value: object) -> float:
     return clamp(float(value), -MAX_DELTA, MAX_DELTA)
 
 
-def apply_deltas(current: Traits, llm_deltas: Mapping[str, object], recent_user_turns: int) -> Traits:
+def apply_deltas(
+    current: Traits, llm_deltas: Mapping[str, object], recent_user_turns: int
+) -> Traits:
     """reflection の変化量を適用する。talkativeness は行動統計とブレンドする。"""
     values = current.as_dict()
     for name in TRAIT_NAMES:
         delta = _as_delta(llm_deltas.get(name))
         if name == "talkativeness":
             t_behavior = min(1.0, recent_user_turns / 100)
-            delta = clamp(0.5 * delta + 0.5 * (t_behavior - values[name]) * 0.1, -MAX_DELTA, MAX_DELTA)
+            delta = clamp(
+                0.5 * delta + 0.5 * (t_behavior - values[name]) * 0.1, -MAX_DELTA, MAX_DELTA
+            )
         values[name] = clamp(values[name] + delta, 0.0, 1.0)
     return replace(current, **values)
 

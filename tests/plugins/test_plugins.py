@@ -27,9 +27,17 @@ class MockServer:
         if request.path.endswith("/chat/completions"):
             return web.json_response(
                 {
-                    "id": "c1", "object": "chat.completion", "created": 0, "model": "m",
-                    "choices": [{"index": 0, "finish_reason": "stop",
-                                 "message": {"role": "assistant", "content": '{"ok": true}'}}],
+                    "id": "c1",
+                    "object": "chat.completion",
+                    "created": 0,
+                    "model": "m",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "stop",
+                            "message": {"role": "assistant", "content": '{"ok": true}'},
+                        }
+                    ],
                 }
             )
         return web.Response(status=404)
@@ -64,11 +72,15 @@ def cfg(server):
 
 
 async def test_stt_request(server, cfg):
-    frame = rtc.AudioFrame(b"\0\0" * 1600, sample_rate=16000, num_channels=1, samples_per_channel=1600)
+    frame = rtc.AudioFrame(
+        b"\0\0" * 1600, sample_rate=16000, num_channels=1, samples_per_channel=1600
+    )
     ev = await create_stt(cfg).recognize(frame)
     _, body = server.requests["/v1/audio/transcriptions"][-1]
     assert b'name="language"\r\n\r\nja' in body and "ふたまる".encode() in body
-    assert b"kotoba-tech/kotoba-whisper-v2.0-faster" in body and ev.alternatives[0].text == "ふたまる"
+    assert (
+        b"kotoba-tech/kotoba-whisper-v2.0-faster" in body and ev.alternatives[0].text == "ふたまる"
+    )
 
 
 async def test_tts_request(server, cfg):

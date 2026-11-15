@@ -43,7 +43,9 @@ TRAIT_TEXT = {
     },
 }
 
-EXPRESSION_TAG_LINE = "返答の先頭に必ず表情タグを1つ付ける: [neutral] [happy] [sad] [surprised] [love] [sleepy]"
+EXPRESSION_TAG_LINE = (
+    "返答の先頭に必ず表情タグを1つ付ける: [neutral] [happy] [sad] [surprised] [love] [sleepy]"
+)
 
 
 def recency_factor(updated_at: str, now: datetime) -> float:
@@ -52,7 +54,9 @@ def recency_factor(updated_at: str, now: datetime) -> float:
 
 
 def rank_memories(memories: list[Memory], now: datetime, limit: int) -> list[Memory]:
-    ranked = sorted(memories, key=lambda m: m.importance * recency_factor(m.updated_at, now), reverse=True)
+    ranked = sorted(
+        memories, key=lambda m: m.importance * recency_factor(m.updated_at, now), reverse=True
+    )
     return ranked[:limit]
 
 

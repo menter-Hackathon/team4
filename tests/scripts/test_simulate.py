@@ -12,9 +12,17 @@ async def test_simulate_records_and_reflects(tmp_path):
     log = {
         "plant_id": "s",
         "sessions": [
-            {"started_at": "2026-11-01T19:00:00+09:00",
-             "turns": [{"role": "user", "text": "ただいま"}, {"role": "plant", "text": "おかえり"}]},
-            {"started_at": "2026-11-02T19:00:00+09:00", "turns": [{"role": "user", "text": "かわいいね"}]},
+            {
+                "started_at": "2026-11-01T19:00:00+09:00",
+                "turns": [
+                    {"role": "user", "text": "ただいま"},
+                    {"role": "plant", "text": "おかえり"},
+                ],
+            },
+            {
+                "started_at": "2026-11-02T19:00:00+09:00",
+                "turns": [{"role": "user", "text": "かわいいね"}],
+            },
         ],
     }
     store = PlantStore(str(tmp_path / "s.db"))
@@ -22,7 +30,9 @@ async def test_simulate_records_and_reflects(tmp_path):
     assert len(hist) == 3 and hist[-1].traits.affection > hist[0].traits.affection
     assert hist[1].recorded_at.startswith("2026-11-01T19:00")
     utt = store.get_utterances(1)
-    assert [u.text for u in utt] == ["ただいま", "おかえり"] and utt[1].created_at == "2026-11-01T19:00:10+09:00"
+    assert [u.text for u in utt] == ["ただいま", "おかえり"] and utt[
+        1
+    ].created_at == "2026-11-01T19:00:10+09:00"
 
 
 def test_samples_are_valid():

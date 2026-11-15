@@ -19,7 +19,9 @@ def build_token(plant_id: str, api_key: str, api_secret: str, ttl_days: int = 30
         api.AccessToken(api_key, api_secret)
         .with_identity(f"device-{plant_id}")
         .with_grants(
-            api.VideoGrants(room_join=True, room=f"plant-{plant_id}", can_publish=True, can_subscribe=True)
+            api.VideoGrants(
+                room_join=True, room=f"plant-{plant_id}", can_publish=True, can_subscribe=True
+            )
         )
         .with_ttl(timedelta(days=ttl_days))
         .to_jwt()
