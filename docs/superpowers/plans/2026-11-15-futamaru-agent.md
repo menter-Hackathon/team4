@@ -86,13 +86,8 @@ README.md                      セットアップ・起動手順（Task 10 で�
 - [ ] **Step 2: 失敗するテストを書く**
 
 ```python
-BASE = {
-    "LLM_BASE_URL": "http://gpu:8000/v1",
-    "LLM_MODEL": "google/gemma-4-E4B-it",
-    "STT_BASE_URL": "http://gpu:8001/v1",
-    "OPENAI_API_KEY": "sk-test",
-}
-
+BASE = {"LLM_BASE_URL": "http://gpu:8000/v1", "LLM_MODEL": "google/gemma-4-E4B-it",
+        "STT_BASE_URL": "http://gpu:8001/v1", "OPENAI_API_KEY": "sk-test"}
 
 def test_defaults():
     c = load_config(BASE)
@@ -104,32 +99,20 @@ def test_defaults():
     assert (c.sleep_after, c.llm_timeout, c.stt_timeout, c.tts_timeout) == (60.0, 15.0, 10.0, 10.0)
     assert c.tts_instructions == TTS_INSTRUCTIONS and c.dev_plant_id is None
 
-
 def test_overrides():
-    c = load_config(
-        {
-            **BASE,
-            "WAKE_WORDS": "ふたまる, ふーちゃん",
-            "SLEEP_AFTER_SECONDS": "30",
-            "TTS_BASE_URL": "http://gpu:8002/v1",
-            "DEV_PLANT_ID": "dev",
-        }
-    )
+    c = load_config({**BASE, "WAKE_WORDS": "ふたまる, ふーちゃん", "SLEEP_AFTER_SECONDS": "30",
+                     "TTS_BASE_URL": "http://gpu:8002/v1", "DEV_PLANT_ID": "dev"})
     assert c.wake_words == ("ふたまる", "ふーちゃん") and c.sleep_after == 30.0
     assert c.tts_base_url == "http://gpu:8002/v1" and c.dev_plant_id == "dev"
 
-
 @pytest.mark.parametrize("missing", ["LLM_BASE_URL", "LLM_MODEL", "STT_BASE_URL"])
 def test_required(missing):
-    env = dict(BASE)
-    del env[missing]
+    env = dict(BASE); del env[missing]
     with pytest.raises(ConfigError, match=missing):
         load_config(env)
 
-
 def test_openai_key_required_only_without_tts_base_url():
-    env = dict(BASE)
-    del env["OPENAI_API_KEY"]
+    env = dict(BASE); del env["OPENAI_API_KEY"]
     with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
         load_config(env)
     assert load_config({**env, "TTS_BASE_URL": "http://gpu:8002/v1"}).tts_api_key == "EMPTY"
@@ -175,46 +158,31 @@ def test_iso_is_jst_seconds():
     assert iso(dt) == "2026-11-15T10:00:00+09:00"
     assert parse_iso("2026-11-15T10:00:00+09:00") == dt.replace(microsecond=0)
 
-
-@pytest.mark.parametrize(
-    "v,lv",
-    [(0.0, "low"), (0.33, "low"), (0.34, "mid"), (0.66, "mid"), (0.67, "high"), (1.0, "high")],
-)
+@pytest.mark.parametrize("v,lv", [(0.0,"low"),(0.33,"low"),(0.34,"mid"),(0.66,"mid"),(0.67,"high"),(1.0,"high")])
 def test_level_boundaries(v, lv):
     assert level(v) == lv
 
-
 def test_deltas_clamped_to_005():
-    t = apply_deltas(
-        Traits(), {"affection": 0.2, "energy": -0.3, "curiosity": 0.01}, recent_user_turns=50
-    )
+    t = apply_deltas(Traits(), {"affection": 0.2, "energy": -0.3, "curiosity": 0.01}, recent_user_turns=50)
     assert t.affection == pytest.approx(0.55) and t.energy == pytest.approx(0.45)
     assert t.curiosity == pytest.approx(0.51)
-
 
 def test_values_clamped_to_unit_range():
     t = apply_deltas(Traits(affection=0.98, energy=0.02), {"affection": 0.05, "energy": -0.05}, 50)
     assert t.affection == 1.0 and t.energy == 0.0
 
-
 def test_talkativeness_blend():
     # delta = 0.5*0.04 + 0.5*(1.0-0.5)*0.1 = 0.045
-    assert apply_deltas(Traits(), {"talkativeness": 0.04}, 100).talkativeness == pytest.approx(
-        0.545
-    )
-    assert apply_deltas(Traits(), {"talkativeness": 0.04}, 300).talkativeness == pytest.approx(
-        0.545
-    )
+    assert apply_deltas(Traits(), {"talkativeness": 0.04}, 100).talkativeness == pytest.approx(0.545)
+    assert apply_deltas(Traits(), {"talkativeness": 0.04}, 300).talkativeness == pytest.approx(0.545)
     # delta = 0 + 0.5*(0-0.5)*0.1 = -0.025
     assert apply_deltas(Traits(), {}, 0).talkativeness == pytest.approx(0.475)
     # llm_delta は先に ±0.05 にクランプ: 0.5*0.05 + 0.025 = 0.05
     assert apply_deltas(Traits(), {"talkativeness": 0.5}, 100).talkativeness == pytest.approx(0.55)
 
-
 def test_bad_delta_values_are_zero():
     t = apply_deltas(Traits(), {"energy": "high", "curiosity": None, "unknown": 0.05}, 50)
     assert t.energy == 0.5 and t.curiosity == 0.5
-
 
 @pytest.mark.parametrize("t,expected", [(0.9, 13.0), (0.5, 25.0), (0.3, 31.0), (0.29, None)])
 def test_nudge_delay(t, expected):
@@ -254,7 +222,6 @@ def test_nudge_delay(t, expected):
 def test_wal_mode(store):
     assert store._conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
 
-
 def test_create_plant_once_with_initial_history(store):
     p = store.get_or_create_plant("a", T0)
     assert p.name == "ふたまる" and p.traits == Traits()
@@ -262,7 +229,6 @@ def test_create_plant_once_with_initial_history(store):
     h = store.trait_history("a")
     assert len(h) == 1 and h[0].session_id is None and h[0].traits == Traits()
     assert h[0].recorded_at == "2026-11-15T10:00:00+09:00"
-
 
 def test_session_and_utterances(store):
     store.get_or_create_plant("a", T0)
@@ -274,61 +240,41 @@ def test_session_and_utterances(store):
     assert s.user_turns == 1 and s.ended_at == "2026-11-15T10:01:00+09:00" and not s.reflected
     assert [u.role for u in store.get_utterances(sid)] == ["user", "plant"]
 
-
 def test_repair_unfinished(store):
     store.get_or_create_plant("a", T0)
-    s1 = store.start_session("a", T0)
-    store.add_utterance(s1, "user", "x", T0 + timedelta(minutes=5))
+    s1 = store.start_session("a", T0); store.add_utterance(s1, "user", "x", T0 + timedelta(minutes=5))
     s2 = store.start_session("a", T0 + timedelta(hours=1))
     assert store.repair_unfinished_sessions("a") == 2
     assert store.get_session(s1).ended_at == iso(T0 + timedelta(minutes=5))
     assert store.get_session(s2).ended_at == store.get_session(s2).started_at
     assert store.unreflected_sessions("a") == [s1, s2]
 
-
 def test_unreflected_excludes_open_sessions(store):
     store.get_or_create_plant("a", T0)
     store.start_session("a", T0)
     assert store.unreflected_sessions("a") == []
 
-
 def test_apply_reflection(store):
-    store.get_or_create_plant("a", T0)
-    store.get_or_create_plant("b", T0)
+    store.get_or_create_plant("a", T0); store.get_or_create_plant("b", T0)
     # 既存記憶: a に1件、b に1件（テスト用に apply_reflection で作る）
     ...
-    store.apply_reflection(
-        "a",
-        sid,
-        "テストの話をした",
+    store.apply_reflection("a", sid, "テストの話をした",
         [NewMemory("明日テスト", "event", 0.8)],
-        [
-            MemoryUpdate(a_mem_id, "辛いカレーが好き", 0.7),
-            MemoryUpdate(999, "x", 0.5),
-            MemoryUpdate(b_mem_id, "乗っ取り", 0.9),
-        ],
-        Traits(affection=0.53),
-        T0 + timedelta(hours=1),
-    )
+        [MemoryUpdate(a_mem_id, "辛いカレーが好き", 0.7), MemoryUpdate(999, "x", 0.5), MemoryUpdate(b_mem_id, "乗っ取り", 0.9)],
+        Traits(affection=0.53), T0 + timedelta(hours=1))
     assert store.get_plant("a").traits.affection == pytest.approx(0.53)
     mems = {m.id: m for m in store.get_memories("a")}
-    assert mems[a_mem_id].content == "辛いカレーが好き" and mems[a_mem_id].updated_at == iso(
-        T0 + timedelta(hours=1)
-    )
+    assert mems[a_mem_id].content == "辛いカレーが好き" and mems[a_mem_id].updated_at == iso(T0 + timedelta(hours=1))
     assert any(m.content == "明日テスト" for m in mems.values())
-    assert store.get_memories("b")[0].content != "乗っ取り"  # 他株の記憶は更新しない
+    assert store.get_memories("b")[0].content != "乗っ取り"          # 他株の記憶は更新しない
     assert store.get_session(sid).reflected and store.latest_summary("a") == "テストの話をした"
     assert store.trait_history("a")[-1].session_id == sid
 
+def test_apply_reflection_is_atomic(store):
+    ...  # NewMemory("x", None, 0.5)（kind NOT NULL 違反）で例外 → traits・summary・reflected・trait_history が変わっていない
 
-def test_apply_reflection_is_atomic(
-    store,
-): ...  # NewMemory("x", None, 0.5)（kind NOT NULL 違反）で例外 → traits・summary・reflected・trait_history が変わっていない
-
-
-def test_count_user_utterances_since(
-    store,
-): ...  # a の user 2件(期間内) + user 1件(8日前) + plant 1件、b の user 1件 → count("a", T0 - 7日) == 2
+def test_count_user_utterances_since(store):
+    ...  # a の user 2件(期間内) + user 1件(8日前) + plant 1件、b の user 1件 → count("a", T0 - 7日) == 2
 ```
 
 `...` の部分はテスト作者がデータを組む（期待値は書いてある通り）。
@@ -379,46 +325,25 @@ def test_count_user_utterances_since(
 ```python
 def test_base_and_tag_line():
     p = build_system_prompt("ふたまる", Traits(), [], None, NOW)
-    assert p.startswith(
-        "あなたは観葉植物のふたまる。持ち主と話し言葉で短く話す。1回の返答は1〜2文。"
-    )
-    assert (
-        "返答の先頭に必ず表情タグを1つ付ける: [neutral] [happy] [sad] [surprised] [love] [sleepy]"
-        in p
-    )
+    assert p.startswith("あなたは観葉植物のふたまる。持ち主と話し言葉で短く話す。1回の返答は1〜2文。")
+    assert "返答の先頭に必ず表情タグを1つ付ける: [neutral] [happy] [sad] [surprised] [love] [sleepy]" in p
     assert "覚えていること" not in p and "前回の会話" not in p
 
-
-@pytest.mark.parametrize(
-    "v,text",
-    [
-        (0.2, "少し素っ気なく接する。"),
-        (0.5, "普通に親しく接する。"),
-        (0.8, "持ち主に甘えて親しげに話す。"),
-    ],
-)
+@pytest.mark.parametrize("v,text", [(0.2,"少し素っ気なく接する。"),(0.5,"普通に親しく接する。"),(0.8,"持ち主に甘えて親しげに話す。")])
 def test_affection_levels(v, text):
     assert text in build_system_prompt("ふたまる", Traits(affection=v), [], None, NOW)
 
-
 def test_talkativeness_changes_length():
-    assert "1回の返答は1文。" in build_system_prompt(
-        "ふたまる", Traits(talkativeness=0.1), [], None, NOW
-    )
-    assert "1回の返答は2〜3文で、ときどき自分から話題も振る。" in build_system_prompt(
-        "ふたまる", Traits(talkativeness=0.9), [], None, NOW
-    )
-
+    assert "1回の返答は1文。" in build_system_prompt("ふたまる", Traits(talkativeness=0.1), [], None, NOW)
+    assert "1回の返答は2〜3文で、ときどき自分から話題も振る。" in build_system_prompt("ふたまる", Traits(talkativeness=0.9), [], None, NOW)
 
 def test_recency_halves_weekly():
     assert recency_factor(iso(NOW - timedelta(days=7)), NOW) == pytest.approx(0.5)
 
-
 def test_rank_prefers_recent_over_old_important():
-    old = mem(1, "古い", 0.9, NOW - timedelta(days=14))  # 0.225
-    new = mem(2, "新しい", 0.5, NOW)  # 0.5
+    old = mem(1, "古い", 0.9, NOW - timedelta(days=14))   # 0.225
+    new = mem(2, "新しい", 0.5, NOW)                       # 0.5
     assert [m.id for m in rank_memories([old, new], NOW, 10)] == [2, 1]
-
 
 def test_memory_section_top10_and_summary():
     mems = [mem(i, f"記憶{i}", i / 20, NOW) for i in range(12)]
@@ -461,86 +386,46 @@ def test_memory_section_top10_and_summary():
 - [ ] **Step 1: 失敗するテストを書く**（`FakeCompleter(responses)` は呼ばれるたびに次の要素を返し、要素が Exception なら raise、`calls` に `(messages, schema)` を記録）
 
 ```python
-VALID = json.dumps(
-    {
-        "summary": "テストの話をした",
-        "new_memories": [{"content": "明日数学のテスト", "kind": "event", "importance": 0.8}],
-        "updated_memories": [],
-        "trait_deltas": {"affection": 0.03},
-    },
-    ensure_ascii=False,
-)
+VALID = json.dumps({"summary": "テストの話をした",
+    "new_memories": [{"content": "明日数学のテスト", "kind": "event", "importance": 0.8}],
+    "updated_memories": [], "trait_deltas": {"affection": 0.03}}, ensure_ascii=False)
 
-
-async def test_success_updates_everything(
-    store_with_session,
-):  # 発話: user「明日テストなんだ」plant「がんばって！」
-    store, sid = store_with_session
-    fake = FakeCompleter([VALID])
+async def test_success_updates_everything(store_with_session):  # 発話: user「明日テストなんだ」plant「がんばって！」
+    store, sid = store_with_session; fake = FakeCompleter([VALID])
     assert await reflect_session(store, "a", sid, fake, NOW) is True
     assert store.get_plant("a").traits.affection == pytest.approx(0.53)
     assert store.latest_summary("a") == "テストの話をした" and store.get_session(sid).reflected
     msgs, schema = fake.calls[0]
     assert schema is REFLECTION_SCHEMA and "持ち主: 明日テストなんだ" in msgs[-1]["content"]
 
-
 async def test_retry_once_then_success(store_with_session):
-    store, sid = store_with_session
-    fake = FakeCompleter(["not json", VALID])
+    store, sid = store_with_session; fake = FakeCompleter(["not json", VALID])
     assert await reflect_session(store, "a", sid, fake, NOW) is True and len(fake.calls) == 2
 
-
-@pytest.mark.parametrize(
-    "first,second",
-    [
-        ("not json", "{}"),
-        (RuntimeError("timeout"), "[]"),
-        (json.dumps({"summary": "x", "new_memories": [], "updated_memories": []}), "not json"),
-    ],
-)
+@pytest.mark.parametrize("first,second", [("not json", "{}"), (RuntimeError("timeout"), "[]"),
+    (json.dumps({"summary": "x", "new_memories": [], "updated_memories": []}), "not json")])
 async def test_gives_up_after_two_failures(store_with_session, first, second):
-    store, sid = store_with_session
-    fake = FakeCompleter([first, second])
+    store, sid = store_with_session; fake = FakeCompleter([first, second])
     assert await reflect_session(store, "a", sid, fake, NOW) is False
     assert not store.get_session(sid).reflected and len(fake.calls) == 2
 
-
-async def test_zero_user_turns_skips_llm(
-    store,
-): ...  # 発話なしセッション → True、fake.calls == []、reflected
-
+async def test_zero_user_turns_skips_llm(store):
+    ...  # 発話なしセッション → True、fake.calls == []、reflected
 
 def test_parse_cleans_items():
-    r = parse_reflection(
-        "```json\n"
-        + json.dumps(
-            {
-                "summary": "s",
-                "new_memories": [
-                    {"content": "a", "kind": "other", "importance": 0.5},
-                    {"content": "b", "kind": "habit", "importance": 1.7},
-                ],
-                "updated_memories": [
-                    {"id": "12", "content": "c", "importance": 0.4},
-                    {"id": 3, "content": "d", "importance": "x"},
-                ],
-                "trait_deltas": {},
-            }
-        )
-        + "\n```"
-    )
+    r = parse_reflection("```json\n" + json.dumps({"summary": "s",
+        "new_memories": [{"content": "a", "kind": "other", "importance": 0.5},
+                         {"content": "b", "kind": "habit", "importance": 1.7}],
+        "updated_memories": [{"id": "12", "content": "c", "importance": 0.4}, {"id": 3, "content": "d", "importance": "x"}],
+        "trait_deltas": {}}) + "\n```")
     assert [(m.content, m.importance) for m in r.new_memories] == [("b", 1.0)]
     assert [(u.id, u.importance) for u in r.updated_memories] == [(3, 0.5)]
 
+async def test_prompt_lists_at_most_30_memories(store_with_35_memories):
+    ...  # fake.calls[0][0][-1]["content"].count("[id=") == 30
 
-async def test_prompt_lists_at_most_30_memories(
-    store_with_35_memories,
-): ...  # fake.calls[0][0][-1]["content"].count("[id=") == 30
-
-
-async def test_recover_repairs_and_reflects(
-    store,
-): ...  # ended_at 無しで発話1件のセッション → recover 後 ended_at あり・reflected
+async def test_recover_repairs_and_reflects(store):
+    ...  # ended_at 無しで発話1件のセッション → recover 後 ended_at あり・reflected
 ```
 
 - [ ] **Step 2: 失敗を確認** → FAIL
@@ -571,26 +456,22 @@ async def test_recover_repairs_and_reflects(
 - [ ] **Step 1: 失敗するテストを書く**（ヘルパー `run(chunks) -> (expressions: list[str], text: str)` は全 feed と flush の結果を集める）
 
 ```python
-@pytest.mark.parametrize(
-    "chunks,exprs,text",
-    [
-        (["[happy]こんにちは"], ["happy"], "こんにちは"),
-        (["[ha", "ppy]こん", "にちは"], ["happy"], "こんにちは"),
-        (["こんにちは"], ["neutral"], "こんにちは"),
-        (["[angry]やだ"], ["neutral"], "やだ"),
-        (["[listening]うん"], ["neutral"], "うん"),
-        (["[Happy] やった"], ["happy"], "やった"),
-        ([" [love] すき"], ["love"], "すき"),
-        (["[" + "あ" * 20], ["neutral"], "[" + "あ" * 20),
-        (["[hap"], ["neutral"], "[hap"),
-        (["[happy]うん！[lo", "ve]だいすき"], ["happy"], "うん！だいすき"),
-        (["[happy]答えは[1]番"], ["happy"], "答えは[1]番"),
-        ([], ["neutral"], ""),
-    ],
-)
+@pytest.mark.parametrize("chunks,exprs,text", [
+    (["[happy]こんにちは"], ["happy"], "こんにちは"),
+    (["[ha", "ppy]こん", "にちは"], ["happy"], "こんにちは"),
+    (["こんにちは"], ["neutral"], "こんにちは"),
+    (["[angry]やだ"], ["neutral"], "やだ"),
+    (["[listening]うん"], ["neutral"], "うん"),
+    (["[Happy] やった"], ["happy"], "やった"),
+    ([" [love] すき"], ["love"], "すき"),
+    (["[" + "あ" * 20], ["neutral"], "[" + "あ" * 20),
+    (["[hap"], ["neutral"], "[hap"),
+    (["[happy]うん！[lo", "ve]だいすき"], ["happy"], "うん！だいすき"),
+    (["[happy]答えは[1]番"], ["happy"], "答えは[1]番"),
+    ([], ["neutral"], ""),
+])
 def test_parse(chunks, exprs, text):
     assert run(chunks) == (exprs, text)
-
 
 def test_plain_text_is_not_delayed():
     assert ExpressionParser().feed("こんにちは") == ParsedChunk("neutral", "こんにちは")
@@ -629,76 +510,43 @@ def test_normalize():
     assert normalize("フタマル、 おはよう！") == "ふたまるおはよう"
     assert normalize("２丸") == "2丸"
 
-
-@pytest.mark.parametrize(
-    "text",
-    ["ふたまる", "フタマル", "ふた丸", "二丸", "2丸", "２丸", "ねえ、フタマル！", "ふ た ま る"],
-)
+@pytest.mark.parametrize("text", ["ふたまる", "フタマル", "ふた丸", "二丸", "2丸", "２丸", "ねえ、フタマル！", "ふ た ま る"])
 def test_detects_variants(text):
     assert detect_wake(text, DEFAULT) is not None
-
 
 @pytest.mark.parametrize("text", ["おはよう", "ふたりまるい", ""])
 def test_no_wake(text):
     assert detect_wake(text, DEFAULT) is None
 
-
-@pytest.mark.parametrize(
-    "text,rest",
-    [
-        ("ふたまる、今日ね、テストだった", "今日ね、テストだった"),
-        ("フタマル。", ""),
-        ("ふたまる、ね", ""),
-        ("ねえふたまる カレー食べた", "カレー食べた"),
-    ],
-)
+@pytest.mark.parametrize("text,rest", [("ふたまる、今日ね、テストだった", "今日ね、テストだった"),
+    ("フタマル。", ""), ("ふたまる、ね", ""), ("ねえふたまる カレー食べた", "カレー食べた")])
 def test_rest(text, rest):
     assert detect_wake(text, DEFAULT).rest == rest
 
-
 def test_sleeps_after_60s_of_silence():
-    c = WakeController()
-    assert c.tick(T0) == "none"
+    c = WakeController(); assert c.tick(T0) == "none"
     c.wake(T0)
     assert c.tick(T0 + s(59)) == "none" and c.tick(T0 + s(60)) == "sleep"
     assert c.state == "SLEEPING" and c.tick(T0 + s(61)) == "none"
 
-
 def test_plant_busy_pauses_and_restarts():
-    c = WakeController()
-    c.wake(T0)
-    c.set_plant_busy(True, T0 + s(10))
-    assert c.tick(T0 + s(90)) == "none"
+    c = WakeController(); c.wake(T0)
+    c.set_plant_busy(True, T0 + s(10)); assert c.tick(T0 + s(90)) == "none"
     c.set_plant_busy(False, T0 + s(100))
     assert c.tick(T0 + s(159)) == "none" and c.tick(T0 + s(160)) == "sleep"
 
-
 def test_user_speaking_long_does_not_sleep():
-    c = WakeController()
-    c.wake(T0)
-    c.set_user_speaking(True, T0 + s(5))
-    assert c.tick(T0 + s(120)) == "none"
-    c.set_user_speaking(False, T0 + s(130))
-    assert c.tick(T0 + s(189)) == "none"
-
+    c = WakeController(); c.wake(T0)
+    c.set_user_speaking(True, T0 + s(5)); assert c.tick(T0 + s(120)) == "none"
+    c.set_user_speaking(False, T0 + s(130)); assert c.tick(T0 + s(189)) == "none"
 
 def test_nudge_once_per_silence():
-    c = WakeController()
-    c.wake(T0)
-    c.set_nudge_delay(25)
-    assert (
-        c.tick(T0 + s(24)) == "none"
-        and c.tick(T0 + s(25)) == "nudge"
-        and c.tick(T0 + s(26)) == "none"
-    )
-    c.on_user_activity(T0 + s(30))
-    assert c.tick(T0 + s(55)) == "nudge"
-
+    c = WakeController(); c.wake(T0); c.set_nudge_delay(25)
+    assert c.tick(T0 + s(24)) == "none" and c.tick(T0 + s(25)) == "nudge" and c.tick(T0 + s(26)) == "none"
+    c.on_user_activity(T0 + s(30)); assert c.tick(T0 + s(55)) == "nudge"
 
 def test_no_nudge_when_none():
-    c = WakeController()
-    c.wake(T0)
-    c.set_nudge_delay(None)
+    c = WakeController(); c.wake(T0); c.set_nudge_delay(None)
     assert c.tick(T0 + s(40)) == "none"
 ```
 
@@ -738,82 +586,56 @@ def test_no_nudge_when_none():
 - [ ] **Step 1: 失敗するテストを書く**（`FakeClock`（`now` を進められる）、Task 5 の `FakeCompleter`、`sent: list[str]` フィクスチャに記録する `send_expression`、`conv` フィクスチャは `start()` 済み）
 
 ```python
-async def test_start_creates_plant_recovers_and_sleepy(
-    tmp_path,
-): ...  # 事前に ended_at 無し・発話1件のセッションを入れる → start() 後 reflected、sent == ["sleepy"]
-
+async def test_start_creates_plant_recovers_and_sleepy(tmp_path):
+    ...  # 事前に ended_at 無し・発話1件のセッションを入れる → start() 後 reflected、sent == ["sleepy"]
 
 async def test_sleeping_ignores_non_wake(conv, store):
     assert (await conv.on_user_turn("おはよう")).kind == "ignore"
     assert not conv.awake and store.unreflected_sessions("a") == [] and no_sessions(store)
 
-
 async def test_wake_only_greets(conv):
     d = await conv.on_user_turn("フタマル！")
     assert d.kind == "greet" and "あなたは観葉植物のふたまる" in d.instructions and conv.awake
-
 
 async def test_wake_with_rest_replies_and_records(conv, store):
     d = await conv.on_user_turn("ふたまる、今日カレー食べた")
     assert (d.kind, d.text) == ("reply", "今日カレー食べた") and d.instructions
     assert [u.text for u in store.get_utterances(current_sid(store))] == ["今日カレー食べた"]
 
-
 async def test_awake_reply_has_no_instructions_and_blank_is_ignored(conv, store):
     await conv.on_user_turn("ふたまる")
-    d = await conv.on_user_turn("ただいま")
-    assert (d.kind, d.text, d.instructions) == ("reply", "ただいま", None)
+    d = await conv.on_user_turn("ただいま"); assert (d.kind, d.text, d.instructions) == ("reply", "ただいま", None)
     assert (await conv.on_user_turn("  ")).kind == "ignore"
     assert [u.text for u in store.get_utterances(current_sid(store))] == ["ただいま"]
 
-
 async def test_plant_utterance_only_recorded_when_awake(conv, store): ...
 
-
 async def test_silence_sleeps_and_reflects(conv, store, clock):
-    await conv.on_user_turn("ふたまる、ただいま")
-    conv.on_plant_utterance("おかえり！")
-    clock.advance(60)
-    assert await conv.tick() == "slept"
+    await conv.on_user_turn("ふたまる、ただいま"); conv.on_plant_utterance("おかえり！")
+    clock.advance(60); assert await conv.tick() == "slept"
     await conv.wait_reflections()
     s = store.get_session(current_sid(store))
     assert s.ended_at and s.reflected and sent[-1] == "sleepy" and not conv.awake
 
+async def test_next_wake_uses_updated_summary(conv, clock):
+    ...  # 1回目のセッション → slept → wait_reflections → 再度「ふたまる」→ instructions に "前回の会話: テストの話をした"
 
-async def test_next_wake_uses_updated_summary(
-    conv, clock
-): ...  # 1回目のセッション → slept → wait_reflections → 再度「ふたまる」→ instructions に "前回の会話: テストの話をした"
-
-
-async def test_wake_while_reflection_pending(
-    conv, clock
-): ...  # reflection 用 completer を asyncio.Event で止めたまま再度「ふたまる」→ greet が返る（古い性格で組み立て、例外なし）
-
+async def test_wake_while_reflection_pending(conv, clock):
+    ...  # reflection 用 completer を asyncio.Event で止めたまま再度「ふたまる」→ greet が返る（古い性格で組み立て、例外なし）
 
 async def test_nudge_from_tick(conv, clock):
-    await conv.on_user_turn("ふたまる")
-    clock.advance(25)
-    assert await conv.tick() == "nudge"  # talkativeness 0.5 → 25秒
-
+    await conv.on_user_turn("ふたまる"); clock.advance(25); assert await conv.tick() == "nudge"  # talkativeness 0.5 → 25秒
 
 async def test_listening_and_thinking_only_when_awake(conv):
-    conv.on_user_speaking(True)
-    conv.on_agent_state("thinking")
-    await settle()
+    conv.on_user_speaking(True); conv.on_agent_state("thinking"); await settle()
     assert sent == ["sleepy"]
-    await conv.on_user_turn("ふたまる")
-    conv.on_user_speaking(True)
-    conv.on_agent_state("thinking")
-    await settle()
+    await conv.on_user_turn("ふたまる"); conv.on_user_speaking(True); conv.on_agent_state("thinking"); await settle()
     assert sent[-2:] == ["listening", "thinking"]
-
 
 async def test_close_while_awake_ends_and_reflects(conv, store): ...
 
-
-async def test_failing_send_does_not_raise(
-    tmp_path,
-): ...  # send_expression が RuntimeError を投げても start() / express() は例外を出さない
+async def test_failing_send_does_not_raise(tmp_path):
+    ...  # send_expression が RuntimeError を投げても start() / express() は例外を出さない
 ```
 
 （`settle()` は `await asyncio.sleep(0)` を数回。）
@@ -845,40 +667,23 @@ async def test_failing_send_does_not_raise(
 
 ```python
 async def test_stt_request(respx_mock, cfg):
-    route = respx_mock.post("http://gpu:8001/v1/audio/transcriptions").respond(
-        json={"text": "ふたまる"}
-    )
-    frame = rtc.AudioFrame(
-        b"\0\0" * 1600, sample_rate=16000, num_channels=1, samples_per_channel=1600
-    )
+    route = respx_mock.post("http://gpu:8001/v1/audio/transcriptions").respond(json={"text": "ふたまる"})
+    frame = rtc.AudioFrame(b"\0\0" * 1600, sample_rate=16000, num_channels=1, samples_per_channel=1600)
     ev = await create_stt(cfg).recognize(frame)
     body = route.calls.last.request.content
     assert b'name="language"\r\n\r\nja' in body and "ふたまる".encode() in body
-    assert (
-        b"kotoba-tech/kotoba-whisper-v2.0-faster" in body and ev.alternatives[0].text == "ふたまる"
-    )
-
+    assert b"kotoba-tech/kotoba-whisper-v2.0-faster" in body and ev.alternatives[0].text == "ふたまる"
 
 async def test_tts_request(respx_mock, cfg):
-    route = respx_mock.post("https://api.openai.com/v1/audio/speech").respond(
-        content=b"\0\0" * 2400
-    )
+    route = respx_mock.post("https://api.openai.com/v1/audio/speech").respond(content=b"\0\0" * 2400)
     async with create_tts(cfg).synthesize("こんにちは") as stream:
-        async for _ in stream:
-            pass
+        async for _ in stream: pass
     req = json.loads(route.calls.last.request.content)
     assert req["model"] == "gpt-4o-mini-tts" and req["voice"] == "coral"
-    assert (
-        req["response_format"] == "pcm"
-        and req["instructions"] == TTS_INSTRUCTIONS
-        and req["input"] == "こんにちは"
-    )
-
+    assert req["response_format"] == "pcm" and req["instructions"] == TTS_INSTRUCTIONS and req["input"] == "こんにちは"
 
 async def test_json_completer_request(respx_mock, cfg):
-    route = respx_mock.post("http://gpu:8000/v1/chat/completions").respond(
-        json=chat_completion('{"ok": true}')
-    )
+    route = respx_mock.post("http://gpu:8000/v1/chat/completions").respond(json=chat_completion('{"ok": true}'))
     out = await create_json_completer(cfg)([{"role": "user", "content": "x"}], {"type": "object"})
     req = json.loads(route.calls.last.request.content)
     assert out == '{"ok": true}' and req["response_format"]["type"] == "json_schema"
@@ -950,8 +755,7 @@ def test_token_claims():
     assert claims.identity == "device-a1"
     assert claims.video.room == "plant-a1" and claims.video.room_join
     assert claims.video.can_publish and claims.video.can_subscribe
-    exp = jwt_payload(tok)["exp"]
-    assert 29.9 * 86400 < exp - time.time() <= 30 * 86400
+    exp = jwt_payload(tok)["exp"]; assert 29.9 * 86400 < exp - time.time() <= 30 * 86400
 ```
 
 （`jwt_payload` は base64 で payload を読むテスト内ヘルパー。）
@@ -982,34 +786,18 @@ def test_token_claims():
 
 ```python
 async def test_simulate_records_and_reflects(tmp_path):
-    log = {
-        "plant_id": "s",
-        "sessions": [
-            {
-                "started_at": "2026-11-01T19:00:00+09:00",
-                "turns": [
-                    {"role": "user", "text": "ただいま"},
-                    {"role": "plant", "text": "おかえり"},
-                ],
-            },
-            {
-                "started_at": "2026-11-02T19:00:00+09:00",
-                "turns": [{"role": "user", "text": "かわいいね"}],
-            },
-        ],
-    }
+    log = {"plant_id": "s", "sessions": [
+        {"started_at": "2026-11-01T19:00:00+09:00", "turns": [{"role": "user", "text": "ただいま"}, {"role": "plant", "text": "おかえり"}]},
+        {"started_at": "2026-11-02T19:00:00+09:00", "turns": [{"role": "user", "text": "かわいいね"}]}]}
     store = PlantStore(str(tmp_path / "s.db"))
     hist = await simulate(store, log, FakeCompleter([VALID_AFFECTION_UP, VALID_AFFECTION_UP]))
     assert len(hist) == 3 and hist[-1].traits.affection > hist[0].traits.affection
     assert hist[1].recorded_at.startswith("2026-11-01T19:00")
 
-
 def test_samples_are_valid():
     for p in ["scripts/samples/plant-a.json", "scripts/samples/plant-b.json"]:
         log = json.loads(Path(p).read_text(encoding="utf-8"))
-        assert len(log["sessions"]) == 7 and all(
-            t["role"] in ("user", "plant") for s in log["sessions"] for t in s["turns"]
-        )
+        assert len(log["sessions"]) == 7 and all(t["role"] in ("user", "plant") for s in log["sessions"] for t in s["turns"])
 ```
 
 - [ ] **Step 2: 失敗を確認** → FAIL

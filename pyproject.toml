@@ -28,6 +28,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+extend-exclude = ["docs"]  # 設計書・計画書のコード例は整形しない
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
