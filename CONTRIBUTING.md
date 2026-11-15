@@ -23,16 +23,23 @@
 
 - PR を出すと GitHub Actions が自動でテスト（`uv run pytest`）を回す
 - **テストが落ちている PR はマージしない**
-- 手元でも push 前に `uv run pytest` を回す
+- PR では整形と lint（ruff）も確認する。手元でも push 前に `uvx ruff format . && uvx ruff check . && uv run pytest` を回す
 
-## 4. 秘密情報
+## 4. AI ツールの使い方
+
+- Claude Code・ChatGPT（Codex）など、使う AI ツールは自由
+- **コーディングのルールは [`AGENTS.md`](AGENTS.md) に一本化**。Codex は自動で読み、Claude Code は `CLAUDE.md` 経由で読む
+- ChatGPT の Web 画面など自動で読まないツールでは、最初に `AGENTS.md` を貼り付ける
+- ルールを変えたいときは `AGENTS.md` を PR で直す（`CLAUDE.md` には書き足さない）
+
+## 5. 秘密情報
 
 - `.env`、APIキー、LiveKit のトークン、`data/`（会話ログの DB）は**コミットしない**（`.gitignore` 済み）
 - 新しい環境変数を足したら、`.env.example` に**値なし**で書き足す
 - キー本体はチームの Discord の DM で渡す。Issue・PR・コミットには書かない
 - ログやエラーを Issue に貼るときは、キーが含まれていないか確認する
 
-## 5. 共有リソース
+## 6. 共有リソース
 
 | リソース | 決めごと |
 |---|---|
@@ -41,7 +48,7 @@
 | LiveKit Cloud | プロジェクトは1つを共有。株ごとのルームは `plant-<id>` |
 | OpenAI | キーは1つを共有。使いすぎに注意（目安は仕様書 §8.3） |
 
-## 6. 進捗と連絡
+## 7. 進捗と連絡
 
 - やることは必ず Issue にし、担当者（Assignees）を入れる（テンプレート: 作業 / バグ報告）
 - **30分詰まったら**チームの Discord で共有する

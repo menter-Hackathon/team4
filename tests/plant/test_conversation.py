@@ -36,13 +36,20 @@ def sent():
 
 @pytest.fixture
 def completer():
-    return FakeCompleter([reflection_json(summary=f"会話{i}", deltas={"affection": 0.05}) for i in range(10)])
+    return FakeCompleter(
+        [reflection_json(summary=f"会話{i}", deltas={"affection": 0.05}) for i in range(10)]
+    )
 
 
 def make_conv(store, clock, completer, send):
     return PlantConversation(
-        store=store, plant_id="a", complete_json=completer, send_expression=send, clock=clock,
-        wake_words=WAKE_WORDS, sleep_after=60.0,
+        store=store,
+        plant_id="a",
+        complete_json=completer,
+        send_expression=send,
+        clock=clock,
+        wake_words=WAKE_WORDS,
+        sleep_after=60.0,
     )
 
 
@@ -115,7 +122,9 @@ async def test_plant_utterance_only_recorded_when_awake(conv, store):
     await conv.on_user_turn("ふたまる")
     conv.on_plant_utterance("おかえり！")
     conv.on_plant_utterance("")
-    assert [(u.role, u.text) for u in store.get_utterances(current_sid(store))] == [("plant", "おかえり！")]
+    assert [(u.role, u.text) for u in store.get_utterances(current_sid(store))] == [
+        ("plant", "おかえり！")
+    ]
 
 
 async def test_silence_sleeps_and_reflects(conv, store, clock, sent):

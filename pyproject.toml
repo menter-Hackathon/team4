@@ -24,3 +24,12 @@ packages = ["agent", "scripts"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["docs"]  # 設計書・計画書のコード例は整形しない
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]  # 行の長さは formatter に任せる（日本語の文字列で誤検知が多い）

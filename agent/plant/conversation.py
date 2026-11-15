@@ -144,7 +144,9 @@ class PlantConversation:
         now = self._clock()
         self._store.end_session(session_id, now)
         logger.info("plant %s fell asleep (session=%s)", self._plant_id, session_id)
-        self._track(reflect_session(self._store, self._plant_id, session_id, self._complete_json, now))
+        self._track(
+            reflect_session(self._store, self._plant_id, session_id, self._complete_json, now)
+        )
 
     async def _reflect_all(self, session_ids: list[int], now) -> None:
         for session_id in session_ids:

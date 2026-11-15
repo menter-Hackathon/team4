@@ -63,7 +63,9 @@ class FutamaruAgent(Agent):
         if decision.kind == "ignore":
             raise StopResponse()  # ユーザー発話は履歴にも残らない
         if decision.kind == "greet":
-            self.session.generate_reply(chat_ctx=direction_ctx(self.chat_ctx, WAKE_GREETING_INSTRUCTION))
+            self.session.generate_reply(
+                chat_ctx=direction_ctx(self.chat_ctx, WAKE_GREETING_INSTRUCTION)
+            )
             raise StopResponse()
         if decision.text != original:
             new_message.content = [decision.text]
@@ -75,7 +77,9 @@ class FutamaruAgent(Agent):
         emitted = False
         try:
             async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
-                if isinstance(chunk, str) or (isinstance(chunk, llm.ChatChunk) and chunk.delta and chunk.delta.content):
+                if isinstance(chunk, str) or (
+                    isinstance(chunk, llm.ChatChunk) and chunk.delta and chunk.delta.content
+                ):
                     emitted = True
                 yield chunk
         except Exception:
@@ -83,7 +87,9 @@ class FutamaruAgent(Agent):
             if not emitted:
                 yield FALLBACK_REPLY
 
-    async def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings) -> AsyncIterable[rtc.AudioFrame]:
+    async def tts_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[rtc.AudioFrame]:
         async def cleaned() -> AsyncIterable[str]:
             parser = ExpressionParser()
             async for delta in text:
@@ -101,7 +107,9 @@ class FutamaruAgent(Agent):
         async for frame in Agent.default.tts_node(self, cleaned(), model_settings):
             yield frame
 
-    async def transcription_node(self, text: AsyncIterable[str], model_settings: ModelSettings) -> AsyncIterable[str]:
+    async def transcription_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterable[str]:
         # 画面・ログ用の文字起こしからもタグを除く（表情は tts_node から送る）
         parser = ExpressionParser()
         async for delta in text:
@@ -170,7 +178,9 @@ async def entrypoint(ctx: JobContext) -> None:
         llm=create_llm(cfg),
         tts=create_tts(cfg),
         vad=ctx.proc.userdata["vad"],
-        turn_handling=TurnHandlingOptions(turn_detection="vad", preemptive_generation={"enabled": False}),
+        turn_handling=TurnHandlingOptions(
+            turn_detection="vad", preemptive_generation={"enabled": False}
+        ),
         user_away_timeout=None,
         conn_options=SessionConnectOptions(
             # リトライしない（タイムアウトが何倍にもならないように）。STT/TTS の読み取り待ちは
@@ -229,7 +239,9 @@ async def entrypoint(ctx: JobContext) -> None:
             try:
                 result = await conv.tick()
                 if result == "nudge":
-                    session.generate_reply(chat_ctx=direction_ctx(agent.chat_ctx, NUDGE_INSTRUCTION))
+                    session.generate_reply(
+                        chat_ctx=direction_ctx(agent.chat_ctx, NUDGE_INSTRUCTION)
+                    )
                 elif result == "slept":
                     await agent.update_chat_ctx(ChatContext.empty())  # 眠ったら会話履歴を捨てる
             except Exception:

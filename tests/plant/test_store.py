@@ -21,7 +21,9 @@ def _reflected_session(store, plant_id, memories, now):
     """記憶を作るために、空のセッションを1つ reflection 済みにする。"""
     sid = store.start_session(plant_id, now)
     store.end_session(sid, now)
-    store.apply_reflection(plant_id, sid, "seed", memories, [], store.get_plant(plant_id).traits, now)
+    store.apply_reflection(
+        plant_id, sid, "seed", memories, [], store.get_plant(plant_id).traits, now
+    )
     return sid
 
 
@@ -115,7 +117,9 @@ def test_apply_reflection_is_atomic(store):
     sid = store.start_session("a", T0)
     store.end_session(sid, T0)
     with pytest.raises(sqlite3.IntegrityError):
-        store.apply_reflection("a", sid, "s", [NewMemory("x", None, 0.5)], [], Traits(affection=0.9), T0)
+        store.apply_reflection(
+            "a", sid, "s", [NewMemory("x", None, 0.5)], [], Traits(affection=0.9), T0
+        )
     assert store.get_plant("a").traits == Traits()
     s = store.get_session(sid)
     assert not s.reflected and s.summary is None

@@ -1,11 +1,15 @@
-import pytest
 from livekit.agents import Agent, ChatContext, llm
 
 from agent import main
 from agent.config import load_config
 from agent.plant.prompt import FALLBACK_REPLY
 
-CFG = {"LLM_BASE_URL": "http://x/v1", "LLM_MODEL": "m", "STT_BASE_URL": "http://x/v1", "OPENAI_API_KEY": "k"}
+CFG = {
+    "LLM_BASE_URL": "http://x/v1",
+    "LLM_MODEL": "m",
+    "STT_BASE_URL": "http://x/v1",
+    "OPENAI_API_KEY": "k",
+}
 
 
 class FakeConv:
@@ -21,7 +25,9 @@ def test_resolve_plant_id():
     assert main.resolve_plant_id("plant-a1", cfg) == "a1"
     assert main.resolve_plant_id("console-room", cfg) is None
     assert main.resolve_plant_id("plant-", cfg) is None
-    assert main.resolve_plant_id("console-room", load_config({**CFG, "DEV_PLANT_ID": "dev"})) == "dev"
+    assert (
+        main.resolve_plant_id("console-room", load_config({**CFG, "DEV_PLANT_ID": "dev"})) == "dev"
+    )
 
 
 def chunk(text):
@@ -50,7 +56,9 @@ def test_direction_ctx_adds_user_turn_without_touching_history():
     ctx.add_message(role="system", content="あなたは観葉植物のふたまる。")
     out = main.direction_ctx(ctx, "持ち主に呼ばれて起きた。")
     roles = [i.role for i in out.items]
-    assert roles == ["system", "user"] and out.items[-1].text_content == "（持ち主に呼ばれて起きた。）"
+    assert (
+        roles == ["system", "user"] and out.items[-1].text_content == "（持ち主に呼ばれて起きた。）"
+    )
     assert [i.role for i in ctx.items] == ["system"]
 
 

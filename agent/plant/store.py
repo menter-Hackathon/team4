@@ -155,7 +155,9 @@ class PlantStore:
             raise KeyError(plant_id)
         return Plant(row["plant_id"], row["name"], _traits(row))
 
-    def _insert_history(self, plant_id: str, session_id: int | None, t: Traits, now: datetime) -> None:
+    def _insert_history(
+        self, plant_id: str, session_id: int | None, t: Traits, now: datetime
+    ) -> None:
         self._conn.execute(
             f"INSERT INTO trait_history (plant_id, session_id, {_TRAIT_COLS}, recorded_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -190,14 +192,21 @@ class PlantStore:
 
     def end_session(self, session_id: int, now: datetime) -> None:
         with self._conn:
-            self._conn.execute("UPDATE sessions SET ended_at = ? WHERE id = ?", (iso(now), session_id))
+            self._conn.execute(
+                "UPDATE sessions SET ended_at = ? WHERE id = ?", (iso(now), session_id)
+            )
 
     def get_session(self, session_id: int) -> Session:
         r = self._conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if r is None:
             raise KeyError(session_id)
         return Session(
-            r["id"], r["plant_id"], r["started_at"], r["ended_at"], r["user_turns"], r["summary"],
+            r["id"],
+            r["plant_id"],
+            r["started_at"],
+            r["ended_at"],
+            r["user_turns"],
+            r["summary"],
             bool(r["reflected"]),
         )
 
@@ -254,7 +263,9 @@ class PlantStore:
             "SELECT * FROM memories WHERE plant_id = ? ORDER BY id", (plant_id,)
         ).fetchall()
         return [
-            Memory(r["id"], r["content"], r["kind"], r["importance"], r["created_at"], r["updated_at"])
+            Memory(
+                r["id"], r["content"], r["kind"], r["importance"], r["created_at"], r["updated_at"]
+            )
             for r in rows
         ]
 

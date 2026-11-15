@@ -16,20 +16,32 @@ def mem(id, content, importance, updated):
 
 def test_base_and_tag_line():
     p = build_system_prompt("ふたまる", Traits(), [], None, NOW)
-    assert p.startswith("あなたは観葉植物のふたまる。持ち主と話し言葉で短く話す。1回の返答は1〜2文。")
-    assert "返答の先頭に必ず表情タグを1つ付ける: [neutral] [happy] [sad] [surprised] [love] [sleepy]" in p
+    assert p.startswith(
+        "あなたは観葉植物のふたまる。持ち主と話し言葉で短く話す。1回の返答は1〜2文。"
+    )
+    assert (
+        "返答の先頭に必ず表情タグを1つ付ける: [neutral] [happy] [sad] [surprised] [love] [sleepy]"
+        in p
+    )
     assert "覚えていること" not in p and "前回の会話" not in p
 
 
 @pytest.mark.parametrize(
-    "v,text", [(0.2, "少し素っ気なく接する。"), (0.5, "普通に親しく接する。"), (0.8, "持ち主に甘えて親しげに話す。")]
+    "v,text",
+    [
+        (0.2, "少し素っ気なく接する。"),
+        (0.5, "普通に親しく接する。"),
+        (0.8, "持ち主に甘えて親しげに話す。"),
+    ],
 )
 def test_affection_levels(v, text):
     assert text in build_system_prompt("ふたまる", Traits(affection=v), [], None, NOW)
 
 
 def test_all_axes_present_in_order():
-    p = build_system_prompt("ふたまる", Traits(talkativeness=0.1, energy=0.9, curiosity=0.5), [], None, NOW)
+    p = build_system_prompt(
+        "ふたまる", Traits(talkativeness=0.1, energy=0.9, curiosity=0.5), [], None, NOW
+    )
     lines = p.split("\n\n")[2].split("\n")
     assert lines == [
         "口数は少なめで、静かに返す。",
@@ -40,7 +52,9 @@ def test_all_axes_present_in_order():
 
 
 def test_talkativeness_changes_length():
-    assert "1回の返答は1文。" in build_system_prompt("ふたまる", Traits(talkativeness=0.1), [], None, NOW)
+    assert "1回の返答は1文。" in build_system_prompt(
+        "ふたまる", Traits(talkativeness=0.1), [], None, NOW
+    )
     assert "1回の返答は2〜3文で、ときどき自分から話題も振る。" in build_system_prompt(
         "ふたまる", Traits(talkativeness=0.9), [], None, NOW
     )

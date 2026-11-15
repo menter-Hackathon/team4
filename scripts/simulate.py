@@ -28,7 +28,9 @@ from agent.plugins.llm import create_json_completer
 TURN_INTERVAL = timedelta(seconds=10)
 
 
-async def simulate(store: PlantStore, log: dict, complete_json: JsonCompleter) -> list[TraitSnapshot]:
+async def simulate(
+    store: PlantStore, log: dict, complete_json: JsonCompleter
+) -> list[TraitSnapshot]:
     plant_id = log["plant_id"]
     sessions = log["sessions"]
     if sessions:
@@ -60,7 +62,9 @@ async def _main(args: argparse.Namespace) -> None:
     cfg = load_config()
     store = PlantStore(args.db)
     complete_json = create_json_completer(cfg)
-    client = AsyncOpenAI(base_url=cfg.llm_base_url, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout)
+    client = AsyncOpenAI(
+        base_url=cfg.llm_base_url, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout
+    )
     for path in args.logs:
         log = json.loads(Path(path).read_text(encoding="utf-8"))
         hist = await simulate(store, log, complete_json)
@@ -69,13 +73,20 @@ async def _main(args: argparse.Namespace) -> None:
         plant = store.get_plant(plant_id)
         now = parse_iso(hist[-1].recorded_at)
         prompt = build_system_prompt(
-            plant.name, plant.traits, store.get_memories(plant_id), store.latest_summary(plant_id), now
+            plant.name,
+            plant.traits,
+            store.get_memories(plant_id),
+            store.latest_summary(plant_id),
+            now,
         )
         print("\n--- system prompt ---\n" + prompt)
         if args.ask:
             resp = await client.chat.completions.create(
                 model=cfg.llm_model,
-                messages=[{"role": "system", "content": prompt}, {"role": "user", "content": args.ask}],
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": args.ask},
+                ],
             )
             print(f"\n--- 「{args.ask}」への返答 ---\n{resp.choices[0].message.content}")
     store.close()
@@ -84,7 +95,9 @@ async def _main(args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="会話ログを流し込んで植物の成長を早送りする")
     parser.add_argument("logs", nargs="+", help="会話ログ JSON（株ごとに1ファイル）")
-    parser.add_argument("--db", default="data/sim.db", help="シミュレーション用 DB（既定: data/sim.db）")
+    parser.add_argument(
+        "--db", default="data/sim.db", help="シミュレーション用 DB（既定: data/sim.db）"
+    )
     parser.add_argument("--ask", help="最後にこの発話への返答を1回生成する")
     asyncio.run(_main(parser.parse_args()))
 
