@@ -1,0 +1,100 @@
+{
+  "plant_id": "sample-b",
+  "sessions": [
+    {
+      "started_at": "2026-11-01T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ふたまる、水やっとく"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-02T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま"
+        },
+        {
+          "role": "plant",
+          "text": "おかえり"
+        },
+        {
+          "role": "user",
+          "text": "疲れたから寝る"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-03T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "水"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-04T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "今日雨だって"
+        },
+        {
+          "role": "plant",
+          "text": "そうなんだ"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-05T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま"
+        },
+        {
+          "role": "plant",
+          "text": "おかえり"
+        },
+        {
+          "role": "user",
+          "text": "別に何もない"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-06T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "日当たりのとこに移すよ"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-07T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "水やった"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう"
+        },
+        {
+          "role": "user",
+          "text": "じゃ"
+        }
+      ]
+    }
+  ]
+}

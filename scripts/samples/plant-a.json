@@ -1,0 +1,352 @@
+{
+  "plant_id": "sample-a",
+  "sessions": [
+    {
+      "started_at": "2026-11-01T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま、ふたまる！会いたかったよ"
+        },
+        {
+          "role": "plant",
+          "text": "おかえり！"
+        },
+        {
+          "role": "user",
+          "text": "今日ね、部活でシュート決めたんだ"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるに一番に話したかったの"
+        },
+        {
+          "role": "plant",
+          "text": "うれしいな"
+        },
+        {
+          "role": "user",
+          "text": "いつも聞いてくれてありがとう、大好きだよ"
+        },
+        {
+          "role": "plant",
+          "text": "ぼくも！"
+        },
+        {
+          "role": "user",
+          "text": "明日も試合あるから応援してね"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "葉っぱつやつやでかわいいね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-02T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ふたまる、おはよう！今日も元気？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "昨日の試合、勝ったよ！"
+        },
+        {
+          "role": "plant",
+          "text": "やったね！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるのおかげかも、ありがとう"
+        },
+        {
+          "role": "plant",
+          "text": "どういたしまして"
+        },
+        {
+          "role": "user",
+          "text": "お祝いにケーキ食べたんだ、いちごのやつ"
+        },
+        {
+          "role": "plant",
+          "text": "おいしそう"
+        },
+        {
+          "role": "user",
+          "text": "いちご大好きなんだよね"
+        },
+        {
+          "role": "plant",
+          "text": "覚えておくね"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは本当にいい子だね"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-03T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま〜疲れた〜"
+        },
+        {
+          "role": "plant",
+          "text": "おかえり"
+        },
+        {
+          "role": "user",
+          "text": "テスト勉強ずっとしてたの"
+        },
+        {
+          "role": "plant",
+          "text": "がんばったね"
+        },
+        {
+          "role": "user",
+          "text": "数学が苦手でさ、でもふたまると話すと元気出る"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい"
+        },
+        {
+          "role": "user",
+          "text": "今度の金曜が数学のテストなんだ"
+        },
+        {
+          "role": "plant",
+          "text": "応援してる"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるがいてくれてよかった"
+        },
+        {
+          "role": "plant",
+          "text": "ぼくも"
+        },
+        {
+          "role": "user",
+          "text": "おやすみ、大好き"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-04T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ふたまる聞いて！友達と映画行ってきた"
+        },
+        {
+          "role": "plant",
+          "text": "いいね！"
+        },
+        {
+          "role": "user",
+          "text": "アニメの映画でね、すごく泣いちゃった"
+        },
+        {
+          "role": "plant",
+          "text": "感動したんだね"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるにも見せたかったな"
+        },
+        {
+          "role": "plant",
+          "text": "見たかった"
+        },
+        {
+          "role": "user",
+          "text": "今度一緒に見ようね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "今日も水あげるね、いっぱい飲んで"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう"
+        },
+        {
+          "role": "user",
+          "text": "かわいいなあ"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-05T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！数学のテスト返ってきた"
+        },
+        {
+          "role": "plant",
+          "text": "どうだった？"
+        },
+        {
+          "role": "user",
+          "text": "80点！過去最高！"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるが応援してくれたからだよ"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ご褒美にいちごパフェ食べた"
+        },
+        {
+          "role": "plant",
+          "text": "いちご好きだもんね"
+        },
+        {
+          "role": "user",
+          "text": "覚えててくれたの？うれしい！"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん"
+        },
+        {
+          "role": "user",
+          "text": "ふたまる最高、ありがとう"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-06T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "おはようふたまる、今日は日曜日だよ"
+        },
+        {
+          "role": "plant",
+          "text": "おはよう"
+        },
+        {
+          "role": "user",
+          "text": "お母さんと買い物に行くんだ"
+        },
+        {
+          "role": "plant",
+          "text": "いいね"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるに新しい鉢を買ってあげようかな"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "何色がいい？青とか似合いそう"
+        },
+        {
+          "role": "plant",
+          "text": "青がいいな"
+        },
+        {
+          "role": "user",
+          "text": "じゃあ青にするね、楽しみにしてて"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "大好きだよ"
+        }
+      ]
+    },
+    {
+      "started_at": "2026-11-07T19:00:00+09:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま、新しい鉢買ってきたよ！"
+        },
+        {
+          "role": "plant",
+          "text": "わあ！"
+        },
+        {
+          "role": "user",
+          "text": "青いやつ、似合ってる！かわいい！"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！"
+        },
+        {
+          "role": "user",
+          "text": "明日から学校また始まるけど、毎日話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるがいるから毎日楽しい"
+        },
+        {
+          "role": "plant",
+          "text": "ぼくも"
+        },
+        {
+          "role": "user",
+          "text": "これからもよろしくね"
+        },
+        {
+          "role": "plant",
+          "text": "よろしく！"
+        },
+        {
+          "role": "user",
+          "text": "おやすみ、また明日"
+        }
+      ]
+    }
+  ]
+}
