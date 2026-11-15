@@ -29,14 +29,14 @@
 
 - `.env`、APIキー、LiveKit のトークン、`data/`（会話ログの DB）は**コミットしない**（`.gitignore` 済み）
 - 新しい環境変数を足したら、`.env.example` に**値なし**で書き足す
-- キー本体はチームのチャットの DM で渡す。Issue・PR・コミットには書かない
+- キー本体はチームの Discordの DM で渡す。Issue・PR・コミットには書かない
 - ログやエラーを Issue に貼るときは、キーが含まれていないか確認する
 
 ## 5. 共有リソース
 
 | リソース | 決めごと |
 |---|---|
-| GPU サーバー | ポートは LLM（vLLM）が `8000`、STT（Speaches）が `8001`、自前 TTS を使う場合は `8002`。起動・停止・モデル変更をしたらチームのチャットで一言伝える |
+| GPU サーバー | ポートは LLM（vLLM）が `8000`、STT（Speaches）が `8001`、自前 TTS を使う場合は `8002`。起動・停止・モデル変更をしたらチームの Discordで一言伝える |
 | GPU メモリ | LLM と STT で分け合う。`--gpu-memory-utilization` を変えるときは相手の担当に相談する |
 | LiveKit Cloud | プロジェクトは1つを共有。株ごとのルームは `plant-<id>` |
 | OpenAI | キーは1つを共有。使いすぎに注意（目安は仕様書 §8.3） |
@@ -44,14 +44,14 @@
 ## 6. 進捗と連絡
 
 - やることは必ず Issue にし、担当者（Assignees）を入れる（テンプレート: 作業 / バグ報告）
-- **30分詰まったら**チームのチャットで共有する
+- **30分詰まったら**チームの Discordで共有する
 - 決めたことは Issue か仕様書（`docs/superpowers/specs/`）に残す。チャットだけで終わらせない
 
 ## 開発の始め方
 
 ```bash
 uv sync
-cp .env.example .env   # 値はチームのチャットで受け取る
+cp .env.example .env   # 値はチームの Discordで受け取る
 uv run pytest
 ```
 
