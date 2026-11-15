@@ -35,17 +35,6 @@ async def collect(agent):
     return "".join(out)
 
 
-async def test_llm_node_strips_tags_and_sends_expression(monkeypatch):
-    async def fake(self, chat_ctx, tools, model_settings):
-        for t in ["[hap", "py]やっ", "た！[love]"]:
-            yield chunk(t)
-
-    monkeypatch.setattr(Agent.default, "llm_node", fake)
-    conv = FakeConv()
-    assert await collect(main.FutamaruAgent(conv)) == "やった！"
-    assert conv.expressions == ["happy"]
-
-
 async def test_llm_node_fallback_on_error(monkeypatch):
     async def fake(self, chat_ctx, tools, model_settings):
         raise RuntimeError("gpu down")
@@ -53,3 +42,51 @@ async def test_llm_node_fallback_on_error(monkeypatch):
 
     monkeypatch.setattr(Agent.default, "llm_node", fake)
     assert await collect(main.FutamaruAgent(FakeConv())) == FALLBACK_REPLY
+
+
+# --- final review I1 / I3 ---
+def test_direction_ctx_adds_user_turn_without_touching_history():
+    ctx = ChatContext.empty()
+    ctx.add_message(role="system", content="あなたは観葉植物のふたまる。")
+    out = main.direction_ctx(ctx, "持ち主に呼ばれて起きた。")
+    roles = [i.role for i in out.items]
+    assert roles == ["system", "user"] and out.items[-1].text_content == "（持ち主に呼ばれて起きた。）"
+    assert [i.role for i in ctx.items] == ["system"]
+
+
+async def test_llm_node_keeps_tags_for_history(monkeypatch):
+    async def fake(self, chat_ctx, tools, model_settings):
+        yield chunk("[happy]やった")
+
+    monkeypatch.setattr(Agent.default, "llm_node", fake)
+    assert await collect(main.FutamaruAgent(FakeConv())) == "[happy]やった"
+
+
+async def test_tts_node_strips_tags_and_sends_expression(monkeypatch):
+    spoken = []
+
+    async def fake_tts(self, text, model_settings):
+        async for t in text:
+            spoken.append(t)
+        return
+        yield  # pragma: no cover
+
+    async def stream():
+        for t in ["[hap", "py]やっ", "た！[love]"]:
+            yield t
+
+    monkeypatch.setattr(Agent.default, "tts_node", fake_tts)
+    conv = FakeConv()
+    async for _ in main.FutamaruAgent(conv).tts_node(stream(), None):
+        pass
+    assert "".join(spoken) == "やった！" and conv.expressions == ["happy"]
+
+
+async def test_transcription_node_strips_tags():
+    async def stream():
+        for t in ["[sad]そっ", "か"]:
+            yield t
+
+    conv = FakeConv()
+    out = [t async for t in main.FutamaruAgent(conv).transcription_node(stream(), None)]
+    assert "".join(out) == "そっか" and conv.expressions == []

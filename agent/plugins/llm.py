@@ -10,7 +10,7 @@ from agent.plant.reflection import JsonCompleter
 
 
 def _client(cfg: Config) -> AsyncOpenAI:
-    return AsyncOpenAI(base_url=cfg.llm_base_url, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout)
+    return AsyncOpenAI(base_url=cfg.llm_base_url, api_key=cfg.llm_api_key, timeout=cfg.llm_timeout, max_retries=0)
 
 
 def create_llm(cfg: Config) -> openai.LLM:

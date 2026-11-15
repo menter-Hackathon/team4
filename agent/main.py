@@ -63,7 +63,7 @@ class FutamaruAgent(Agent):
         if decision.kind == "ignore":
             raise StopResponse()  # ユーザー発話は履歴にも残らない
         if decision.kind == "greet":
-            self.session.generate_reply(instructions=WAKE_GREETING_INSTRUCTION)
+            self.session.generate_reply(chat_ctx=direction_ctx(self.chat_ctx, WAKE_GREETING_INSTRUCTION))
             raise StopResponse()
         if decision.text != original:
             new_message.content = [decision.text]
@@ -71,39 +71,57 @@ class FutamaruAgent(Agent):
     async def llm_node(
         self, chat_ctx: ChatContext, tools: list[llm.FunctionTool], model_settings: ModelSettings
     ) -> AsyncIterable[llm.ChatChunk | str]:
-        parser = ExpressionParser()
+        # 表情タグはここでは消さない。履歴にタグを残し、LLM がタグを付け続けるようにする
         emitted = False
-
-        def handle(text: str) -> str:
-            nonlocal emitted
-            parsed = parser.feed(text)
-            if parsed.expression is not None:
-                self._conv.express(parsed.expression)
-            emitted = emitted or bool(parsed.text)
-            return parsed.text
-
         try:
             async for chunk in Agent.default.llm_node(self, chat_ctx, tools, model_settings):
-                if isinstance(chunk, str):
-                    cleaned = handle(chunk)
-                    if cleaned:
-                        yield cleaned
-                elif isinstance(chunk, llm.ChatChunk) and chunk.delta and chunk.delta.content:
-                    chunk.delta.content = handle(chunk.delta.content)
-                    yield chunk
-                else:
-                    yield chunk
+                if isinstance(chunk, str) or (isinstance(chunk, llm.ChatChunk) and chunk.delta and chunk.delta.content):
+                    emitted = True
+                yield chunk
         except Exception:
             logger.exception("LLM error")
             if not emitted:
-                self._conv.express("neutral")
                 yield FALLBACK_REPLY
-                return
-        tail = parser.flush()
-        if tail.expression is not None:
-            self._conv.express(tail.expression)
-        if tail.text:
-            yield tail.text
+
+    async def tts_node(self, text: AsyncIterable[str], model_settings: ModelSettings) -> AsyncIterable[rtc.AudioFrame]:
+        async def cleaned() -> AsyncIterable[str]:
+            parser = ExpressionParser()
+            async for delta in text:
+                parsed = parser.feed(delta)
+                if parsed.expression is not None:
+                    self._conv.express(parsed.expression)
+                if parsed.text:
+                    yield parsed.text
+            tail = parser.flush()
+            if tail.expression is not None:
+                self._conv.express(tail.expression)
+            if tail.text:
+                yield tail.text
+
+        async for frame in Agent.default.tts_node(self, cleaned(), model_settings):
+            yield frame
+
+    async def transcription_node(self, text: AsyncIterable[str], model_settings: ModelSettings) -> AsyncIterable[str]:
+        # 画面・ログ用の文字起こしからもタグを除く（表情は tts_node から送る）
+        parser = ExpressionParser()
+        async for delta in text:
+            out = parser.feed(delta).text
+            if out:
+                yield out
+        tail = parser.flush().text
+        if tail:
+            yield tail
+
+
+def direction_ctx(chat_ctx: ChatContext, direction: str) -> ChatContext:
+    """挨拶・話題振り用に、ト書きをユーザー発話として足したコンテキストのコピーを作る。
+
+    system メッセージを後ろに重ねると Gemma のチャットテンプレートが受け付けない場合があるため、
+    ト書きは user ロールで渡す。元の履歴（chat_ctx）は変更しない。
+    """
+    ctx = chat_ctx.copy()
+    ctx.add_message(role="user", content=f"（{direction}）")
+    return ctx
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -155,9 +173,11 @@ async def entrypoint(ctx: JobContext) -> None:
         turn_handling=TurnHandlingOptions(turn_detection="vad", preemptive_generation={"enabled": False}),
         user_away_timeout=None,
         conn_options=SessionConnectOptions(
-            stt_conn_options=APIConnectOptions(timeout=cfg.stt_timeout),
+            # リトライしない（タイムアウトが何倍にもならないように）。STT/TTS の読み取り待ちは
+            # プラグイン側で 30 秒固定、ここでの timeout は接続待ちに効く
+            stt_conn_options=APIConnectOptions(max_retry=0, timeout=cfg.stt_timeout),
             llm_conn_options=APIConnectOptions(max_retry=0, timeout=cfg.llm_timeout),
-            tts_conn_options=APIConnectOptions(timeout=cfg.tts_timeout),
+            tts_conn_options=APIConnectOptions(max_retry=0, timeout=cfg.tts_timeout),
             # GPU サーバーが一時的に落ちても植物を終了させない
             max_unrecoverable_errors=1_000_000,
         ),
@@ -209,7 +229,7 @@ async def entrypoint(ctx: JobContext) -> None:
             try:
                 result = await conv.tick()
                 if result == "nudge":
-                    session.generate_reply(instructions=NUDGE_INSTRUCTION)
+                    session.generate_reply(chat_ctx=direction_ctx(agent.chat_ctx, NUDGE_INSTRUCTION))
                 elif result == "slept":
                     await agent.update_chat_ctx(ChatContext.empty())  # 眠ったら会話履歴を捨てる
             except Exception:

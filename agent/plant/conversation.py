@@ -11,9 +11,10 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from .expression import strip_tags
 from .personality import nudge_delay
 from .prompt import build_system_prompt
-from .reflection import JsonCompleter, recover, reflect_session
+from .reflection import JsonCompleter, reflect_session
 from .store import PlantStore
 from .timeutil import Clock
 from .wake import WakeController, detect_wake
@@ -21,6 +22,9 @@ from .wake import WakeController, detect_wake
 logger = logging.getLogger(__name__)
 
 SendExpression = Callable[[str], Awaitable[None]]
+
+# 起動時に再実行する未処理 reflection の上限。LLM が落ちていても起動を何分も止めないため
+RECOVERY_LIMIT = 3
 
 
 @dataclass
@@ -59,7 +63,12 @@ class PlantConversation:
 
     async def start(self) -> None:
         self._store.get_or_create_plant(self._plant_id, self._clock())
-        await recover(self._store, self._plant_id, self._complete_json, self._clock())
+        # 対象のセッションはここで確定し（起動後に終わるセッションを二重に処理しない）、
+        # reflection 自体は裏で行ってウェイクワードの受付を待たせない（§6.3 手順8）
+        self._store.repair_unfinished_sessions(self._plant_id)
+        pending = self._store.unreflected_sessions(self._plant_id)[-RECOVERY_LIMIT:]
+        if pending:
+            self._track(self._reflect_all(pending, self._clock()))
         self.express("sleepy")
 
     # --- ユーザー・植物の発話 ---
@@ -84,8 +93,9 @@ class PlantConversation:
         return TurnDecision("reply", text)
 
     def on_plant_utterance(self, text: str) -> None:
-        if self.awake and text.strip():
-            self._record("plant", text.strip())
+        text = strip_tags(text).strip()
+        if self.awake and text:
+            self._record("plant", text)
 
     def _record(self, role: str, text: str) -> None:
         assert self._session_id is not None
@@ -134,9 +144,14 @@ class PlantConversation:
         now = self._clock()
         self._store.end_session(session_id, now)
         logger.info("plant %s fell asleep (session=%s)", self._plant_id, session_id)
-        task = asyncio.create_task(
-            reflect_session(self._store, self._plant_id, session_id, self._complete_json, now)
-        )
+        self._track(reflect_session(self._store, self._plant_id, session_id, self._complete_json, now))
+
+    async def _reflect_all(self, session_ids: list[int], now) -> None:
+        for session_id in session_ids:
+            await reflect_session(self._store, self._plant_id, session_id, self._complete_json, now)
+
+    def _track(self, coro) -> None:
+        task = asyncio.create_task(coro)
         self._reflections.add(task)
         task.add_done_callback(self._reflections.discard)
 

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 LLM_EXPRESSIONS = frozenset({"neutral", "happy", "sad", "surprised", "love", "sleepy"})
 ALL_EXPRESSIONS = LLM_EXPRESSIONS | {"listening", "thinking"}
 
 MAX_TAG_LEN = 16  # "[" と "]" を含む
+OPEN_BRACKETS = "[［【"
+CLOSE_BRACKETS = "]］】"
+# 本文中では、英字だけの括弧（[smile] [thinking] など）はタグとみなして読み上げない
+_TAG_LIKE = re.compile(r"[a-z_ ]{1,14}")
 
 
 @dataclass
@@ -32,7 +37,7 @@ class ExpressionParser:
                 if self._skip_ws and ch.isspace():
                     continue
                 self._skip_ws = False
-                if ch == "[":
+                if ch in OPEN_BRACKETS:
                     self._buf = ch
                     continue
                 if self._expression is None:
@@ -41,13 +46,13 @@ class ExpressionParser:
                 continue
 
             self._buf += ch
-            if ch == "]":
+            if ch in CLOSE_BRACKETS:
                 raw, self._buf = self._buf, ""
                 name = raw[1:-1].strip().lower()
                 if self._expression is None:
                     decided = self._decide(name if name in LLM_EXPRESSIONS else "neutral")
                     self._skip_ws = True
-                elif name in LLM_EXPRESSIONS:
+                elif _TAG_LIKE.fullmatch(name):
                     self._skip_ws = True
                 else:
                     out.append(raw)
@@ -66,3 +71,9 @@ class ExpressionParser:
     def _decide(self, name: str) -> str:
         self._expression = name
         return name
+
+
+def strip_tags(text: str) -> str:
+    """ストリーミングでない文字列から表情タグを除去する（会話ログの保存用）。"""
+    parser = ExpressionParser()
+    return parser.feed(text).text + parser.flush().text

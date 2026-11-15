@@ -46,3 +46,26 @@ def test_text_after_tag_streams_immediately():
     p = ExpressionParser()
     assert p.feed("[happy]") == ParsedChunk("happy", "")
     assert p.feed("やった") == ParsedChunk(None, "やった")
+
+
+# --- final review I4: 全角・隅付き括弧、本文中の英字タグ ---
+@pytest.mark.parametrize(
+    "chunks,exprs,text",
+    [
+        (["［happy］こんにちは"], ["happy"], "こんにちは"),
+        (["【love】すき"], ["love"], "すき"),
+        (["やあ[smile]"], ["neutral"], "やあ"),
+        (["[happy][excited]やった"], ["happy"], "やった"),
+        (["[happy]うん[thinking]えっと"], ["happy"], "うんえっと"),
+        (["[happy]答えは[1]番"], ["happy"], "答えは[1]番"),
+    ],
+)
+def test_bracket_variants_never_spoken(chunks, exprs, text):
+    assert run(chunks) == (exprs, text)
+
+
+def test_strip_tags():
+    from agent.plant.expression import strip_tags
+
+    assert strip_tags("[happy]やった！[love]") == "やった！"
+    assert strip_tags("こんにちは") == "こんにちは"

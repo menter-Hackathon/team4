@@ -98,3 +98,25 @@ async def test_json_completer_request(server, cfg):
 
 def test_create_llm_model(cfg):
     assert create_llm(cfg).model == "google/gemma-4-E4B-it"
+
+
+# --- final review I2: SDK の自動リトライでタイムアウトが何倍にもならない ---
+def test_clients_do_not_retry(cfg):
+    assert create_stt(cfg)._client.max_retries == 0
+    assert create_tts(cfg)._client.max_retries == 0
+    assert create_llm(cfg)._client.max_retries == 0
+
+
+def test_json_completer_client_does_not_retry(cfg, monkeypatch):
+    import agent.plugins.llm as mod
+
+    seen = {}
+    real = mod.AsyncOpenAI
+
+    def spy(**kw):
+        seen.update(kw)
+        return real(**kw)
+
+    monkeypatch.setattr(mod, "AsyncOpenAI", spy)
+    create_json_completer(cfg)
+    assert seen["max_retries"] == 0

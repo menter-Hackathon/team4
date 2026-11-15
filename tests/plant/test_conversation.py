@@ -214,3 +214,59 @@ async def test_failing_send_does_not_raise(store, clock, completer):
     c.express("happy")
     await settle()
     await c.close()
+
+
+# --- final review I3 / I5 ---
+async def test_plant_utterance_is_stored_without_tags(conv, store):
+    await conv.on_user_turn("ふたまる")
+    conv.on_plant_utterance("[happy]おかえり！")
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["おかえり！"]
+
+
+async def test_start_does_not_wait_for_recovery(store, clock, sent):
+    store.get_or_create_plant("a", T0 - timedelta(days=1))
+    old = store.start_session("a", T0 - timedelta(hours=2))
+    store.add_utterance(old, "user", "ただいま", T0 - timedelta(hours=2))
+    gate = asyncio.Event()
+    completer = FakeCompleter([reflection_json()], gate=gate)
+
+    async def send(name):
+        sent.append(name)
+
+    c = make_conv(store, clock, completer, send)
+    await asyncio.wait_for(c.start(), timeout=1)  # LLM が止まっていても起動は待たない
+    assert (await c.on_user_turn("ふたまる")).kind == "greet"
+    gate.set()
+    await c.close()
+    assert store.get_session(old).reflected
+
+
+async def test_recovery_is_capped(store, clock, sent):
+    store.get_or_create_plant("a", T0 - timedelta(days=1))
+    for i in range(5):
+        sid = store.start_session("a", T0 - timedelta(hours=10 - i))
+        store.add_utterance(sid, "user", f"発話{i}", T0 - timedelta(hours=10 - i))
+    completer = FakeCompleter([reflection_json() for _ in range(10)])
+
+    async def send(name):
+        sent.append(name)
+
+    c = make_conv(store, clock, completer, send)
+    await c.start()
+    await c.wait_reflections()
+    assert len(completer.calls) == 3 and len(store.unreflected_sessions("a")) == 2
+
+
+async def test_session_ending_right_after_start_is_reflected_once(store, clock, sent):
+    completer = FakeCompleter([reflection_json() for _ in range(5)])
+
+    async def send(name):
+        sent.append(name)
+
+    c = make_conv(store, clock, completer, send)
+    await c.start()
+    await c.on_user_turn("ふたまる、ただいま")
+    clock.advance(60)
+    await c.tick()
+    await c.close()
+    assert len(completer.calls) == 1
