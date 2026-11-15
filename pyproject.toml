@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest", "pytest-asyncio", "respx"]
+dev = ["pytest", "pytest-asyncio"]
 
 [build-system]
 requires = ["hatchling"]
