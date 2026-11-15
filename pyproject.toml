@@ -1,0 +1,26 @@
+[project]
+name = "futamaru-agent"
+version = "0.1.0"
+description = "ふたまる: 育て方で個性が変わる、話せる観葉植物の音声AIエージェント"
+requires-python = ">=3.12"
+dependencies = [
+    "livekit-agents[openai,silero]~=1.8",
+    "livekit-api",
+    "openai",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent", "scripts"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
