@@ -58,6 +58,8 @@ logger = logging.getLogger("futamaru")
 
 # ESP32 の株が入るルームは "plant-<plant_id>"（仕様 §3）
 ROOM_PREFIX = "plant-"
+# 終了時に振り返りを待つ最大の秒数（#13）。LiveKit の終了の打ち切り（既定 10 秒）より短くする
+SHUTDOWN_REFLECTION_TIMEOUT = 8.0
 # LiveKit Agents の console モード（PC のマイク・スピーカーで試すモード）が使うルーム名
 CONSOLE_ROOM = "console-room"
 # 無言タイマーを確かめる間隔（秒）。この間隔で conv.tick() を呼ぶ
@@ -327,8 +329,12 @@ async def entrypoint(ctx: JobContext) -> None:
             asyncio.create_task(agent.end_session())
 
     async def shutdown() -> None:
-        """エージェントが止まるときの後始末。振り返りが終わるのを待ってから DB を閉じる。"""
-        await conv.close()
+        """エージェントが止まるときの後始末。振り返りを少し待ってから DB を閉じる（#13）。
+
+        LiveKit は終了処理を 10 秒（shutdown_process_timeout の既定）で打ち切るので、
+        振り返りは SHUTDOWN_REFLECTION_TIMEOUT 秒までしか待たず、必ず store.close() まで進める。
+        """
+        await conv.shutdown(SHUTDOWN_REFLECTION_TIMEOUT)
         store.close()
 
     ctx.add_shutdown_callback(shutdown)
