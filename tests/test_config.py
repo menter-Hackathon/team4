@@ -16,7 +16,7 @@ def test_defaults():
     assert c.tts_model == "gpt-4o-mini-tts" and c.tts_voice == "coral" and c.tts_base_url is None
     assert c.tts_api_key == "sk-test" and c.llm_api_key == "EMPTY" and c.stt_api_key == "EMPTY"
     assert c.db_path == "./data/futamaru.db"
-    assert c.wake_words == ("ふたまる", "二丸", "ふた丸", "2丸")
+    assert c.wake_words == ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
     assert (c.sleep_after, c.llm_timeout, c.stt_timeout, c.tts_timeout) == (60.0, 15.0, 10.0, 10.0)
     assert c.tts_instructions == TTS_INSTRUCTIONS and c.dev_plant_id is None
 

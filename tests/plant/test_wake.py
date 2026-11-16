@@ -139,3 +139,10 @@ def test_no_nudge_when_none():
     c.wake(T0)
     c.set_nudge_delay(None)
     assert c.tick(T0 + s(40)) == "none"
+
+
+def test_default_wake_words_catch_shitamaru_mishearing():
+    # STT が「ふたまるくん元気？」を「下丸くん元気?」と書いたことがある（#2）。既定の一覧で起きられる
+    from agent.config import DEFAULT_WAKE_WORDS
+
+    assert detect_wake("下丸くん元気?", DEFAULT_WAKE_WORDS).rest == "元気?"
