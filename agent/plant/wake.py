@@ -1,4 +1,11 @@
-"""ウェイクワード検出と、起きている/眠っている状態・無言タイマーの管理（仕様 §5）。"""
+"""ウェイクワード検出と、起きている/眠っている状態・無言タイマーの管理（仕様 §5）。
+
+ふたまるは普段は眠っていて（SLEEPING）、「ふたまる」と呼ばれると起きる（AWAKE）。
+起きている間は会話し、しばらく誰も話さないと眠る。このファイルは、
+- 文字起こしに「ふたまる」が入っているかの判定（detect_wake）
+- 起きている / 眠っている状態と、無言の時間を数えるタイマー（WakeController）
+を担当する。実際に起こす・眠らせる処理は conversation.py が行う。
+"""
 
 from __future__ import annotations
 
@@ -8,19 +15,29 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+# 植物の状態。SLEEPING: 眠っている（ウェイクワードだけ待つ）、AWAKE: 起きて会話している
 State = Literal["SLEEPING", "AWAKE"]
+# WakeController.tick() の結果。none: 何もしない、nudge: 話題を振る、sleep: 眠る
 Tick = Literal["none", "nudge", "sleep"]
 
+# ウェイクワードの後ろがこの文字数未満なら、話しかけではなく呼びかけだけとみなす
 MIN_REST_CHARS = 2
 # ウェイクワードにすぐ続く呼びかけの敬称。発話の中身ではないので取り除く（#6）
 HONORIFICS = ("ちゃん", "くん", "さん")
 
 
 def _normalize_char(ch: str) -> str:
+    """1 文字を正規化する。消える文字なら ""、全角→半角などで複数文字になることもある。
+
+    例: "フ" → "ふ"、"２" → "2"、"ﾌ" → "ふ"、"、" → ""、" " → ""
+    """
     out = []
+    # NFKC: 全角英数字・半角カタカナなど、見た目が同じで文字コードが違うものを 1 つの形にそろえる
     for c in unicodedata.normalize("NFKC", ch):
+        # カタカナ（ァ〜ヶ）は、文字コードを 0x60 引くと同じ音のひらがなになる（"フ" → "ふ"）
         if "ァ" <= c <= "ヶ":
             c = chr(ord(c) - 0x60)
+        # 文字の種類の頭文字が P（句読点）・S（記号）・Z（空白）・C（制御文字）なら捨てる
         if unicodedata.category(c)[0] in "PSZC":
             continue
         out.append(c)
@@ -28,12 +45,19 @@ def _normalize_char(ch: str) -> str:
 
 
 def normalize(text: str) -> str:
-    """カタカナ→ひらがな、空白・句読点・記号の除去。"""
+    """カタカナ→ひらがな、空白・句読点・記号の除去。
+
+    STT は同じ言葉でも「フタマル」「ふたまる」「ふ た ま る。」のように書き方が揺れるので、
+    比べる前にこの関数で同じ形にそろえる。
+    例: "フタマル、 おはよう！" → "ふたまるおはよう"、"２丸" → "2丸"
+    """
     return "".join(_normalize_char(ch) for ch in text)
 
 
 @dataclass
 class WakeMatch:
+    """detect_wake() が「ウェイクワードあり」と判定したときの結果。"""
+
     rest: str  # ウェイクワードの後ろに続く文。"" はウェイクワードだけ
 
 
@@ -126,49 +150,72 @@ class WakeController:
     """SLEEPING / AWAKE の状態と、無言時間による話題振り・睡眠の判定。
 
     無言時間は「植物が話していない・ユーザーが話していない時間」で数える（§5.2）。
+
+    使い方:
+        conversation.py が 1 秒ごとに tick(現在時刻) を呼ぶ。
+        tick は「最後に誰かが話し終えた時刻（_anchor）」からの経過秒数を見て、
+        - sleep_after 秒（既定 60 秒）たったら "sleep"（眠る）
+        - 話題を振る秒数（性格で決まる。personality.nudge_delay）たったら "nudge"（1 回だけ）
+        を返す。植物やユーザーが話している最中は数えない。
+
+    時刻は引数で受け取るので、テストでは時計を自由に進めて確かめられる。
     """
 
     def __init__(self, sleep_after: float = 60.0) -> None:
-        self.sleep_after = sleep_after
+        self.sleep_after = sleep_after  # この秒数だれも話さなければ眠る
         self.state: State = "SLEEPING"
-        self._anchor: datetime | None = None
-        self._plant_busy = False
-        self._user_speaking = False
-        self._nudge_delay: float | None = None
-        self._nudged = False
+        self._anchor: datetime | None = None  # 無言の時間を数え始めた時刻
+        self._plant_busy = False  # 植物が考え中・話し中か
+        self._user_speaking = False  # ユーザーが話している最中か
+        self._nudge_delay: float | None = None  # 話題を振るまでの秒数。None なら振らない
+        self._nudged = False  # 今回の無言の間に、もう話題を振ったか
 
     def wake(self, now: datetime) -> None:
+        """起きる。無言タイマーを今から数え直す。"""
         self.state = "AWAKE"
         self._anchor = now
         self._nudged = False
 
     def sleep(self) -> None:
+        """眠る。"""
         self.state = "SLEEPING"
 
     def on_user_activity(self, now: datetime) -> None:
+        """ユーザーが何か話した。無言タイマーを数え直し、また話題を振れるようにする。"""
         self._anchor = now
         self._nudged = False
 
     def set_user_speaking(self, speaking: bool, now: datetime) -> None:
+        """ユーザーが話し始めた（True）／話し終えた（False）。話し終えた時刻から無言を数える。"""
         self._user_speaking = speaking
         if not speaking:
             self._anchor = now
 
     def set_plant_busy(self, busy: bool, now: datetime) -> None:
+        """植物が考え始めた・話し始めた（True）／話し終えた（False）。"""
+        # 話し終えた瞬間（True → False に変わったとき）から無言を数え直す
         if self._plant_busy and not busy:
             self._anchor = now
         self._plant_busy = busy
 
     def set_nudge_delay(self, seconds: float | None) -> None:
+        """話題を振るまでの秒数を設定する。起きるたびに、その株の性格から決めて渡される。"""
         self._nudge_delay = seconds
 
     def tick(self, now: datetime) -> Tick:
+        """今の時刻から、眠る・話題を振る・何もしない、のどれかを決める。
+
+        例（sleep_after=60、話題を振るのは 25 秒）: 最後に話してから
+        10 秒 → "none"、25 秒 → "nudge"、30 秒 → "none"（2 回目は振らない）、60 秒 → "sleep"
+        """
+        # 眠っている・誰かが話している最中は、無言ではないので何もしない
         if self.state != "AWAKE" or self._plant_busy or self._user_speaking or self._anchor is None:
             return "none"
-        silence = (now - self._anchor).total_seconds()
+        silence = (now - self._anchor).total_seconds()  # 無言が続いている秒数
         if silence >= self.sleep_after:
             self.sleep()
             return "sleep"
+        # 話題を振るのは、無言が続く間に 1 回だけ（振ったあと黙っていたら、そのまま眠る）
         if self._nudge_delay is not None and not self._nudged and silence >= self._nudge_delay:
             self._nudged = True
             return "nudge"
