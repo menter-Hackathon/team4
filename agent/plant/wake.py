@@ -12,6 +12,8 @@ State = Literal["SLEEPING", "AWAKE"]
 Tick = Literal["none", "nudge", "sleep"]
 
 MIN_REST_CHARS = 2
+# ウェイクワードにすぐ続く呼びかけの敬称。発話の中身ではないので取り除く（#6）
+HONORIFICS = ("ちゃん", "くん", "さん")
 
 
 def _normalize_char(ch: str) -> str:
@@ -45,18 +47,26 @@ def detect_wake(text: str, wake_words: Sequence[str]) -> WakeMatch | None:
             origin.append(i)
     joined = "".join(normalized)
 
+    words = [w for w in (normalize(word) for word in wake_words) if w]
     best: tuple[int, int] | None = None  # (開始位置, 終了位置) 正規化後
-    for word in wake_words:
-        w = normalize(word)
-        if not w:
-            continue
+    for w in words:
         pos = joined.find(w)
         if pos >= 0 and (best is None or pos < best[0]):
             best = (pos, pos + len(w))
     if best is None:
         return None
 
-    rest = text[origin[best[1] - 1] + 1 :]
+    end = best[1]
+    while True:
+        # 「ふたまる、さんぽ」の「さん」は敬称ではないので、区切りを挟まず続くときだけ取る
+        adjacent = end < len(joined) and origin[end] == origin[end - 1] + 1
+        suffix = next((h for h in HONORIFICS if adjacent and joined.startswith(h, end)), None)
+        suffix = suffix or next((w for w in words if joined.startswith(w, end)), None)
+        if suffix is None:
+            break
+        end += len(suffix)
+
+    rest = text[origin[end - 1] + 1 :]
     i = 0
     while i < len(rest) and not _normalize_char(rest[i]):
         i += 1
