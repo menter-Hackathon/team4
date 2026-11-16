@@ -99,7 +99,7 @@ PARAMS = [
     ("mouth_dz", -19.3, "口の両端の高さ（comp_zc から）"),
     ("mouth_hole_d", 2.4, "口の穴の直径（奥の部品が見えにくい細さ）"),
     ("mouth_front", -8.5, "ふたの裏の音の部屋の前の面（基準面から。マイナスは前）"),
-    # --- M5Stack Atomic Voice Base（24 × 24 × 10mm、上にピンが 4.1mm）。スピーカー・マイク・アンプ入り ---
+    # --- M5Stack Atomic Voice Base（24 × 24 × 10mm、上にピンが 4.14mm。公式の寸法は 24 × 24 × 14.1）---
     # スピーカーのスリットがある側面を前（口の裏）に、ピンを上に向けて、部屋の台に載せる
     ("vb_size", 24.0, "Voice Base の幅・奥行き"),
     ("vb_h", 10.0, "Voice Base の箱の高さ（ピンを除く）"),
@@ -147,7 +147,7 @@ PARAMS = [
 FOOT_ANGLE = 32.0
 # 腕のピンの高さ（arm_z から、mm）。2 本にして腕が回らないようにする
 ARM_PEGS_DZ = (-6.0, 10.0)
-# 磁石の位置（丸い顔の中心から、mm）。スピーカーのリング・マイクのポケット・顔のくぼみの縁を避けた場所
+# 磁石の位置（丸い顔の中心から、mm）。Voice Base の台・XIAO の枠・口の奥の音の部屋を避けた場所
 MAG_POINTS = [(34.0, 0.0), (-34.0, 0.0), (24.0, -24.0), (-24.0, -24.0)]
 # 口の穴の数。弧の上に等間隔にならべる（穴と穴のすき間が 1.5mm 以上になる数）
 MOUTH_HOLES = 7
@@ -156,8 +156,10 @@ MOUTH_HOLES = 7
 XIAO_L, XIAO_W, XIAO_PCB = 21.0, 17.8, 1.2
 USB_W, USB_T, USB_L, USB_OVER = 9.0, 3.2, 7.3, 1.0
 HEADER_T, DUPONT_L = 2.5, 14.0
-# Voice Base のピンの列（上の面の前と後ろのふちから 3mm 内側、左右の中央に 5 本と 4 本）
-VB_PIN_INSET, VB_PINS = 3.0, (5, 4)
+# Voice Base のピンの列（M5Stack の公式図面 model size.jpg から読んだ値）。列は前後のふちから 4.35mm 内側、
+# 間隔 15.24mm、ピッチ 2.54mm。5 本と 4 本の列は、どちらも MIC の面と反対の端（右）のふちから 4.35mm に
+# そろっている。MIC の面を左（XIAO と反対）に向けて置く
+VB_PIN_INSET, VB_PINS = 4.35, (5, 4)
 # 色（R, G, B）。チャムさんの案に合わせて、体はクリーム色、目は黒
 BODY_RGB = (237, 230, 214)
 EYE_RGB = (25, 25, 25)
@@ -1148,7 +1150,7 @@ def build_refs(comp: adsk.fusion.Component) -> None:
                 comp,
                 "z",
                 f"{vb_bot} + vb_h",
-                {"x": "0 mm", "y": y},
+                {"x": f"vb_size / 2 - {VB_PIN_INSET + (n - 1) * 2.54 / 2} mm", "y": y},
                 {"x": f"{n * 2.54} mm", "y": "2.54 mm"},
                 f"{DUPONT_L} mm",
                 "+z",
