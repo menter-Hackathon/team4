@@ -17,7 +17,7 @@ from .prompt import build_system_prompt
 from .reflection import JsonCompleter, reflect_session
 from .store import PlantStore
 from .timeutil import Clock
-from .wake import WakeController, detect_wake
+from .wake import WakeController, detect_wake, normalize
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,8 @@ class PlantConversation:
 
     async def on_user_turn(self, text: str) -> TurnDecision:
         text = text.strip()
-        if not text:
+        # 「。」「…」だけの文字起こしは雑音なので、返事も記録もしない（#10）
+        if not normalize(text):
             return TurnDecision("ignore")
 
         if not self.awake:
