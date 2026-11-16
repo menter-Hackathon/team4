@@ -26,7 +26,7 @@ from typing import Literal
 
 from .dialect import resolve_dialect
 from .expression import strip_tags
-from .people import identify
+from .people import clean_name, identify
 from .personality import nudge_delay
 from .prompt import build_system_prompt
 from .reflection import JsonCompleter, reflect_session
@@ -55,8 +55,8 @@ class TurnDecision:
     text: str = ""  # reply のとき LLM に渡すユーザー発話
     # 新しいシステムプロンプト。起きたとき・相手が決まったとき・お客さんに決まったときだけ入る
     instructions: str | None = None
-    # 話し相手の方言（例: "kansai"）。相手が決まった・お客さんに決まったときだけ入る。
-    # main.py が TTS（声の出し方）の指示を替えるのに使う
+    # 話し相手の方言（例: "kansai"）。起きたとき（未確定なので "standard"）・相手が決まった・
+    # お客さんに決まったときだけ入る。main.py が TTS（声の出し方）の指示を替えるのに使う
     dialect: str | None = None
 
 
@@ -101,6 +101,9 @@ class PlantConversation:
         self._person: Person | None = None  # 決まった相手。未確定・お客さんの間は None
         self._user_turns = 0  # このセッションで記録したユーザー発話の数（挨拶だけの起床は数えない）
         self._guest = False  # お客さんに決まったか。決まったら名前探しをやめる
+        # 植物が最後に言ったこと（表情タグなし）。次のユーザー発話の名前探しに渡し、渡したら消す。
+        # 「お名前は？」→「はなこ」のような、名前だけの答えを見分けやすくするため（最終レビュー I2）
+        self._last_plant_utterance: str | None = None
 
     @property
     def awake(self) -> bool:
@@ -163,10 +166,13 @@ class PlantConversation:
                 decided = await self._identify_turn(match.rest)
                 if decided is not None:
                     return TurnDecision("reply", match.rest, decided[0], decided[1])
-                return TurnDecision("reply", match.rest, instructions)
+                # 名乗っていない → 相手は未確定なので、声は標準語に戻す（下の greet と同じ理由）
+                return TurnDecision("reply", match.rest, instructions, "standard")
             # 「ふたまる」だけ → 植物から話しかける（挨拶なのでユーザー発話は記録しない）。
-            # 名乗る言葉が無いので名前探しもしない。挨拶のプロンプトには名前を聞く指示が入っている
-            return TurnDecision("greet", instructions=instructions)
+            # 名乗る言葉が無いので名前探しもしない。挨拶のプロンプトには名前を聞く指示が入っている。
+            # dialect="standard" を返すのは、前のセッションの相手の方言（例: 関西弁）が
+            # TTS の指示に残ったまま挨拶しないようにするため（最終レビュー I1）
+            return TurnDecision("greet", instructions=instructions, dialect="standard")
 
         # 3. 起きているとき: 発話を記録し、無言タイマーをリセットする
         self._record("user", text)
@@ -182,6 +188,7 @@ class PlantConversation:
         text = strip_tags(text).strip()
         if self.awake and text:
             self._record("plant", text)
+            self._last_plant_utterance = text
 
     async def _identify_turn(self, text: str) -> tuple[str, str] | None:
         """記録したユーザー発話 1 つぶん、話し相手の見分けを進める（設計: 話し相手の見分けと方言）。
@@ -197,6 +204,8 @@ class PlantConversation:
         例（3 回とも名乗らない）:
             1・2 回目 → None、3 回目 → (お客さんのプロンプト, "standard")、4 回目以降は名前探しをしない
         """
+        # 0. 植物の直前の発言を取り出して消す。ユーザーが続けて話したとき、古い発言を使い回さないため
+        previous_plant, self._last_plant_utterance = self._last_plant_utterance, None
         # 1. 相手が決まっている・お客さんに決まっているなら、もう何もしない（LLM も呼ばない）
         if self._person is not None or self._guest:
             return None
@@ -208,7 +217,8 @@ class PlantConversation:
         session_id = self._session_id  # 待っている間に眠ったかどうかを、後で確かめるため
         try:
             result = await asyncio.wait_for(
-                identify(self._complete_json, text, known), IDENTIFY_TIMEOUT
+                identify(self._complete_json, text, known, previous_plant=previous_plant),
+                IDENTIFY_TIMEOUT,
             )
         except TimeoutError:
             logger.warning("identification timed out (plant=%s)", self._plant_id)
@@ -219,7 +229,12 @@ class PlantConversation:
         # 4. 名乗った → その人に決める（初めての人なら登録する）
         if result is not None and result.kind == "known" and result.person_id is not None:
             return self._decide_person(self._store.get_person(result.person_id))
-        if result is not None and result.kind == "new" and result.name:
+        if (
+            result is not None
+            and result.kind == "new"
+            and result.name
+            and not self._is_plant_name(result.name)
+        ):
             return self._decide_person(
                 self._store.add_person(self._plant_id, result.name, self._clock())
             )
@@ -227,6 +242,19 @@ class PlantConversation:
         if self._user_turns >= MAX_NAME_TURNS:
             return self._become_guest()
         return None
+
+    def _is_plant_name(self, name: str) -> bool:
+        """name が植物自身の名前かウェイクワードなら True（最終レビュー M6）。
+
+        起きている間の「ふたまるって呼んでいい？」のような発話から、LLM が「ふたまる」を
+        新しい人の名前として取り出すことがある。植物の名前を人として登録しないために使う。
+        表記ゆれ（カタカナ・記号）は normalize() でそろえてから比べる。
+
+        例: "フタマル" → True、"二丸" → True、"はなこ" → False
+        """
+        target = normalize(name)
+        plant_name = self._store.get_plant(self._plant_id).name
+        return target in {normalize(w) for w in (plant_name, *self._wake_words)}
 
     def _decide_person(self, person: Person) -> tuple[str, str]:
         """話し相手を person に決め、その人用のシステムプロンプトと方言を返す。"""
@@ -251,7 +279,8 @@ class PlantConversation:
             self._store.latest_summary(self._plant_id, person.id),
             self._clock(),
             dialect=dialect,
-            person_name=person.name,
+            # CLI で登録した名前も入るので、改行を消し・長さを切ってからプロンプトに入れる
+            person_name=clean_name(person.name),
             ask_name=False,
         )
         return prompt, dialect
@@ -280,6 +309,7 @@ class PlantConversation:
         self._person = None
         self._user_turns = 0
         self._guest = False
+        self._last_plant_utterance = None
 
     def _record(self, role: str, text: str) -> None:
         """発話を 1 つ DB に保存する。role は "user"（持ち主）か "plant"（植物）。"""

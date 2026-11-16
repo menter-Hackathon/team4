@@ -8,11 +8,11 @@ uv run python -m scripts.people --plant-id a1 --person タロウ --auto
 from __future__ import annotations
 
 import argparse
-import os
 from datetime import datetime
 
 from dotenv import load_dotenv
 
+from agent.config import db_path_from_env
 from agent.plant.dialect import DIALECTS, resolve_dialect
 from agent.plant.store import Person, PlantStore
 from agent.plant.wake import normalize
@@ -101,5 +101,6 @@ if __name__ == "__main__":
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--db")
     known, _ = pre.parse_known_args()
-    db_path = known.db or os.environ.get("FUTAMARU_DB_PATH", "./data/futamaru.db")
+    # 環境変数は agent/config.py 経由でだけ読む（AGENTS.md）。LLM などの設定は要らないので DB の場所だけ読む
+    db_path = known.db or db_path_from_env()
     raise SystemExit(main(sys.argv[1:], PlantStore(db_path), datetime.now().astimezone()))
