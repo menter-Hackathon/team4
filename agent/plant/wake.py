@@ -56,8 +56,11 @@ def detect_wake(text: str, wake_words: Sequence[str]) -> WakeMatch | None:
         2. ウェイクワードの直後にある敬称と、繰り返しのウェイクワードを読み飛ばす
         3. 読み飛ばした位置から後ろを、元の text から切り出して rest にする
     """
-    # 1. joined は記号を消しているので位置が元の text とずれる。
-    #    rest を元の表記のまま切り出せるよう、各文字が text の何文字目から来たか（origin）を残す
+    # --- 1. 表記ゆれをなくした文字列 joined を作る ---
+    # 例: text = "フタマル、元気？" → joined = "ふたまる元気"（カタカナ→ひらがな、記号は消える）
+    # joined は記号を消した分だけ文字の位置が text とずれる。最後に rest を元の表記のまま
+    # 切り出したいので、joined の各文字が text の何文字目から来たかを origin に記録しておく。
+    # 例: text = "フタマル、元気？" → origin = [0, 1, 2, 3, 5, 6]（4 文字目の「、」は消えたので飛ぶ）
     normalized: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
@@ -66,28 +69,49 @@ def detect_wake(text: str, wake_words: Sequence[str]) -> WakeMatch | None:
             origin.append(i)
     joined = "".join(normalized)
 
+    # ウェイクワードの一覧も同じ方法で正規化する（"フタマル" と書いても "ふたまる" で探せるように）
     words = [w for w in (normalize(word) for word in wake_words) if w]
-    best: tuple[int, int] | None = None  # (開始位置, 終了位置) 正規化後
+
+    # joined の中でウェイクワードを探す。複数見つかったら、一番前にあるものを使う
+    best: tuple[int, int] | None = None  # (開始位置, 終了位置)。joined の中での位置
     for w in words:
-        pos = joined.find(w)
+        pos = joined.find(w)  # 見つからなければ -1
         if pos >= 0 and (best is None or pos < best[0]):
             best = (pos, pos + len(w))
     if best is None:
-        return None
+        return None  # ウェイクワードが無い → 起こされていない
 
-    # 2. end は joined の中で「ここから後ろが発話の中身」になる位置。敬称・繰り返しがある限り後ろへ進める
+    # --- 2. ウェイクワードの直後にある敬称と、繰り返しのウェイクワードを読み飛ばす（#6） ---
+    # end は joined の中で「ここから後ろが発話の中身」になる位置。読み飛ばすたびに後ろへ進める。
+    # 例: "ふたまるちゃん、ふたまるちゃん、ただいま"
+    #     → 「ちゃん」→「ふたまる」→「ちゃん」の順に読み飛ばし、end は「ただいま」の手前になる
     end = best[1]
     while True:
-        # 「ふたまる、さんぽ」の「さん」は敬称ではないので、区切りを挟まず続くときだけ取る
+        # 敬称は、ウェイクワードに区切り（読点・空白など）を挟まず続くときだけ取る。
+        # 「ふたまる、さんぽ行こう」の「さん」は「さんぽ」の一部なので取ってはいけない。
+        # origin が 1 つずつ並んでいれば、text の上でも間に何も挟まっていない（＝続いている）
         adjacent = end < len(joined) and origin[end] == origin[end - 1] + 1
-        suffix = next((h for h in HONORIFICS if adjacent and joined.startswith(h, end)), None)
-        suffix = suffix or next((w for w in words if joined.startswith(w, end)), None)
+
+        suffix: str | None = None  # 今回読み飛ばす文字列
+        if adjacent:
+            for h in HONORIFICS:
+                if joined.startswith(h, end):  # end の位置から h が始まっているか
+                    suffix = h
+                    break
         if suffix is None:
-            break
+            # 「ふたまる、ふたまる」のような繰り返しは、区切りを挟んでいても読み飛ばす
+            for w in words:
+                if joined.startswith(w, end):
+                    suffix = w
+                    break
+        if suffix is None:
+            break  # もう読み飛ばすものが無い
         end += len(suffix)
 
-    # 3. 元の text から切り出し、先頭の読点・空白などと末尾の空白を落とす
+    # --- 3. 読み飛ばした位置から後ろを、元の text から切り出す ---
+    # origin[end - 1] は「読み飛ばした最後の文字」が text の何文字目か。その次の文字から後ろが rest
     rest = text[origin[end - 1] + 1 :]
+    # 先頭の読点・空白など（正規化すると消える文字）を飛ばし、末尾の空白も落とす
     i = 0
     while i < len(rest) and not _normalize_char(rest[i]):
         i += 1
