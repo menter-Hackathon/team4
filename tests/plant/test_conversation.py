@@ -1,9 +1,12 @@
 import asyncio
+import json
 from datetime import datetime, timedelta
 
 import pytest
 
+from agent.plant import conversation as conversation_module
 from agent.plant.conversation import PlantConversation
+from agent.plant.prompt import ASK_NAME_INSTRUCTION
 from agent.plant.store import PlantStore
 from agent.plant.timeutil import JST
 from tests.fakes import FakeClock, FakeCompleter, reflection_json
@@ -151,7 +154,8 @@ async def test_tick_none_while_sleeping(conv, clock):
     assert await conv.tick() == "none"
 
 
-async def test_next_wake_uses_updated_summary(conv, clock):
+async def test_next_wake_uses_updated_summary(conv, clock, completer):
+    completer.responses.insert(0, identify_json())  # 名前探しの応答（名乗っていない）
     await conv.on_user_turn("ふたまる、テストだった")
     clock.advance(60)
     await conv.tick()
@@ -161,7 +165,9 @@ async def test_next_wake_uses_updated_summary(conv, clock):
     assert "前回の会話: 会話0" in d.instructions
 
 
-async def test_wake_while_reflection_pending(store, clock, sent):
+async def test_wake_while_reflection_pending(store, clock, sent, monkeypatch):
+    # 名前探しも gate で止まるので、すぐ時間切れにして「名乗っていない」扱いにする
+    monkeypatch.setattr(conversation_module, "IDENTIFY_TIMEOUT", 0.01)
     gate = asyncio.Event()
     completer = FakeCompleter([reflection_json()], gate=gate)
 
@@ -174,7 +180,9 @@ async def test_wake_while_reflection_pending(store, clock, sent):
     clock.advance(60)
     assert await c.tick() == "slept"
     await settle()
-    assert len(completer.calls) == 1  # reflection が LLM 待ちで止まっている
+    assert (
+        len(completer.calls) == 2
+    )  # 名前探し（時間切れ）の後、reflection が LLM 待ちで止まっている
     d = await c.on_user_turn("ふたまる")
     assert d.kind == "greet" and "前回の会話" not in d.instructions
     gate.set()
@@ -275,7 +283,7 @@ async def test_recovery_is_capped(store, clock, sent):
 
 
 async def test_session_ending_right_after_start_is_reflected_once(store, clock, sent):
-    completer = FakeCompleter([reflection_json() for _ in range(5)])
+    completer = FakeCompleter([identify_json()] + [reflection_json() for _ in range(5)])
 
     async def send(name):
         sent.append(name)
@@ -286,4 +294,103 @@ async def test_session_ending_right_after_start_is_reflected_once(store, clock, 
     clock.advance(60)
     await c.tick()
     await c.close()
-    assert len(completer.calls) == 1
+    assert len(completer.calls) == 2  # 名前探し 1 回 + reflection 1 回（二重に振り返らない）
+
+
+# --- 話し相手の見分け（Task 5） ---
+def identify_json(kind="none", person_id=None, name=None) -> str:
+    """名前探し（people.identify）の LLM 応答を作る。"""
+    return json.dumps({"kind": kind, "person_id": person_id, "name": name}, ensure_ascii=False)
+
+
+async def make_started(store, clock, completer):
+    async def send(name):
+        pass
+
+    c = make_conv(store, clock, completer, send)
+    await c.start()
+    await settle()
+    return c
+
+
+async def test_wake_prompt_asks_for_a_name(store, clock):
+    c = await make_started(store, clock, FakeCompleter([]))
+    d = await c.on_user_turn("ふたまる")
+    assert d.kind == "greet" and ASK_NAME_INSTRUCTION in d.instructions
+    assert d.dialect is None
+    assert c._complete_json.calls == []  # 挨拶だけでは名前探しをしない
+    await c.close()
+
+
+async def test_named_wake_switches_to_that_persons_prompt(store, clock):
+    store.get_or_create_plant("a", T0)
+    taro = store.add_person("a", "たろう", T0)
+    store.set_dialect_override(taro.id, "kansai")
+    completer = FakeCompleter([identify_json("known", taro.id), reflection_json()])
+    c = await make_started(store, clock, completer)
+    d = await c.on_user_turn("ふたまる、たろうだよ")
+    assert (d.kind, d.text) == ("reply", "たろうだよ")
+    assert "関西弁" in d.instructions and "今話している相手は たろう。" in d.instructions
+    assert ASK_NAME_INSTRUCTION not in d.instructions
+    assert d.dialect == "kansai"
+    assert store.get_session(current_sid(store)).person_id == taro.id
+    await c.close()
+
+
+async def test_new_person_is_registered(store, clock):
+    completer = FakeCompleter([identify_json("new", name="はなこ"), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    d = await c.on_user_turn("はなこです")
+    people = store.get_people("a")
+    assert [p.name for p in people] == ["はなこ"]
+    assert store.get_session(current_sid(store)).person_id == people[0].id
+    assert "今話している相手は はなこ。" in d.instructions and d.dialect == "standard"
+    await c.close()
+
+
+async def test_becomes_guest_after_three_unnamed_turns_and_stops_identifying(store, clock):
+    completer = FakeCompleter([identify_json() for _ in range(3)] + [reflection_json()])
+    c = await make_started(store, clock, completer)
+    d1 = await c.on_user_turn("ふたまる、ただいま")
+    assert ASK_NAME_INSTRUCTION in d1.instructions and d1.dialect is None
+    d2 = await c.on_user_turn("今日は晴れ")
+    assert (d2.instructions, d2.dialect) == (None, None)
+    d3 = await c.on_user_turn("カレー食べた")
+    assert d3.instructions and ASK_NAME_INSTRUCTION not in d3.instructions
+    assert d3.dialect == "standard"
+    assert len(completer.calls) == 3
+    d4 = await c.on_user_turn("ぼくはたろう")
+    assert (d4.kind, d4.instructions, d4.dialect) == ("reply", None, None)
+    assert len(completer.calls) == 3  # お客さんになったら名前探しを呼ばない
+    assert store.get_session(current_sid(store)).person_id is None
+    await c.close()
+
+
+async def test_slow_identification_does_not_block_reply(store, clock, monkeypatch):
+    monkeypatch.setattr(conversation_module, "IDENTIFY_TIMEOUT", 0.05)
+    gate = asyncio.Event()
+    completer = FakeCompleter([identify_json(), reflection_json()], gate=gate)
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    d = await asyncio.wait_for(c.on_user_turn("ただいま"), timeout=1)
+    assert (d.kind, d.text) == ("reply", "ただいま")
+    gate.set()
+    await c.close()
+
+
+async def test_sleep_forgets_the_person(store, clock):
+    store.get_or_create_plant("a", T0)
+    taro = store.add_person("a", "たろう", T0)
+    completer = FakeCompleter([identify_json("known", taro.id), reflection_json()])
+    c = await make_started(store, clock, completer)
+    d = await c.on_user_turn("ふたまる、たろうだよ")
+    assert ASK_NAME_INSTRUCTION not in d.instructions
+    clock.advance(60)
+    assert await c.tick() == "slept"
+    await c.wait_reflections()
+    d = await c.on_user_turn("ふたまる")
+    assert ASK_NAME_INSTRUCTION in d.instructions and "たろう" not in d.instructions
+    assert "テストの話をした" not in d.instructions  # たろうとの要約はお客さんに見せない
+    assert c._person is None and c._user_turns == 0 and not c._guest
+    await c.close()
