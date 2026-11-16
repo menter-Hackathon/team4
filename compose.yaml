@@ -5,12 +5,12 @@
 #   docker compose down        … 停止
 #
 # 手順書: docs/deploy.md
-# 前提: NVIDIA の GPU（24GB 以上）がある PC。鉢（ESP32）とは LiveKit Cloud 経由でつながる。
+# 前提: NVIDIA の GPU（24GB 以上）と、ドライバ 580 以上（CUDA 13.0 対応）がある PC。鉢（ESP32）とは LiveKit Cloud 経由でつながる。
 #
 # 中身:
 #   llm      … Gemma 4 E4B を動かす（vLLM、GPU を使う）
 #   stt      … kotoba-whisper で声を文字にする（Speaches、GPU を使う）
-#   stt-init … 起動時に一度だけ動き、stt に音声認識のモデルをダウンロードさせて終わる
+#   stt-init … 起動時に一度だけ動き、stt に音声認識のモデルをダウンロード・読み込みさせて終わる
 #   agent    … ふたまるのエージェント。llm の準備と stt-init の完了を待ってから起動する
 
 # GPU を使うサービスに共通の設定。NVIDIA の GPU を全部見えるようにする
@@ -26,11 +26,13 @@ x-gpu: &gpu
 services:
   llm:
     <<: *gpu
-    # vLLM 公式イメージ。Gemma 4 に対応した 0.19 以上の版を固定する
+    # vLLM 公式イメージ。Gemma 4 に対応した 0.19 以上の版を固定する。
+    # この版は CUDA 13.0 で作られているので、NVIDIA ドライバ 580 以上が必要（docs/deploy.md）
     image: vllm/vllm-openai:v0.33.0
     # 思考モードは使わない（enable_thinking を渡さない。仕様 §8.1）
     # --gpu-memory-utilization 0.8: GPU メモリの 8 割まで使う。残りを stt に回す
-    # --max-model-len 16384: 一度に扱える文章の長さの上限。メモリが足りなければ下げる（docs/deploy.md）
+    #   （E4B の重みだけで約 16GB あるので、24GB の GPU ではこれより大きく下げられない）
+    # --max-model-len 16384: 一度に扱える文章の長さの上限。メモリ不足のときの調整方法は docs/deploy.md
     command:
       - google/gemma-4-E4B-it
       - --max-model-len
@@ -38,8 +40,9 @@ services:
       - --gpu-memory-utilization
       - "0.8"
     environment:
-      # Gemma 4 のダウンロードに必要な Hugging Face のトークン（.env に書く）
-      HF_TOKEN: ${HF_TOKEN:?.env に HF_TOKEN を書いてください（docs/deploy.md）}
+      # Hugging Face のトークン（任意）。Gemma 4 E4B は同意不要の公開モデルなので、空でもダウンロードできる。
+      # 書くと Hugging Face の回数制限に当たりにくくなる
+      HF_TOKEN: ${HF_TOKEN:-}
     # vLLM の推奨設定。プロセス間で共有メモリを使えるようにする
     ipc: host
     volumes:
@@ -66,23 +69,18 @@ services:
     restart: unless-stopped
 
   stt-init:
-    image: curlimages/curl:8.23.0
-    # stt が起動するまで 5 秒おきに最大 10 分再試行しながら、モデルのダウンロードを頼む。
-    # 成功したら終わる（失敗したらエラーで止まり、agent は起動しない）
-    command:
-      - --fail
-      - --silent
-      - --show-error
-      - --retry
-      - "120"
-      - --retry-delay
-      - "5"
-      - --retry-all-errors
-      - --max-time
-      - "1800"
-      - -X
-      - POST
-      - http://stt:8000/v1/models/${DOCKER_STT_MODEL:-kotoba-tech/kotoba-whisper-v2.0-faster}
+    # stt と同じイメージ（ダウンロード済み）の Python で scripts/stt_init.py を動かす。
+    # 1. モデルのダウンロードを頼む（stt が起動するまで最大 10 分ほど再試行）
+    # 2. 無音を一度文字起こしさせて、モデルを GPU に読み込ませる（最初の「ふたまる」が遅れないように）
+    # 成功したら終わる。失敗したらエラーで止まり、agent は起動しない
+    image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda
+    entrypoint: ["python", "/stt_init.py"]
+    command: []
+    environment:
+      STT_URL: http://stt:8000
+      STT_MODEL: ${DOCKER_STT_MODEL:-kotoba-tech/kotoba-whisper-v2.0-faster}
+    volumes:
+      - ./scripts/stt_init.py:/stt_init.py:ro
     depends_on:
       - stt
     restart: "no"
