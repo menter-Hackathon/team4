@@ -30,6 +30,9 @@ class Config:
     llm_base_url: str  # LLM サーバーの URL（例: http://localhost:8000/v1）
     llm_model: str  # LLM のモデル名（例: google/gemma-4-E4B-it）
     llm_api_key: str  # 自前のサーバーなら何でもよい（"EMPTY"）
+    # LLM に送る reasoning_effort（例: "none"）。None なら送らない。
+    # Ollama の Gemma 4 は思考モードが既定でオンなので、"none" にして切る（#1・#37）
+    llm_reasoning_effort: str | None
     stt_base_url: str  # STT サーバーの URL
     stt_model: str  # STT のモデル名
     stt_api_key: str
@@ -87,6 +90,7 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         llm_base_url=required("LLM_BASE_URL"),
         llm_model=required("LLM_MODEL"),
         llm_api_key=get("LLM_API_KEY", "EMPTY"),
+        llm_reasoning_effort=get("LLM_REASONING_EFFORT"),
         stt_base_url=required("STT_BASE_URL"),
         stt_model=get("STT_MODEL", "kotoba-tech/kotoba-whisper-v2.0-faster"),
         stt_api_key=get("STT_API_KEY", "EMPTY"),

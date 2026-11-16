@@ -291,7 +291,7 @@ URL・モデル名はすべて環境変数で指定する。開発時はロー�
 
 | 項目 | 内容 |
 |---|---|
-| 環境変数 | `LLM_BASE_URL`, `LLM_MODEL` |
+| 環境変数 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`（任意。Ollama の Gemma 4 では `none` にして思考モードを切る） |
 | エンドポイント | `POST {LLM_BASE_URL}/chat/completions`（OpenAI 互換、ストリーミング） |
 | vLLM バージョン | 0.19 以上（Gemma 4 のネイティブ実装が入った版） |
 | 起動例 | `vllm serve google/gemma-4-E4B-it --max-model-len 32768 --gpu-memory-utilization 0.80`（STT の分を残す） |
