@@ -54,7 +54,12 @@ class FutamaruAgent(Agent):
         self._conv = conv
 
     async def end_session(self) -> None:
-        """ESP32 が退出したときの後始末。次に起きたとき前の会話を引きずらないよう履歴も捨てる（#5）。"""
+        """ESP32 が退出したときの後始末（#5）。
+
+        1. 会話を閉じる。起きていれば眠らせ、そのセッションの振り返り（記憶・性格の更新）を走らせる
+        2. LLM に渡す会話履歴（チャットコンテキスト）を空にする。黙って眠ったときはティッカーが空にするが、
+           途中で切断したときはここで空にしないと、次に起きたとき前の会話が混ざる
+        """
         await self._conv.close()
         await self.update_chat_ctx(ChatContext.empty())
 
