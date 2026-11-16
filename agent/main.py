@@ -39,6 +39,7 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     llm,
+    room_io,
     tts,
 )
 from livekit.plugins import silero
@@ -190,6 +191,18 @@ def direction_ctx(chat_ctx: ChatContext, direction: str) -> ChatContext:
     return ctx
 
 
+def room_options() -> room_io.RoomOptions:
+    """ルームでの音声のやりとりの設定を作る。
+
+    close_on_disconnect=False: ESP32 がルームを出ても、エージェントのセッションを閉じない。
+    LiveKit の既定（True）だと、ESP32 が出た時点でセッションが閉じる。一方でエージェント自身は、
+    ルームが空になるまで（約 20 秒）ルームに残る。その間に ESP32 が入り直すと、新しいエージェントは
+    呼ばれず、閉じたセッションのまま何も聞かない（2026-11-17 の通し試験で、5 分以上黙ったままだった）。
+    ESP32 が出たときの後始末（眠らせる・振り返り・会話履歴を空にする）は、_on_leave が行う（#5）。
+    """
+    return room_io.RoomOptions(close_on_disconnect=False)
+
+
 def prewarm(proc: JobProcess) -> None:
     """エージェントのプロセスが起動したときに 1 回だけ呼ばれる下準備。"""
     # VAD（声が出ているかを判定するモデル）は読み込みに時間がかかるので、会話が始まる前に読んでおく
@@ -336,7 +349,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # --- 5. ルームに参加して会話を始める ---
     await ctx.connect()
     await conv.start()
-    await session.start(agent=agent, room=ctx.room)
+    await session.start(agent=agent, room=ctx.room, room_options=room_options())
 
     # --- 6. 1 秒ごとに無言タイマーを確かめる ---
     async def ticker() -> None:

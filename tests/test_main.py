@@ -127,3 +127,8 @@ async def test_end_session_closes_conversation_and_forgets_history():
     # 会話が閉じられ（＝振り返りが走る）、次に起きたとき前の会話が混ざらないよう履歴が空になる
     assert conv.closed
     assert agent.chat_ctx.items == []
+
+
+def test_room_options_keep_session_when_device_leaves():
+    # ESP32 が出て入り直しても、同じセッションで話を続けられるようにする
+    assert main.room_options().close_on_disconnect is False
