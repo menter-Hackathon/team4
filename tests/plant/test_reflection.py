@@ -177,3 +177,63 @@ async def test_recover_repairs_and_reflects(store):
     await recover(store, "a", FakeCompleter([VALID]), NOW)
     s = store.get_session(sid)
     assert s.ended_at is not None and s.reflected
+
+
+def test_owner_dialect_is_parsed():
+    assert parse_reflection(reflection_json(dialect="kansai")).owner_dialect == "kansai"
+
+
+@pytest.mark.parametrize("dialect", [None, "osaka", 3])
+def test_missing_or_invalid_dialect_is_unknown(dialect):
+    data = json.loads(reflection_json())
+    if dialect is None:
+        del data["owner_dialect"]
+    else:
+        data["owner_dialect"] = dialect
+    assert parse_reflection(json.dumps(data)).owner_dialect == "unknown"
+
+
+def _person_session(store, person, text):
+    """person の会話を 1 つ作って終了させ、セッション id を返す（person=None はゲスト）。"""
+    sid = store.start_session("a", NOW - timedelta(minutes=5))
+    if person is not None:
+        store.set_session_person(sid, person.id)
+    store.add_utterance(sid, "user", text, NOW - timedelta(minutes=4))
+    store.end_session(sid, NOW - timedelta(minutes=3))
+    return sid
+
+
+async def test_reflection_shows_only_this_persons_and_shared_memories(store):
+    taro = store.add_person("a", "たろう", NOW)
+    hanako = store.add_person("a", "はなこ", NOW)
+    store.apply_reflection(
+        "a",
+        _person_session(store, hanako, "ピアノ弾くよ"),
+        "s",
+        [NewMemory("はなこはピアノが好き", "preference", 0.5)],
+        [],
+        store.get_plant("a").traits,
+        NOW,
+        person_id=hanako.id,
+    )
+    sid = _person_session(store, taro, "こんにちは")
+    fake = FakeCompleter([VALID])
+    await reflect_session(store, "a", sid, fake, NOW)
+    assert "はなこはピアノが好き" not in fake.calls[0][0][-1]["content"]
+
+
+async def test_person_session_updates_person_traits_and_dialect(store):
+    taro = store.add_person("a", "たろう", NOW)
+    plant_before = store.get_plant("a").traits
+    sid = _person_session(store, taro, "今日はええ天気やなあ")
+    fake = FakeCompleter([reflection_json(deltas={"affection": 0.05}, dialect="kansai")])
+    await reflect_session(store, "a", sid, fake, NOW)
+    assert store.get_person(taro.id).traits.affection == pytest.approx(0.55)
+    assert store.get_plant("a").traits == plant_before
+    assert store.recent_dialects(taro.id) == ["kansai"]
+
+
+async def test_guest_session_updates_plant_traits(store):
+    sid = _person_session(store, None, "こんにちは")
+    await reflect_session(store, "a", sid, FakeCompleter([VALID]), NOW)
+    assert store.get_plant("a").traits.affection == pytest.approx(0.53)
