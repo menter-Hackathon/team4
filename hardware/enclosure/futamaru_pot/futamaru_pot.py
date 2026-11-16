@@ -87,7 +87,7 @@ PARAMS = [
     ("mag_boss_len", 5.5, "本体側の磁石のボスの長さ"),
     # --- 目（チャムさんの案の、黒く刷って顔のふたに貼る立体の目） ---
     ("eye_x", 22.0, "目の中心・横（顔の中心から）"),
-    ("eye_dz", 0.0, "目の中心の高さ（comp_zc から）。口の点との間を 4mm 以上あける"),
+    ("eye_dz", -3.0, "目の中心の高さ（comp_zc から）。口の端との間を 3mm 以上あける"),
     ("eye_w", 18.0, "目の幅"),
     ("eye_h", 22.0, "目の高さ"),
     ("eye_t", 5.5, "目の厚さ"),
@@ -100,11 +100,15 @@ PARAMS = [
     ("spk_front", -9.8, "基準面からスピーカーの前面まで（マイナスは前）"),
     ("spk_t", 4.0, "スピーカーの厚さ（設計包絡）"),
     ("ring_id", 20.6, "スピーカーのポケットの直径"),
-    ("grill_d", 1.8, "スピーカー穴の直径"),
-    ("grill_p", 4.0, "スピーカー穴の間隔"),
     ("mic_dx", -13.6, "マイクの穴・横（推定。実物で確認する）"),
-    ("mic_dz", -19.3, "マイクの縦の位置（推定。実物で確認する）。点の段はスピーカーにそろえる"),
+    ("mic_dz", -19.3, "マイクの縦の位置（推定。実物で確認する）"),
     ("mic_front", -10.0, "基準面からマイクのポケットの底まで（マイナスは前）"),
+    ("mic_pocket", 10.0, "マイクのポケットの一辺（口の溝の左の端をこの中に通す）"),
+    # --- 口（スピーカーとマイクの音の通り道を兼ねる、にっこりした弧の溝） ---
+    ("mouth_w", 26.0, "口の幅（両端の丸の中心どうし）。左の端をマイクの前に置く"),
+    ("mouth_drop", 7.0, "口の両端から、いちばん下までの深さ（大きいほど笑う）"),
+    ("mouth_dz", -19.3, "口の両端の高さ（comp_zc から）。マイクの高さにそろえる"),
+    ("mouth_t", 3.0, "口の溝の太さ"),
     # --- XIAO ESP32S3 Sense とアンプ（MAX98357A） ---
     ("xiao_cx", -13.0, "XIAO の中心・横（USB は下向き）"),
     ("xiao_cz", -19.8, "XIAO の中心・縦"),
@@ -152,9 +156,9 @@ FOOT_ANGLE = 32.0
 ARM_PEGS_DZ = (-6.0, 10.0)
 # 磁石の位置（丸い顔の中心から、mm）。スピーカーのリング・マイクのポケット・顔のくぼみの縁を避けた場所
 MAG_POINTS = [(34.0, 0.0), (-34.0, 0.0), (24.0, -24.0), (-24.0, -24.0)]
-# 口の点の、いちばん上の段の列の数と段の数。下の段ほど短くして、にっこりした口の形にする
-GRILL_COLS = 9
-GRILL_ROWS = 4
+# 色（R, G, B）。チャムさんの案に合わせて、体はクリーム色、目は黒
+BODY_RGB = (237, 230, 214)
+EYE_RGB = (25, 25, 25)
 
 _app: adsk.core.Application | None = None
 _design: adsk.fusion.Design | None = None
@@ -821,31 +825,53 @@ def build_plate(comp: adsk.fusion.Component) -> adsk.fusion.BRepBody | None:
 
     def mic():
         s = Sk(comp, "y", back, "マイクのポケット")
-        side = "2 * grill_p + grill_d + 1 mm"
-        s.rect({"x": "mic_dx", "z": "comp_zc + spk_dz"}, {"x": side, "z": side})
+        s.rect({"x": "mic_dx", "z": "comp_zc + mic_dz"}, {"x": "mic_pocket", "z": "mic_pocket"})
         extrude(s, "plate_t - mic_front", "-y", CUT, [body], "マイクのポケット")
 
     step("マイクのポケット", mic)
 
-    # スピーカーとマイクの穴は、顔の中心にそろえた 1 つの「口」にまとめる（顔に模様が 1 つだけ出る）。
-    # 点はふたの背面から表まで抜くので、ポケットの外の点もそのまま部屋へ通る
-    def grille():
-        s = Sk(comp, "y", back, "口の点")
-        for ix, iz in mouth_holes():
-            s.circle(
-                {"x": f"({ix}) * grill_p", "z": f"comp_zc + spk_dz + ({iz}) * grill_p"}, "grill_d"
-            )
-        extrude(s, "20 mm", "-y", CUT, [body], "口の点")
-        gp, z0 = ev("grill_p"), ev("comp_zc + spk_dz")
-        pts = [(ix * gp, z0 + iz * gp) for ix, iz in mouth_holes()]
-        mx, mz = ev("mic_dx"), ev("comp_zc + mic_dz")
-        if min(math.hypot(x - mx, z - mz) for x, z in pts) > gp:
-            log("WARN マイクの位置が口の点から外れている（mic_dx・mic_dz を確認）")
-        sx, sz, sr = ev("spk_dx"), ev("comp_zc + spk_dz"), ev("ring_id") / 2
-        if sum(math.hypot(x - sx, z - sz) < sr for x, z in pts) < 9:
-            log("WARN スピーカーの前の点が 9 個より少ない（spk_dx・spk_dz を確認）")
+    # スピーカーとマイクの音は、にっこりした弧の溝 1 本（口）から出入りさせる。溝はスピーカーの前面の
+    # 少し奥から表まで掘るので、スピーカーとマイクのポケットの前では抜け、ほかのところは深い溝になる
+    # （背面から抜くと、スピーカーの抜け止めの爪まで切ってしまう）
+    def mouth():
+        s = Sk(comp, "y", "-face_y + spk_front + 0.5 mm", "口")
+        zc, r, phi0, t = mouth_geometry()
 
-    step("口の点", grille)
+        def p(rr: float, ph: float) -> adsk.core.Point3D:
+            return s.sp({"x": rr * math.sin(ph), "z": zc - rr * math.cos(ph)})
+
+        arcs = s.sk.sketchCurves.sketchArcs
+        sides = [
+            arcs.addByThreePoints(p(rr, -phi0), p(rr, 0.0), p(rr, phi0))
+            for rr in (r + t / 2, r - t / 2)
+        ]
+        ends = []
+        for sg in (1, -1):
+            ex, ez = r * math.sin(sg * phi0), zc - r * math.cos(phi0)
+            tip = s.sp({"x": ex + t / 2 * sg * math.cos(phi0), "z": ez + t / 2 * math.sin(phi0)})
+            ends.append(
+                arcs.addByThreePoints(p(r - t / 2, sg * phi0), tip, p(r + t / 2, sg * phi0))
+            )
+        gc = s.sk.geometricConstraints
+        side_pts = [q for a in sides for q in (a.startSketchPoint, a.endSketchPoint)]
+        for a in ends:
+            for q in (a.startSketchPoint, a.endSketchPoint):
+                gc.addCoincident(
+                    q, min(side_pts, key=lambda o, q=q: o.geometry.distanceTo(q.geometry))
+                )
+        extrude(s, "20 mm", "-y", CUT, [body], "口")
+        mx, mz = ev("mic_dx"), ev("comp_zc + mic_dz")
+        if mouth_dist(mx, mz) > ev("mic_pocket") / 2 - t:
+            log("WARN 口の溝がマイクのポケットを通っていない（mic_dx・mic_dz・mouth_* を確認）")
+        sx, sz, sr = ev("spk_dx"), ev("comp_zc + spk_dz"), ev("ring_id") / 2 - t / 2
+        n = 400
+        over = sum(
+            math.hypot(r * math.sin(ph) - sx, zc - r * math.cos(ph) - sz) < sr
+            for ph in (-phi0 + 2 * phi0 * k / n for k in range(n + 1))
+        )
+        log(f"MOUTH スピーカーの前で抜けている口の長さ {over / n * 2 * phi0 * r * 10:.1f} mm")
+
+    step("口", mouth)
 
     def back_holes():
         s = Sk(comp, "y", back, "磁石の穴")
@@ -947,29 +973,28 @@ def front_wall(body: adsk.fusion.BRepBody, x_cm: float, z_cm: float, y_start: fl
     return (y_start - y) * 10
 
 
-def mouth_holes() -> list[tuple[float, int]]:
-    """口の点の位置（grill_p を 1 とした、顔の中心とスピーカーの段からのずれ）。
-
-    いちばん上の段（スピーカーの 1 段上）を GRILL_COLS 列にして、下の段ほど楕円に沿って短くする。
-    上が平らで下が丸い、にっこりした口の形になる。
-    """
-    half = (GRILL_COLS - 1) / 2
-    # 楕円は点の外側に 1/4 間隔のゆとりを取る（端の点が楕円の線ぎりぎりで消えないように）
-    a, b = half + 0.25, GRILL_ROWS - 0.75
-    out = []
-    for row in range(GRILL_ROWS):
-        reach = a * math.sqrt(max(0.0, 1 - (row / b) ** 2))
-        out += [(i - half, 1 - row) for i in range(GRILL_COLS) if abs(i - half) <= reach]
-    return out
+def mouth_geometry() -> tuple[float, float, float, float]:
+    """口の溝の中心線（円弧）の、円の中心の高さ・半径・両端の角度（真下から）・溝の太さ。長さは cm。"""
+    half, drop = ev("mouth_w") / 2, ev("mouth_drop")
+    r = (half**2 + drop**2) / (2 * drop)
+    zc = ev("comp_zc + mouth_dz") - drop + r
+    return zc, r, math.asin(half / r), ev("mouth_t")
 
 
-def on_grille(x_cm: float, z_cm: float) -> bool:
-    """口の点の穴（とそのまわり 0.2mm）の上なら True。穴の上で測ると厚さが 0 に見えるので外す。"""
-    gp, z0 = ev("grill_p"), ev("comp_zc + spk_dz")
-    reach = ev("grill_d") / 2 + 0.02
-    return any(
-        math.hypot(x_cm - ix * gp, z_cm - (z0 + iz * gp)) < reach for ix, iz in mouth_holes()
+def mouth_dist(x_cm: float, z_cm: float) -> float:
+    """点 (x, z) から口の溝の中心線までの距離（cm）。"""
+    zc, r, phi0, _ = mouth_geometry()
+    if abs(math.atan2(x_cm, zc - z_cm)) <= phi0:
+        return abs(math.hypot(x_cm, z_cm - zc) - r)
+    return min(
+        math.hypot(x_cm - r * math.sin(sg * phi0), z_cm - (zc - r * math.cos(phi0)))
+        for sg in (1, -1)
     )
+
+
+def on_mouth(x_cm: float, z_cm: float) -> bool:
+    """口の溝（とそのまわり 0.2mm）の上なら True。溝の上で測ると厚さが 0 に見えるので外す。"""
+    return mouth_dist(x_cm, z_cm) < ev("mouth_t") / 2 + 0.02
 
 
 def check_front_walls(cap: adsk.fusion.BRepBody) -> None:
@@ -983,15 +1008,14 @@ def check_front_walls(cap: adsk.fusion.BRepBody) -> None:
             a = 2 * math.pi * k / 12
             # ふちから 1mm 内側（ポケットの底が残っているところ）で測る
             px, pz = cx + (r - 0.1) * math.cos(a), cz + (r - 0.1) * math.sin(a)
-            if not on_grille(px, pz):
+            if not on_mouth(px, pz):
                 vals.append(front_wall(cap, px, pz, y0))
         log(f"WALL {label}: 最小 {min(vals):.2f} mm / 最大 {max(vals):.2f} mm")
-    # マイクの前は、点の穴にかからないよう段と段の間（点の中心から上下 grill_p / 2）で測る
+    # マイクの前は、ポケットの中の口の溝にかからないところで測る
     y0 = ev("-face_y + mic_front")
-    mx, mz, gp = ev("mic_dx"), ev("comp_zc + spk_dz"), ev("grill_p")
-    mic = [
-        front_wall(cap, mx + dx, mz + dz * gp / 2, y0) for dx in (-0.3, 0.0, 0.3) for dz in (-1, 1)
-    ]
+    mx, mz = ev("mic_dx"), ev("comp_zc + mic_dz")
+    pts = [(mx + dx, mz + dz) for dx in (-0.3, 0.0, 0.3) for dz in (-0.3, 0.0, 0.3)]
+    mic = [front_wall(cap, x, z, y0) for x, z in pts if not on_mouth(x, z)]
     log(f"WALL マイクの前: 最小 {min(mic):.2f} mm / 最大 {max(mic):.2f} mm")
 
 
@@ -1228,6 +1252,49 @@ def bbox_mm(b: adsk.fusion.BRepBody) -> str:
     return f"X {x.minPoint.x * 10:.1f}..{x.maxPoint.x * 10:.1f}  Y {x.minPoint.y * 10:.1f}..{x.maxPoint.y * 10:.1f}  Z {x.minPoint.z * 10:.1f}..{x.maxPoint.z * 10:.1f}"
 
 
+def plastic(name: str, rgb: tuple[int, int, int]) -> adsk.core.Appearance:
+    """つや消しプラスチックの外観を、色を変えてデザインに入れる。
+
+    Fusion の表示の言語で外観ライブラリの名前が変わるので、日本語と英語の両方で探す。
+    """
+    have = _design.appearances.itemByName(name)
+    if have:
+        return have
+    base = None
+    for lib_name, app_name in (
+        ("Fusion 外観ライブラリ", "プラスチック - マット(白)"),
+        ("Fusion Appearance Library", "Plastic - Matte (White)"),
+    ):
+        lib = _app.materialLibraries.itemByName(lib_name)
+        if lib:
+            base = lib.appearances.itemByName(app_name)
+            if base:
+                break
+    if base is None:
+        raise RuntimeError("つや消しプラスチックの外観が見つからない")
+    a = _design.appearances.addByCopy(base, name)
+    for prop in a.appearanceProperties:
+        if isinstance(prop, adsk.core.ColorProperty) and prop.value is not None:
+            prop.value = adsk.core.Color.create(*rgb, 255)
+    return a
+
+
+def apply_colors(parts: list[adsk.fusion.Occurrence], eyes: list[adsk.fusion.Occurrence]) -> None:
+    """印刷する部品をクリーム色、目を黒にする（画像で、刷ったときの見た目に近づけるため）。"""
+    body_look, eye_look = plastic("ふたまる_クリーム", BODY_RGB), plastic("ふたまる_黒", EYE_RGB)
+    for occ in parts:
+        look = eye_look if occ in eyes else body_look
+        for b in occ.bRepBodies:
+            b.appearance = look
+            # 削り型から移った面ごとの外観が残ると、ふただけ色が違って見える
+            for f in b.faces:
+                if (
+                    f.appearanceSourceType
+                    == adsk.core.AppearanceSourceTypes.OverrideAppearanceSource
+                ):
+                    f.appearance = None
+
+
 def save_view(name: str, eye, target, up=(0, 0, 1)) -> None:
     vp = _app.activeViewport
     cam = vp.camera
@@ -1353,10 +1420,15 @@ def run(context) -> None:
 
         step("STL の書き出し", export)
 
+        step("色", lambda: apply_colors(printable, eye_occs))
+
         def views():
             for comp in [o.component for o in printable + [ref_occ]] + [root]:
                 for sk in comp.sketches:
                     sk.isVisible = False
+            # 部品の中で作業中のままだと、ほかの部品が半透明に写る。辺の線も消して、刷ったときの見た目に近づける
+            _design.activateRootComponent()
+            _app.activeViewport.visualStyle = adsk.core.VisualStyles.ShadedVisualStyle
             save_view("view_iso", (-30, -45, 25), (0, 0, 4.8))
             save_view("view_front", (0, -60, 4.8), (0, 0, 4.8))
             save_view("view_side_port", (45, 50, 6), (0, 0, 4.8))
