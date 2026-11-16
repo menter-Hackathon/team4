@@ -11,8 +11,10 @@ Fusion の［スクリプトとアドイン］から実行すると、新しい�
   電子部品は付けない。裏に浅い音の部屋を掘り、表には目を貼る平らな座面と、にっこりした弧にならべた
   口の穴がある。口の穴の奥には Voice Base のスピーカーの面が当たる
 - 目: 黒く刷って顔のふたの座面に貼る、楕円の立体の目（2 個）
-- 腕: 下がふっくらした卵形。本体の側面を卵形に掘り下げたくぼみに、平らな面をはめてピン 2 本で留める
-- 足: 正面から見てアーチ形の、背の高い足。本体の穴に差し込み、根元は本体の曲面に沿わせてある
+- 腕: 下がふっくらした卵形。本体の側面を卵形に掘り下げたくぼみに、平らな面をはめてダボピン 2 本で留める
+- 足: 正面から見てアーチ形の、背の高い足。ダボピン 1 本で本体に差し込み、根元は本体の曲面に沿わせてある
+- ダボピン: 腕と足を留める丸い棒（6 本）。腕・足と本体の両方に穴をあけ、別に立てて刷る。
+  ピンを腕や足と一体にすると、平らな面を下にして刷れないため
 - 参照部品: 干渉チェック用の部品の外形（印刷しない）。Voice Base・XIAO・ジャンパー線のコネクタ・
   USB-C のプラグとケーブルを、組み立てたときの位置に置く
 
@@ -59,7 +61,11 @@ PARAMS = [
     ("r_sh", 73.5, "肩の半径"),
     ("z_sh", 82.0, "肩の高さ"),
     ("r_top", 70.0, "上の縁の半径（鉢の穴の後ろの壁が薄くなりすぎない大きさ）"),
-    ("body_fillet_bot", 8.0, "底の角の丸み"),
+    (
+        "body_chamfer_bot",
+        4.0,
+        "底の角の面取り（45°。丸めると台のすぐ上が張り出してサポートが要るため面取りにする）",
+    ),
     ("body_fillet_top", 2.0, "上の縁の丸み（背面の壁が薄いので大きくできない）"),
     ("face_y", 60.5, "本体の中心から顔の基準面までの距離（部品の奥行きはここから測る）"),
     # --- 植物の鉢が入る穴（3号のプラ鉢: 上の直径 約90、下 約65、高さ 約80） ---
@@ -123,12 +129,12 @@ PARAMS = [
     ("usb_ch_d", 10.0, "プラグを通す縦の穴の奥行き"),
     ("cable_d", 4.5, "ケーブルの太さ"),
     ("groove_w", 7.0, "底の溝の幅"),
-    ("groove_h", 7.0, "底の溝の深さ"),
+    ("groove_h", 7.0, "底の溝の深さ（屋根のてっぺんまで。屋根は 45°）"),
     # --- 腕・足の差し込み ---
-    ("peg_d", 6.0, "差し込みピンの直径"),
-    ("peg_len", 7.0, "差し込みピンの長さ"),
-    ("peg_hole_d", 6.3, "差し込み穴の直径"),
-    ("peg_hole_depth", 8.0, "差し込み穴の深さ"),
+    ("peg_d", 6.0, "ダボピンの直径"),
+    ("peg_len", 15.0, "ダボピンの長さ（本体と腕・足の穴の深さの合計より 1mm 短く）"),
+    ("peg_hole_d", 6.3, "ダボピンの穴の直径"),
+    ("peg_hole_depth", 8.0, "ダボピンの穴の深さ（本体側と、腕・足の側のそれぞれ）"),
     ("arm_z", 40.0, "腕のいちばん太いところの高さ（低めにして、ぶら下がった手に見せる）"),
     ("arm_r", 19.0, "腕の前後の半径"),
     ("arm_top", 32.0, "いちばん太いところから腕の上の端まで（上は細くとがる）"),
@@ -358,6 +364,20 @@ def fillet(comp: adsk.fusion.Component, edges, r: str, name: str = ""):
     return f
 
 
+def chamfer(comp: adsk.fusion.Component, edges, d: str, name: str = ""):
+    coll = adsk.core.ObjectCollection.create()
+    for e in edges:
+        coll.add(e)
+    if coll.count == 0:
+        raise RuntimeError("面取りする辺が見つからない")
+    ci = comp.features.chamferFeatures.createInput2()
+    ci.chamferEdgeSets.addEqualDistanceChamferEdgeSet(coll, vi(d), True)
+    f = comp.features.chamferFeatures.add(ci)
+    if name:
+        f.name = name
+    return f
+
+
 def edges_along(faces, axis: str) -> list:
     """faces の辺のうち、axis 方向の直線の辺（ポケットや箱の角）。"""
     vec = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}[axis]
@@ -506,8 +526,11 @@ def make_barrel(comp: adsk.fusion.Component, parametric: bool, name: str) -> ads
     body = revolve(s, axis, NEW, name).bodies.item(0)
     body.name = name
     edges = circle_edges_at(body, 0.0)
-    fillet(
-        comp, [e for e in edges if e.geometry.radius > 1.0], "body_fillet_bot", f"{name}_底の丸み"
+    chamfer(
+        comp,
+        [e for e in edges if e.geometry.radius > 1.0],
+        "body_chamfer_bot",
+        f"{name}_底の面取り",
     )
     edges = circle_edges_at(body, ev("body_h"))
     fillet(comp, edges, "body_fillet_top", f"{name}_上の丸み")
@@ -743,12 +766,19 @@ def build_body(comp: adsk.fusion.Component) -> adsk.fusion.BRepBody | None:
         extrude(
             s, f"comp_zc + xiao_z0 + {USB_L + 2.0} mm", "+z", CUT, [body], "USBケーブルの縦の穴"
         )
-        s2 = Sk(comp, "z", "-1 mm", "USBケーブルの底の溝")
-        s2.rect(
-            {"x": "xiao_cx", "y": f"(({yc}) + 80 mm) / 2"},
-            {"x": "groove_w", "y": f"80 mm - ({yc})"},
+        # 溝の天井は 45° の屋根にする。平らな天井だと、スライサーが細長い溝の中にサポートを立て、取り出せない
+        s2 = Sk(comp, "y", yc, "USBケーブルの底の溝")
+        cx, w, h = ev("xiao_cx"), ev("groove_w") / 2, ev("groove_h")
+        eave = h - w + 0.1
+        pts = [(cx - w, -0.1), (cx + w, -0.1), (cx + w, eave), (cx, eave + w), (cx - w, eave)]
+        lines = s2.sk.sketchCurves.sketchLines
+        first = prev = lines.addByTwoPoints(
+            s2.sp({"x": pts[0][0], "z": pts[0][1]}), s2.sp({"x": pts[1][0], "z": pts[1][1]})
         )
-        extrude(s2, "groove_h + 1 mm", "+z", CUT, [body], "USBケーブルの底の溝")
+        for x, z in pts[2:]:
+            prev = lines.addByTwoPoints(prev.endSketchPoint, s2.sp({"x": x, "z": z}))
+        lines.addByTwoPoints(prev.endSketchPoint, first.startSketchPoint)
+        extrude(s2, f"80 mm - ({yc})", "+y", CUT, [body], "USBケーブルの底の溝")
 
     step("USB ケーブルの縦の穴と底の溝", usb_cable)
     return body
@@ -998,19 +1028,20 @@ def fit_to_barrel(comp: adsk.fusion.Component, part: adsk.fusion.BRepBody, name:
     comp.features.combineFeatures.add(inp).name = f"{name}_根元を本体に沿わせる"
 
 
-def add_peg(
+def add_peg_hole(
     comp: adsk.fusion.Component, part: adsk.fusion.BRepBody, r_s: float, z_cm: float, name: str
 ) -> None:
-    s = Sk(comp, "x", f"{r_s * 10 + 3} mm", f"{name}のピン")
-    s.circle({"y": "0 mm", "z": f"{z_cm * 10} mm"}, "peg_d")
-    extrude(s, "peg_len + 3 mm", "-x", JOIN, [part], f"{name}のピン")
+    # 根元は本体の曲面に沿っているので、曲面より 3mm 内側から掘り始めて、足の中へ peg_hole_depth 入れる
+    s = Sk(comp, "x", f"{r_s * 10 - 3} mm", f"{name}のピンの穴")
+    s.circle({"y": "0 mm", "z": f"{z_cm * 10} mm"}, "peg_hole_d")
+    extrude(s, "peg_hole_depth + 3 mm", "+x", CUT, [part], f"{name}のピンの穴")
 
 
 def build_arm(comp: adsk.fusion.Component) -> None:
     """下がふっくらした卵形の腕。卵の立体を外へ引き伸ばし、取り付け面から外の半分だけを使う。
 
-    右の腕として +X に作る（左はこの部品を Z 軸まわりに 180° 回して置く）。取り付け面は平らなので、
-    印刷は取り付け面を下にすればサポートがいらない。
+    右の腕として +X に作る（左はこの部品を Z 軸まわりに 180° 回して置く）。取り付け面は平らで、ピンは
+    別の部品なので、印刷は取り付け面を下にすればサポートがいらない。
     """
     st = {}
     x0, z0 = ev("arm_x0"), ev("arm_z")
@@ -1043,13 +1074,13 @@ def build_arm(comp: adsk.fusion.Component) -> None:
     if "body" not in st:
         return
 
-    def pegs():
-        s = Sk(comp, "x", "arm_x0", "腕のピン")
+    def peg_holes():
+        s = Sk(comp, "x", "arm_x0", "腕のピンの穴")
         for dz in ARM_PEGS_DZ:
-            s.circle({"y": "0 mm", "z": f"arm_z + ({dz} mm)"}, "peg_d")
-        extrude(s, "peg_len", "-x", JOIN, [st["body"]], "腕のピン")
+            s.circle({"y": "0 mm", "z": f"arm_z + ({dz} mm)"}, "peg_hole_d")
+        extrude(s, "peg_hole_depth", "+x", CUT, [st["body"]], "腕のピンの穴")
 
-    step("腕のピン", pegs)
+    step("腕のピンの穴", peg_holes)
 
 
 def build_foot(comp: adsk.fusion.Component, r_s: float) -> None:
@@ -1087,7 +1118,7 @@ def build_foot(comp: adsk.fusion.Component, r_s: float) -> None:
         if step(f"足のつま先 {r}", lambda r=r: toe(r)):
             break
     step("足の根元", lambda: fit_to_barrel(comp, st["body"], "足"))
-    step("足のピン", lambda: add_peg(comp, st["body"], r_s, zc, "足"))
+    step("足のピンの穴", lambda: add_peg_hole(comp, st["body"], r_s, zc, "足"))
 
 
 def rotation_for(angle: float) -> adsk.core.Matrix3D:
@@ -1345,6 +1376,88 @@ def save_view(name: str, eye, target, up=(0, 0, 1)) -> None:
     vp.saveAsImageFile(os.path.join(OUT_DIR, f"{name}.png"), 1600, 1200)
 
 
+# 印刷する向き。部品の中の座標（Fusion の部品の原点）からの回転（軸, 角度）。平らな面を下へ向ける
+PRINT_PARTS = [
+    # (書き出す名前, 刷る数, 回転)
+    ("body", 1, None),
+    ("face_cap", 1, ("x", -90.0)),  # 平らな背面（+Y 向き）を下に
+    ("arm", 2, ("y", -90.0)),  # 平らな取り付け面（-X 向き）を下に
+    ("foot", 2, None),  # 底はもとから下
+    ("eye", 2, None),  # 平らな面はもとから下（部品の XY 平面）
+]
+PEG_COUNT = 2 * len(ARM_PEGS_DZ) + 2
+
+
+def export_print_stls(bodies: dict[str, adsk.fusion.BRepBody]) -> None:
+    """印刷する向きに回し、底を Z = 0・中心を原点に置いた STL を out/print に書き出す。
+
+    回した形を Fusion の部品として作り直すとタイムラインが崩れるので、一時的な形にコピーし、
+    別の（履歴を取らない）ドキュメントに入れて書き出す。
+    """
+    out = os.path.join(OUT_DIR, "print")
+    os.makedirs(out, exist_ok=True)
+    tbm = adsk.fusion.TemporaryBRepManager.get()
+    shapes = []
+    for name, count, rot in PRINT_PARTS:
+        if name not in bodies:
+            continue
+        t = tbm.copy(bodies[name])
+        if rot is not None:
+            m = adsk.core.Matrix3D.create()
+            axis = {"x": (1, 0, 0), "y": (0, 1, 0)}[rot[0]]
+            m.setToRotation(
+                math.radians(rot[1]),
+                adsk.core.Vector3D.create(*axis),
+                adsk.core.Point3D.create(0, 0, 0),
+            )
+            tbm.transform(t, m)
+        shapes.append((name, count, t))
+    pin = tbm.createCylinderOrCone(
+        adsk.core.Point3D.create(0, 0, 0),
+        ev("peg_d / 2"),
+        adsk.core.Point3D.create(0, 0, ev("peg_len")),
+        ev("peg_d / 2"),
+    )
+    shapes.append(("peg", PEG_COUNT, pin))
+
+    src = _app.activeDocument
+    doc = _app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+    try:
+        des = adsk.fusion.Design.cast(doc.products.itemByProductType("DesignProductType"))
+        des.designType = adsk.fusion.DesignTypes.DirectDesignType
+        root = des.rootComponent
+        for name, count, t in shapes:
+            b = t.boundingBox
+            m = adsk.core.Matrix3D.create()
+            m.translation = adsk.core.Vector3D.create(
+                -(b.minPoint.x + b.maxPoint.x) / 2,
+                -(b.minPoint.y + b.maxPoint.y) / 2,
+                -b.minPoint.z,
+            )
+            tbm.transform(t, m)
+            body = root.bRepBodies.add(t)
+            bottom = sum(
+                f.area
+                for f in body.faces
+                if isinstance(f.geometry, adsk.core.Plane)
+                and f.boundingBox.maxPoint.z < 1e-3
+                and abs(f.geometry.normal.z) > 0.99
+            )
+            log(
+                f"PRINT {name} x{count}: {bbox_mm(body)}  台に付く面 {bottom * 100:.0f} mm2"
+                f"  vol {body.volume * 1000:.0f} mm3"
+            )
+            opts = des.exportManager.createSTLExportOptions(
+                body, os.path.join(out, f"futamaru_{name}_x{count}.stl")
+            )
+            opts.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementMedium
+            opts.sendToPrintUtility = False
+            des.exportManager.execute(opts)
+    finally:
+        doc.close(False)
+        src.activate()
+
+
 def run(context) -> None:
     global _app, _design
     _log.clear()
@@ -1417,27 +1530,6 @@ def run(context) -> None:
                     log(f"BBOX {occ.name} / {b.name}: {bbox_mm(b)}  vol {b.volume * 1000:.0f} mm3")
         step("干渉チェック", lambda: check_interference(printable, refs))
 
-        def export():
-            em = _design.exportManager
-            for occ, fname in (
-                (body_occ, "futamaru_pot_body"),
-                (plate_occ, "futamaru_pot_face_cap"),
-                (arm_occ, "futamaru_pot_arm"),
-                *[(o, "futamaru_pot_eye") for o in eye_occs[:1]],
-                (foot_occ, "futamaru_pot_foot"),
-            ):
-                bodies = occ.component.bRepBodies
-                if bodies.count == 0:
-                    continue
-                opts = em.createSTLExportOptions(
-                    bodies.item(0), os.path.join(OUT_DIR, fname + ".stl")
-                )
-                opts.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementMedium
-                opts.sendToPrintUtility = False
-                em.execute(opts)
-
-        step("STL の書き出し", export)
-
         step("色", lambda: apply_colors(printable, eye_occs))
 
         def views():
@@ -1464,6 +1556,24 @@ def run(context) -> None:
             save_view("view_iso", (-30, -45, 25), (0, 0, 4.8))
 
         step("画像の保存", views)
+
+        def print_stls():
+            first = {
+                "body": body_occ,
+                "face_cap": plate_occ,
+                "arm": arm_occ,
+                "foot": foot_occ,
+                "eye": eye_occs[0] if eye_occs else None,
+            }
+            export_print_stls(
+                {
+                    k: o.component.bRepBodies.item(0)
+                    for k, o in first.items()
+                    if o is not None and o.component.bRepBodies.count
+                }
+            )
+
+        step("印刷用の STL の書き出し", print_stls)
     except Exception:
         log("FATAL\n" + traceback.format_exc())
     finally:
