@@ -54,7 +54,7 @@ class FutamaruAgent(Agent):
         self._conv = conv
 
     async def end_session(self) -> None:
-        """ESP32 が退出したときの後始末（#5）。
+        """ESP32 が退出したときの後始末（#5）。entrypoint の _on_leave から呼ばれる。
 
         1. 会話を閉じる。起きていれば眠らせ、そのセッションの振り返り（記憶・性格の更新）を走らせる
         2. LLM に渡す会話履歴（チャットコンテキスト）を空にする。黙って眠ったときはティッカーが空にするが、
@@ -228,9 +228,12 @@ async def entrypoint(ctx: JobContext) -> None:
         if p.identity == device_identity:
             conv.express("sleepy")
 
+    # 誰かがルームから出たときに LiveKit から呼ばれる。
+    # 出たのがこの株の ESP32 なら、セッションを終える（眠らせて振り返り、会話履歴も捨てる。#5）
     @ctx.room.on("participant_disconnected")
     def _on_leave(p: rtc.RemoteParticipant) -> None:
         if p.identity == device_identity:
+            # このコールバックは async にできないので、終わるのを待たずにタスクとして走らせる
             asyncio.create_task(agent.end_session())
 
     async def shutdown() -> None:

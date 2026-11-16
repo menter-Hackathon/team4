@@ -106,6 +106,7 @@ async def test_transcription_node_strips_tags():
 
 # --- #5 ---
 async def test_end_session_closes_conversation_and_forgets_history():
+    # 会話の途中（履歴が 2 件ある状態）で ESP32 が切断したときを再現する
     conv = FakeConv()
     agent = main.FutamaruAgent(conv)
     history = ChatContext.empty()
@@ -115,5 +116,6 @@ async def test_end_session_closes_conversation_and_forgets_history():
 
     await agent.end_session()
 
+    # 会話が閉じられ（＝振り返りが走る）、次に起きたとき前の会話が混ざらないよう履歴が空になる
     assert conv.closed
     assert agent.chat_ctx.items == []
