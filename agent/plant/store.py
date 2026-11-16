@@ -2,12 +2,13 @@
 
 時刻はすべて JST の ISO 8601 文字列で保存するため、文字列比較で時刻順になる。
 
-DB は 1 つの SQLite ファイル（既定は data/futamaru.db）。テーブルは 5 つ:
-    plants:        株ごとの名前と今の性格（4 軸）
-    memories:      株が覚えていること（「持ち主はカレーが好き」など）
-    sessions:      起きてから眠るまでの 1 回の会話。振り返りの要約もここに入る
+DB は 1 つの SQLite ファイル（既定は data/futamaru.db）。テーブルは 6 つ:
+    plants:        株ごとの名前と、お客さん（まだ誰か分からない相手）用の性格（4 軸）
+    people:        株が知っている人。人ごとの性格（4 軸）と、手で固定した方言
+    memories:      株が覚えていること。person_id が NULL なら共通、あればその人だけの記憶
+    sessions:      起きてから眠るまでの 1 回の会話。振り返りの要約・相手の人・判定した方言もここに入る
     utterances:    会話の発話 1 つずつ（持ち主・植物）
-    trait_history: 性格の移り変わりの記録（成長グラフ用）
+    trait_history: 性格の移り変わりの記録（成長グラフ用）。person_id が NULL なら株（お客さん）の分
 
 SQL を書くのはこのファイルだけにして、他のファイルは PlantStore のメソッドを呼ぶ。
 """
@@ -22,7 +23,8 @@ from pathlib import Path
 from .personality import Traits
 from .timeutil import iso
 
-# テーブルを作る SQL。IF NOT EXISTS なので、すでにあるテーブルはそのまま使われる（データは消えない）
+# テーブルを作る SQL。IF NOT EXISTS なので、すでにあるテーブルはそのまま使われる（データは消えない）。
+# 注意: すでにあるテーブルには新しい列が足されない。古い DB への列の追加は _migrate() が行う
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS plants (
   plant_id       TEXT PRIMARY KEY,
@@ -33,9 +35,21 @@ CREATE TABLE IF NOT EXISTS plants (
   energy         REAL NOT NULL DEFAULT 0.5,
   curiosity      REAL NOT NULL DEFAULT 0.5
 );
+CREATE TABLE IF NOT EXISTS people (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  plant_id         TEXT NOT NULL REFERENCES plants(plant_id),
+  name             TEXT NOT NULL,
+  dialect_override TEXT,
+  created_at       TEXT NOT NULL,
+  talkativeness    REAL NOT NULL DEFAULT 0.5,
+  affection        REAL NOT NULL DEFAULT 0.5,
+  energy           REAL NOT NULL DEFAULT 0.5,
+  curiosity        REAL NOT NULL DEFAULT 0.5
+);
 CREATE TABLE IF NOT EXISTS memories (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   plant_id    TEXT NOT NULL REFERENCES plants(plant_id),
+  person_id   INTEGER REFERENCES people(id),
   content     TEXT NOT NULL,
   kind        TEXT NOT NULL,
   importance  REAL NOT NULL,
@@ -49,7 +63,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   ended_at    TEXT,
   user_turns  INTEGER NOT NULL DEFAULT 0,
   summary     TEXT,
-  reflected   INTEGER NOT NULL DEFAULT 0
+  reflected   INTEGER NOT NULL DEFAULT 0,
+  person_id   INTEGER REFERENCES people(id),
+  owner_dialect TEXT
 );
 CREATE TABLE IF NOT EXISTS utterances (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,6 +78,7 @@ CREATE TABLE IF NOT EXISTS trait_history (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   plant_id       TEXT NOT NULL REFERENCES plants(plant_id),
   session_id     INTEGER REFERENCES sessions(id),
+  person_id      INTEGER REFERENCES people(id),
   talkativeness  REAL NOT NULL,
   affection      REAL NOT NULL,
   energy         REAL NOT NULL,
@@ -69,6 +86,17 @@ CREATE TABLE IF NOT EXISTS trait_history (
   recorded_at    TEXT NOT NULL
 );
 """
+
+# 古い DB に足す列: {テーブル名: [(列名, 型と制約), ...]}。SCHEMA の新しい列と同じ内容にする。
+# どれも NULL を許す（既存の行は「共通・お客さん・判定なし」になる）
+_NEW_COLUMNS = {
+    "memories": [("person_id", "INTEGER REFERENCES people(id)")],
+    "sessions": [
+        ("person_id", "INTEGER REFERENCES people(id)"),
+        ("owner_dialect", "TEXT"),
+    ],
+    "trait_history": [("person_id", "INTEGER REFERENCES people(id)")],
+}
 
 # 性格 4 軸の列名。SQL の中で何度も使うのでまとめておく
 _TRAIT_COLS = "talkativeness, affection, energy, curiosity"
@@ -83,6 +111,17 @@ class Plant:
     plant_id: str
     name: str
     traits: Traits
+
+
+@dataclass
+class Person:
+    """people テーブルの 1 行（株が知っている人 1 人）。dialect_override は手で固定した方言（無ければ None）。"""
+
+    id: int
+    plant_id: str
+    name: str
+    traits: Traits
+    dialect_override: str | None
 
 
 @dataclass
@@ -108,6 +147,8 @@ class Session:
     user_turns: int
     summary: str | None
     reflected: bool
+    person_id: int | None = None  # 話し相手（None はお客さん）
+    owner_dialect: str | None = None  # 振り返りで判定した相手の方言（未判定は None）
 
 
 @dataclass
@@ -151,6 +192,11 @@ def _traits(row: sqlite3.Row) -> Traits:
     return Traits(row["talkativeness"], row["affection"], row["energy"], row["curiosity"])
 
 
+def _person(row: sqlite3.Row) -> Person:
+    """DB の people の行から Person を作る。"""
+    return Person(row["id"], row["plant_id"], row["name"], _traits(row), row["dialect_override"])
+
+
 class PlantStore:
     """DB への読み書きをまとめたクラス。
 
@@ -170,6 +216,21 @@ class PlantStore:
         # 存在しない株・セッションを指す行を入れられないようにする（SQLite は既定でオフ）
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """古い DB に足りない列を足す。新しい DB では何も起きない。
+
+        1. テーブルごとに、今ある列の名前を PRAGMA table_info で調べる
+        2. 足りない列だけ ALTER TABLE ... ADD COLUMN で足す（既存の行のデータは消えない）
+        何回開いても同じ結果になる（すでにある列は足さない）。
+        """
+        with self._conn:
+            for table, columns in _NEW_COLUMNS.items():
+                have = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+                for name, definition in columns:
+                    if name not in have:
+                        self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     def close(self) -> None:
         """DB を閉じる。"""
@@ -199,21 +260,84 @@ class PlantStore:
         return Plant(row["plant_id"], row["name"], _traits(row))
 
     def _insert_history(
-        self, plant_id: str, session_id: int | None, t: Traits, now: datetime
+        self,
+        plant_id: str,
+        session_id: int | None,
+        t: Traits,
+        now: datetime,
+        person_id: int | None = None,
     ) -> None:
-        """性格の移り変わりを 1 行記録する（トランザクションは呼び出し側で張る）。"""
+        """性格の移り変わりを 1 行記録する（トランザクションは呼び出し側で張る）。person_id が None なら株の分。"""
         self._conn.execute(
-            f"INSERT INTO trait_history (plant_id, session_id, {_TRAIT_COLS}, recorded_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (plant_id, session_id, t.talkativeness, t.affection, t.energy, t.curiosity, iso(now)),
+            f"INSERT INTO trait_history (plant_id, session_id, person_id, {_TRAIT_COLS}, recorded_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                plant_id,
+                session_id,
+                person_id,
+                t.talkativeness,
+                t.affection,
+                t.energy,
+                t.curiosity,
+                iso(now),
+            ),
         )
 
-    def trait_history(self, plant_id: str) -> list[TraitSnapshot]:
-        """その株の性格の記録を、古い順に全部返す（成長シミュレーション・グラフ用）。"""
+    def trait_history(self, plant_id: str, person_id: int | None = None) -> list[TraitSnapshot]:
+        """その株（person_id があればその人）の性格の記録を、古い順に全部返す（成長グラフ用）。"""
+        # `person_id IS ?` は、値が NULL（None）のときも普通の値のときも使える比較
         rows = self._conn.execute(
-            "SELECT * FROM trait_history WHERE plant_id = ? ORDER BY id", (plant_id,)
+            "SELECT * FROM trait_history WHERE plant_id = ? AND person_id IS ? ORDER BY id",
+            (plant_id, person_id),
         ).fetchall()
         return [TraitSnapshot(r["session_id"], _traits(r), r["recorded_at"]) for r in rows]
+
+    # --- people ---
+
+    def add_person(self, plant_id: str, name: str, now: datetime) -> Person:
+        """株が知っている人を登録する。性格は初期値（全部 0.5）で、成長グラフの起点も記録する。"""
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO people (plant_id, name, created_at) VALUES (?, ?, ?)",
+                (plant_id, name, iso(now)),
+            )
+            person_id = int(cur.lastrowid)
+            self._insert_history(plant_id, None, Traits(), now, person_id)
+        return self.get_person(person_id)
+
+    def get_person(self, person_id: int) -> Person:
+        """人を取り出す。無ければ KeyError。"""
+        row = self._conn.execute("SELECT * FROM people WHERE id = ?", (person_id,)).fetchone()
+        if row is None:
+            raise KeyError(person_id)
+        return _person(row)
+
+    def get_people(self, plant_id: str) -> list[Person]:
+        """その株が知っている人を、登録した順に全部返す。"""
+        rows = self._conn.execute(
+            "SELECT * FROM people WHERE plant_id = ? ORDER BY id", (plant_id,)
+        ).fetchall()
+        return [_person(r) for r in rows]
+
+    def set_dialect_override(self, person_id: int, dialect: str | None) -> None:
+        """方言を手で固定する。None にすると固定を外して、会話からの自動判定に戻る。"""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE people SET dialect_override = ? WHERE id = ?", (dialect, person_id)
+            )
+
+    def recent_dialects(self, person_id: int, limit: int = 5) -> list[str]:
+        """その人のセッションで判定した方言を、新しい順に最大 limit 件返す。
+
+        判定できなかったもの（NULL と "unknown"）は数えない。多数決は dialect.resolve_dialect が行う。
+        """
+        rows = self._conn.execute(
+            "SELECT owner_dialect FROM sessions"
+            " WHERE person_id = ? AND owner_dialect IS NOT NULL AND owner_dialect != 'unknown'"
+            " ORDER BY started_at DESC, id DESC LIMIT ?",
+            (person_id, limit),
+        ).fetchall()
+        return [r["owner_dialect"] for r in rows]
 
     # --- sessions / utterances ---
 
@@ -257,7 +381,16 @@ class PlantStore:
             r["user_turns"],
             r["summary"],
             bool(r["reflected"]),
+            r["person_id"],
+            r["owner_dialect"],
         )
+
+    def set_session_person(self, session_id: int, person_id: int) -> None:
+        """セッションの話し相手が誰か分かったときに記録する（始めはお客さん = NULL）。"""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE sessions SET person_id = ? WHERE id = ?", (person_id, session_id)
+            )
 
     def get_utterances(self, session_id: int) -> list[Utterance]:
         """そのセッションの発話を、話した順に全部返す。"""
@@ -267,13 +400,15 @@ class PlantStore:
         ).fetchall()
         return [Utterance(r["role"], r["text"], r["created_at"]) for r in rows]
 
-    def count_user_utterances_since(self, plant_id: str, since: datetime) -> int:
-        """since 以降に、持ち主がその株に話しかけた回数。おしゃべり度の計算に使う（仕様 §6.3）。"""
-        # 発話（utterances）には plant_id が無いので、セッション（sessions）とつないで株を絞る
+    def count_user_utterances_since(
+        self, plant_id: str, since: datetime, person_id: int | None = None
+    ) -> int:
+        """since 以降に、その人（None ならお客さん）がその株に話しかけた回数。おしゃべり度の計算に使う（仕様 §6.3）。"""
+        # 発話（utterances）には plant_id が無いので、セッション（sessions）とつないで株と人を絞る
         row = self._conn.execute(
             "SELECT COUNT(*) FROM utterances u JOIN sessions s ON u.session_id = s.id"
-            " WHERE s.plant_id = ? AND u.role = 'user' AND u.created_at >= ?",
-            (plant_id, iso(since)),
+            " WHERE s.plant_id = ? AND s.person_id IS ? AND u.role = 'user' AND u.created_at >= ?",
+            (plant_id, person_id, iso(since)),
         ).fetchone()
         return int(row[0])
 
@@ -307,21 +442,28 @@ class PlantStore:
         with self._conn:
             self._conn.execute("UPDATE sessions SET reflected = 1 WHERE id = ?", (session_id,))
 
-    def latest_summary(self, plant_id: str) -> str | None:
-        """一番最近に終わった会話の要約。プロンプトの「前回の会話」に使う。まだ無ければ None。"""
+    def latest_summary(self, plant_id: str, person_id: int | None = None) -> str | None:
+        """その人（None ならお客さん）との、一番最近に終わった会話の要約。「前回の会話」に使う。無ければ None。"""
         row = self._conn.execute(
-            "SELECT summary FROM sessions WHERE plant_id = ? AND reflected = 1 AND summary IS NOT NULL"
+            "SELECT summary FROM sessions WHERE plant_id = ? AND person_id IS ?"
+            " AND reflected = 1 AND summary IS NOT NULL"
             " ORDER BY ended_at DESC, id DESC LIMIT 1",
-            (plant_id,),
+            (plant_id, person_id),
         ).fetchone()
         return row["summary"] if row else None
 
     # --- memories / reflection ---
 
-    def get_memories(self, plant_id: str) -> list[Memory]:
-        """その株の記憶を全部返す（並べ替えと絞り込みは prompt.rank_memories で行う）。"""
+    def get_memories(self, plant_id: str, person_id: int | None = None) -> list[Memory]:
+        """その株の記憶を返す。共通の記憶（person_id が NULL）と、person_id の人だけの記憶。
+
+        person_id が None（お客さん）なら共通の記憶だけ。他の人の記憶は返さない。
+        並べ替えと絞り込みは prompt.rank_memories で行う。
+        """
         rows = self._conn.execute(
-            "SELECT * FROM memories WHERE plant_id = ? ORDER BY id", (plant_id,)
+            "SELECT * FROM memories WHERE plant_id = ? AND (person_id IS NULL OR person_id = ?)"
+            " ORDER BY id",
+            (plant_id, person_id),
         ).fetchall()
         return [
             Memory(
@@ -339,37 +481,54 @@ class PlantStore:
         updated_memories: list[MemoryUpdate],
         traits: Traits,
         now: datetime,
+        *,
+        person_id: int | None = None,
+        owner_dialect: str = "unknown",
     ) -> None:
         """reflection の結果を1トランザクションで反映する（仕様 §6.3 手順5）。
+
+        Args:
+            person_id: 話し相手。None ならお客さん（性格は株に、記憶は共通になる）
+            owner_dialect: このセッションで判定した相手の方言（判断できなければ "unknown"）
 
         5 つの書き込みを「全部成功するか、全部取り消すか」にまとめる。
         途中で落ちても「記憶は増えたのに振り返り済みになっていない」のような半端な状態にならない。
         """
         ts = iso(now)
         with self._conn:
-            # 1. 株の性格を新しい値にする
-            self._conn.execute(
-                "UPDATE plants SET talkativeness = ?, affection = ?, energy = ?, curiosity = ?"
-                " WHERE plant_id = ?",
-                (traits.talkativeness, traits.affection, traits.energy, traits.curiosity, plant_id),
-            )
-            # 2. 新しい記憶を追加する
+            # 1. 性格を新しい値にする。人がいればその人の性格、いなければ株（お客さん用）の性格
+            cols = (traits.talkativeness, traits.affection, traits.energy, traits.curiosity)
+            if person_id is not None:
+                self._conn.execute(
+                    "UPDATE people SET talkativeness = ?, affection = ?, energy = ?, curiosity = ?"
+                    " WHERE id = ?",
+                    (*cols, person_id),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE plants SET talkativeness = ?, affection = ?, energy = ?, curiosity = ?"
+                    " WHERE plant_id = ?",
+                    (*cols, plant_id),
+                )
+            # 2. 新しい記憶を追加する（person_id 付き。None なら共通の記憶）
             for m in new_memories:
                 self._conn.execute(
-                    "INSERT INTO memories (plant_id, content, kind, importance, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?)",
-                    (plant_id, m.content, m.kind, m.importance, ts, ts),
+                    "INSERT INTO memories (plant_id, person_id, content, kind, importance,"
+                    " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (plant_id, person_id, m.content, m.kind, m.importance, ts, ts),
                 )
-            # 3. 既存の記憶を書き換える。id が存在しない・別の株の記憶なら、1 行も変わらず無視される
+            # 3. 既存の記憶を書き換える。id が存在しない・別の株や別の人の記憶なら、1 行も変わらず無視される
+            #    （書き換えてよいのは、この人の記憶か共通の記憶だけ）
             for u in updated_memories:
                 self._conn.execute(
                     "UPDATE memories SET content = ?, importance = ?, updated_at = ?"
-                    " WHERE id = ? AND plant_id = ?",
-                    (u.content, u.importance, ts, u.id, plant_id),
+                    " WHERE id = ? AND plant_id = ? AND (person_id IS NULL OR person_id = ?)",
+                    (u.content, u.importance, ts, u.id, plant_id, person_id),
                 )
             # 4. 性格の移り変わりを記録する
-            self._insert_history(plant_id, session_id, traits, now)
-            # 5. 要約を保存し、振り返り済みにする
+            self._insert_history(plant_id, session_id, traits, now, person_id)
+            # 5. 要約と方言の判定を保存し、振り返り済みにする
             self._conn.execute(
-                "UPDATE sessions SET summary = ?, reflected = 1 WHERE id = ?", (summary, session_id)
+                "UPDATE sessions SET summary = ?, owner_dialect = ?, reflected = 1 WHERE id = ?",
+                (summary, owner_dialect, session_id),
             )
