@@ -15,9 +15,13 @@ CFG = {
 class FakeConv:
     def __init__(self):
         self.expressions = []
+        self.closed = False
 
     def express(self, name):
         self.expressions.append(name)
+
+    async def close(self):
+        self.closed = True
 
 
 def test_resolve_plant_id():
@@ -98,3 +102,18 @@ async def test_transcription_node_strips_tags():
     conv = FakeConv()
     out = [t async for t in main.FutamaruAgent(conv).transcription_node(stream(), None)]
     assert "".join(out) == "そっか" and conv.expressions == []
+
+
+# --- #5 ---
+async def test_end_session_closes_conversation_and_forgets_history():
+    conv = FakeConv()
+    agent = main.FutamaruAgent(conv)
+    history = ChatContext.empty()
+    history.add_message(role="user", content="明日テストなんだ")
+    history.add_message(role="assistant", content="がんばって！")
+    await agent.update_chat_ctx(history)
+
+    await agent.end_session()
+
+    assert conv.closed
+    assert agent.chat_ctx.items == []

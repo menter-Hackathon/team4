@@ -53,6 +53,11 @@ class FutamaruAgent(Agent):
         super().__init__(instructions="")
         self._conv = conv
 
+    async def end_session(self) -> None:
+        """ESP32 が退出したときの後始末。次に起きたとき前の会話を引きずらないよう履歴も捨てる（#5）。"""
+        await self._conv.close()
+        await self.update_chat_ctx(ChatContext.empty())
+
     async def on_user_turn_completed(self, turn_ctx: ChatContext, new_message: ChatMessage) -> None:
         original = new_message.text_content or ""
         decision = await self._conv.on_user_turn(original)
@@ -221,7 +226,7 @@ async def entrypoint(ctx: JobContext) -> None:
     @ctx.room.on("participant_disconnected")
     def _on_leave(p: rtc.RemoteParticipant) -> None:
         if p.identity == device_identity:
-            asyncio.create_task(conv.close())
+            asyncio.create_task(agent.end_session())
 
     async def shutdown() -> None:
         await conv.close()
