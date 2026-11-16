@@ -39,3 +39,5 @@ jobs:
         run: |
           # .env（キー）と data/（会話ログ）がイメージに入っていたら失敗にする
           docker run --rm futamaru-agent sh -c 'test ! -e /app/.env && test -z "$(ls -A /app/data 2>/dev/null)"'
+      - name: Compose file is valid and prefers its own LLM/STT settings
+        run: scripts/ci/check_compose.sh
