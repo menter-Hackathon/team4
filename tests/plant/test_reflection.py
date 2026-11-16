@@ -206,20 +206,31 @@ def _person_session(store, person, text):
 async def test_reflection_shows_only_this_persons_and_shared_memories(store):
     taro = store.add_person("a", "たろう", NOW)
     hanako = store.add_person("a", "はなこ", NOW)
-    store.apply_reflection(
-        "a",
-        _person_session(store, hanako, "ピアノ弾くよ"),
-        "s",
-        [NewMemory("はなこはピアノが好き", "preference", 0.5)],
-        [],
-        store.get_plant("a").traits,
-        NOW,
-        person_id=hanako.id,
-    )
+    traits = store.get_plant("a").traits
+    # 共通（person_id なし）・たろう・はなこの記憶を 1 件ずつ作る
+    for who, content in [
+        (None, "この家は日当たりがいい"),
+        (taro, "たろうはカレーが好き"),
+        (hanako, "はなこはピアノが好き"),
+    ]:
+        store.apply_reflection(
+            "a",
+            _person_session(store, who, "覚えてね"),
+            "s",
+            [NewMemory(content, "preference", 0.5)],
+            [],
+            traits,
+            NOW,
+            person_id=who.id if who else None,
+        )
     sid = _person_session(store, taro, "こんにちは")
     fake = FakeCompleter([VALID])
     await reflect_session(store, "a", sid, fake, NOW)
-    assert "はなこはピアノが好き" not in fake.calls[0][0][-1]["content"]
+    prompt = fake.calls[0][0][-1]["content"]
+    assert "たろうはカレーが好き" in prompt
+    assert "この家は日当たりがいい" in prompt
+    assert "はなこはピアノが好き" not in prompt
+    assert prompt.count("[id=") == 2
 
 
 async def test_person_session_updates_person_traits_and_dialect(store):
