@@ -43,7 +43,10 @@ Gemma 4 E4B（[google/gemma-4-E4B-it](https://huggingface.co/google/gemma-4-E4B-
 git clone https://github.com/menter-Hackathon/team4.git
 cd team4
 cp .env.example .env
+mkdir -p data
 ```
+
+`mkdir -p data` は、植物の記憶の DB を置くフォルダを先に作っておくためです。作らずに起動すると、Docker が `root` の持ち物として作るので、あとで自分のユーザーから中を消したり見たりしにくくなります（#40）。
 
 `.env` に次を書きます。**キーはチームの Discord の DM で受け取り、Issue・PR・チャンネルには書かないでください。**
 
@@ -91,6 +94,8 @@ git pull && docker compose up -d --build   # コードを更新して起動し�
 
 - **植物の記憶**（会話ログ・性格）は、この PC の `data/futamaru.db` に残ります。コンテナを作り直しても消えません
 - `docker compose down -v` はモデルの保存場所も消します（次の起動で再ダウンロード）。植物の記憶（`data/`）は消えません
+- **PC を再起動したとき**は、コンテナは自動で起動し直します（`restart: unless-stopped`）。ただし、このときは起動の順番が守られず、`agent` が `llm` より先に動き出します。`docker compose ps` で `llm` が `healthy` になるまで（モデルはダウンロード済みなので 1〜2 分）待ってから話しかけてください。それまでに話しかけると、植物は「ん…ちょっとぼーっとしてた」と返します（#40）
+- DB を読み書きするコマンド（`scripts/` の下のもの）は、コンテナの中で `docker compose exec agent python -m scripts.<名前>` として動かします。Linux では DB のファイルが `root` の持ち物になるので、PC 側から直接書き換えないでください
 
 ## 7. 困ったとき
 
