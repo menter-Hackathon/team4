@@ -61,6 +61,7 @@ def test_run_checks_sends_agent_params_and_keeps_going_after_error(tmp_path):
     rec.write_bytes(silence_wav(0.5))
     fake = FakeSTT(["", "500", "フタマル、今日ね"])
     results = run_checks(fake.client, MODEL, [rec], DEFAULT_WAKE_WORDS)
+    assert results[0].hallucination is None  # 無音から何も出なければ問題なし
 
     assert [r.name for r in results] == ["無音 3 秒", "雑音 3 秒", "futamaru.wav"]
     assert results[1].error and results[2].wake and results[2].text == "フタマル、今日ね"
@@ -72,3 +73,10 @@ def test_run_checks_sends_agent_params_and_keeps_going_after_error(tmp_path):
 def test_markdown_table_has_one_row_per_result():
     rows = to_markdown([judge("x.wav", "ふたまる", 1.234, DEFAULT_WAKE_WORDS)], MODEL)
     assert "| x.wav | ふたまる | あり | - | 1.23 |" in rows
+
+
+def test_any_text_from_silence_counts_as_hallucination():
+    # 無音から「ごめん」のような一覧に無い言葉が出ても、でっちあげとして報告する
+    fake = FakeSTT(["ごめん", ""])
+    results = run_checks(fake.client, MODEL, [], DEFAULT_WAKE_WORDS)
+    assert results[0].hallucination == "ごめん" and results[1].hallucination is None

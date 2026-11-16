@@ -130,7 +130,12 @@ def run_checks(
     for label, file_name, audio in inputs:
         try:
             text, seconds = transcribe(client, model, file_name, audio)
-            results.append(judge(label, text, seconds, wake_words))
+            result = judge(label, text, seconds, wake_words)
+            # 無音・雑音（自分で作った音声）から文字が出たら、どんな言葉でもでっちあげとみなす。
+            # 11/17 の試験で、kotoba-whisper が無音から「ごめん」を出した（一覧に無い言葉だった）
+            if file_name in ("silence.wav", "noise.wav") and normalize(text):
+                result.hallucination = result.hallucination or text
+            results.append(result)
         except Exception as e:  # 1 つの失敗で全体を止めない
             results.append(CheckResult(label, "", 0.0, False, None, error=str(e)))
     return results
