@@ -75,7 +75,8 @@ class PlantConversation:
 
     async def on_user_turn(self, text: str) -> TurnDecision:
         text = text.strip()
-        # 「。」「…」だけの文字起こしは雑音なので、返事も記録もしない（#10）
+        # STT は雑音を「。」「…」などと文字起こしすることがある。normalize() は空白・句読点・記号を
+        # 消すので、消して何も残らなければ中身の無い発話として、返事も記録もしない（#10）
         if not normalize(text):
             return TurnDecision("ignore")
 
