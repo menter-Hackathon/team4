@@ -16,6 +16,7 @@
 | ファイル | 中身 |
 |---|---|
 | `futamaru_pot/futamaru_pot.py` | Fusion のスクリプト。実行すると新しいドキュメントに筐体一式を作る |
+| `tools/fusion_mcp.py` | Fusion MCP を呼んで、上のスクリプトをコマンド 1 つで実行する道具 |
 | `out/print/futamaru_a1mini.gcode.3mf` | A1 mini 用にスライスしたプロジェクト（皿 3 枚を 1 つのファイルに）。Bambu Studio で開いてそのまま印刷できる |
 | `out/print/*.stl` | 印刷する向きに置いた STL。ファイル名の `_x2` などは刷る数 |
 | `out/futamaru_pot.f3d` | Fusion のデータ（タイムラインとパラメータ付き） |
@@ -25,9 +26,15 @@
 ## 作り直し方
 
 - **Fusion の画面から**: Shift+S →［スクリプト］の［+］で `futamaru_pot` フォルダを追加 → 選んで［実行］
-- **Claude などから Fusion MCP で**: スクリプトの中身を `fusion_mcp_execute`（`featureType: "script"`）に渡す。
+- **コマンドで（Fusion MCP を使う）**: Fusion を起動したまま、リポジトリのいちばん上で次を実行する。
+  ```bash
+  python3 hardware/enclosure/tools/fusion_mcp.py build
+  ```
+  Fusion MCP（Claude Desktop の拡張機能）が `http://127.0.0.1:27182/mcp` で待っているので、そこへスクリプトを送って実行する。
+  終わると `out/build_log.txt` の OK 以外の行（失敗・寸法・干渉チェック）を表示する。失敗があれば終了コードは 1
+- **Claude などから Fusion MCP で直接**: スクリプトの中身を `fusion_mcp_execute`（`featureType: "script"`）に渡す。
   先頭の `from __future__ import annotations` は外して渡す（MCP 側でスクリプトが包まれるため）。
-  このときは書き出し先がスクリプトの `_DEFAULT_OUT`（`~/Desktop/Lit/team4/hardware/enclosure/out`）になるので、別の場所で作業しているときは書き換えて渡す
+  このときは書き出し先がスクリプトの `_DEFAULT_OUT`（`~/Desktop/Lit/team4/hardware/enclosure/out`）になるので、別の場所で作業しているときは書き換えて渡す（上の `fusion_mcp.py build` はこの 2 つを自動でする）
 
 実行するたびに新しいドキュメントができます（前のものは閉じません。いらなければ保存せずに閉じてください）。
 終わってもダイアログは出ません。結果（失敗の数とログの場所）は［テキスト コマンド］欄と `out/build_log.txt` に出ます。
