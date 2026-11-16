@@ -10,7 +10,7 @@ ChatGPT の Web 画面など、このファイルを自動で読まないツー�
 
 - 「ふたまる」: 育て方で個性が変わる、話せる観葉植物のサーバー側音声 AI エージェント（Python / LiveKit Agents）
 - 仕様: `docs/superpowers/specs/2026-11-13-futamaru-agent-design.md`。**仕様と違う動きにするときは、先に仕様書を直す**
-- チームのルール（ブランチ・PR・秘密情報・GPU）: `CONTRIBUTING.md`
+- チームのルール（ブランチ・PR・秘密情報・モデルを動かす PC）: `CONTRIBUTING.md`
 
 | 場所 | 中身 |
 |---|---|

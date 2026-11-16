@@ -11,7 +11,7 @@ uv sync
 cp .env.example .env   # LiveKit・LLM・STT・OpenAI の値を埋める
 ```
 
-`LLM_MODEL` は GPU サーバーのメモリで選びます（80GB: `google/gemma-4-26B-A4B-it`、24GB: `google/gemma-4-E4B-it`）。
+`LLM_MODEL` は `google/gemma-4-E4B-it` です（仕様 §8.1）。LLM・STT は誰かの PC で動かします。準備ができるまでは、`.env.example` のコメントにあるとおり OpenAI に向けて試せます。
 
 ## 起動
 
