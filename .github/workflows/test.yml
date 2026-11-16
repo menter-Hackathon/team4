@@ -25,3 +25,17 @@ jobs:
         run: uv sync --locked
       - name: Run tests
         run: uv run pytest -q
+
+  # エージェントの Docker イメージが作れるか、中でエージェントを読み込めるかを確かめる（docs/deploy.md）
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build agent image
+        run: docker build -t futamaru-agent .
+      - name: Agent can be imported inside the image
+        run: docker run --rm futamaru-agent python -c "import agent.main"
+      - name: No secrets or conversation logs in the image
+        run: |
+          # .env（キー）と data/（会話ログ）がイメージに入っていたら失敗にする
+          docker run --rm futamaru-agent sh -c 'test ! -e /app/.env && test -z "$(ls -A /app/data 2>/dev/null)"'
