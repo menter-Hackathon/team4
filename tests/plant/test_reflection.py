@@ -137,7 +137,42 @@ def test_parse_cleans_items():
         + "\n```"
     )
     assert [(m.content, m.importance) for m in r.new_memories] == [("b", 1.0)]
-    assert [(u.id, u.importance) for u in r.updated_memories] == [(3, 0.5)]
+    # 数字だけの文字列の id も整数として使う（#8）
+    assert [(u.id, u.importance) for u in r.updated_memories] == [(12, 0.4), (3, 0.5)]
+
+
+def test_parse_accepts_uppercase_kind_and_string_id():
+    # LLM が少しだけ違う形で返しても、記憶を捨てない（#8）
+    r = parse_reflection(
+        json.dumps(
+            {
+                "summary": "s",
+                "new_memories": [{"content": "テストがある", "kind": "Event", "importance": 0.6}],
+                "updated_memories": [
+                    {"id": "3", "content": "カレーが好き", "importance": 0.7},
+                    {"id": "abc", "content": "x", "importance": 0.5},
+                    {"id": True, "content": "y", "importance": 0.5},
+                ],
+                "trait_deltas": {},
+            }
+        )
+    )
+    assert [(m.content, m.kind) for m in r.new_memories] == [("テストがある", "event")]
+    assert [u.id for u in r.updated_memories] == [3]
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity"])
+def test_parse_treats_non_finite_importance_as_middle(bad):
+    # json.loads は NaN / Infinity を読めてしまう。上限の 1.0 にせず、真ん中の 0.5 にする（#7）
+    raw = (
+        '{"summary": "s", "new_memories": [{"content": "a", "kind": "habit", "importance": '
+        + bad
+        + '}], "updated_memories": [{"id": 1, "content": "b", "importance": '
+        + bad
+        + '}], "trait_deltas": {}}'
+    )
+    r = parse_reflection(raw)
+    assert r.new_memories[0].importance == 0.5 and r.updated_memories[0].importance == 0.5
 
 
 @pytest.mark.parametrize(

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -104,11 +105,40 @@ class ReflectionResult:
 
 
 def _importance(value: object) -> float:
-    """記憶の重要度を 0.0〜1.0 の数値に直す。数値でなければ真ん中の 0.5 にする。"""
+    """記憶の重要度を 0.0〜1.0 の数値に直す。数値でなければ真ん中の 0.5 にする。
+
+    例: 0.8 → 0.8、2 → 1.0、"high" → 0.5、NaN → 0.5
+    """
     # bool は Python では数値の仲間（True == 1）なので、先に弾く
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 0.5
+    # NaN・Infinity も数値ではない扱いにする。clamp(NaN) は上限の 1.0 を返してしまうため（#7）
+    if not math.isfinite(value):
+        return 0.5
     return clamp(float(value), 0.0, 1.0)
+
+
+def _kind(value: object) -> str | None:
+    """記憶の種類を小文字にそろえる。文字列でなければ None。
+
+    例: "Event" → "event"、" habit " → "habit"、3 → None
+    """
+    return value.strip().lower() if isinstance(value, str) else None
+
+
+def _memory_id(value: object) -> int | None:
+    """記憶の id を整数に直す。直せなければ None（その更新は捨てる）。
+
+    例: 3 → 3、"3" → 3、" 12 " → 12、True → None、"abc" → None、3.0 → None
+    """
+    # bool は Python では int の仲間（True == 1）なので、先に弾く
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdecimal():
+        return int(value.strip())
+    return None
 
 
 def _strip_fence(raw: str) -> str:
@@ -150,23 +180,24 @@ def parse_reflection(raw: str) -> ReflectionResult:
     if not isinstance(data["trait_deltas"], dict):
         raise ReflectionError("trait_deltas がオブジェクトではない")
 
-    # 3. 新しい記憶: 中身が空でなく、種類が 3 種類のどれかのものだけ使う
+    # 3. 新しい記憶: 中身が空でなく、種類が 3 種類のどれかのものだけ使う。
+    #    種類は "Event" のように大文字で来ることがあるので、小文字にそろえてから比べる（#8）
     new_memories = [
-        NewMemory(m["content"], m["kind"], _importance(m.get("importance")))
+        NewMemory(m["content"], _kind(m.get("kind")), _importance(m.get("importance")))
         for m in data["new_memories"]
         if isinstance(m, dict)
         and isinstance(m.get("content"), str)
         and m["content"].strip()
-        and m.get("kind") in MEMORY_KINDS
+        and _kind(m.get("kind")) in MEMORY_KINDS
     ]
-    # 4. 記憶の更新: id が整数（True/False は除く）で、中身が空でないものだけ使う
+    # 4. 記憶の更新: id が整数で、中身が空でないものだけ使う。
+    #    id は "3" のように文字列で来ることがあるので、数字だけの文字列は整数に直す（#8）
     #    （存在しない id は、DB に書くとき store.apply_reflection が無視する）
     updated_memories = [
-        MemoryUpdate(m["id"], m["content"], _importance(m.get("importance")))
+        MemoryUpdate(_memory_id(m.get("id")), m["content"], _importance(m.get("importance")))
         for m in data["updated_memories"]
         if isinstance(m, dict)
-        and isinstance(m.get("id"), int)
-        and not isinstance(m.get("id"), bool)
+        and _memory_id(m.get("id")) is not None
         and isinstance(m.get("content"), str)
         and m["content"].strip()
     ]
