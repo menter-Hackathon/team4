@@ -116,6 +116,14 @@ async def test_awake_reply_has_no_instructions_and_blank_is_ignored(conv, store)
     assert [u.text for u in store.get_utterances(current_sid(store))] == ["ただいま"]
 
 
+@pytest.mark.parametrize("text", ["。", "…", "！？", "、。 "])
+async def test_awake_punctuation_only_is_ignored_and_not_recorded(conv, store, text):
+    await conv.on_user_turn("ふたまる")
+    await conv.on_user_turn("ただいま")
+    assert (await conv.on_user_turn(text)).kind == "ignore"
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["ただいま"]
+
+
 async def test_plant_utterance_only_recorded_when_awake(conv, store):
     conv.on_plant_utterance("ねむい")
     assert session_ids(store) == []
