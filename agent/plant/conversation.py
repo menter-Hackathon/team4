@@ -74,22 +74,47 @@ class PlantConversation:
     # --- ユーザー・植物の発話 ---
 
     async def on_user_turn(self, text: str) -> TurnDecision:
+        """ユーザーが話し終えたときに呼ばれ、植物がどう応じるかを決める（仕様 §5）。
+
+        引数:
+            text: STT が文字起こししたユーザーの発話
+        戻り値:
+            TurnDecision。kind が
+            - "ignore": 何もしない（眠っていてウェイクワードが無い、中身の無い発話など）
+            - "greet":  ウェイクワードだけで起こされた → 植物から話しかける
+            - "reply":  発話（text）に返事する
+
+        例（眠っているとき）:
+            "おはよう"                   → ignore（ウェイクワードが無い）
+            "ふたまる"                   → greet
+            "ふたまる、今日カレー食べた" → reply（text = "今日カレー食べた"）
+        例（起きているとき）:
+            "ただいま" → reply（text = "ただいま"）
+            "。"       → ignore（#10）
+        """
         text = text.strip()
-        # STT は雑音を「。」「…」などと文字起こしすることがある。normalize() は空白・句読点・記号を
-        # 消すので、消して何も残らなければ中身の無い発話として、返事も記録もしない（#10）
+
+        # 1. 中身の無い発話を捨てる。
+        #    STT は雑音を「。」「…」などと文字起こしすることがある。normalize() は空白・句読点・記号を
+        #    消すので、消して何も残らなければ中身の無い発話として、返事も記録もしない（#10）
         if not normalize(text):
             return TurnDecision("ignore")
 
+        # 2. 眠っているとき: ウェイクワードがあるときだけ起きる
         if not self.awake:
             match = detect_wake(text, self._wake_words)
             if match is None:
-                return TurnDecision("ignore")
+                return TurnDecision("ignore")  # ウェイクワードが無い → 寝たまま
+            # 起きる。新しいセッションを始め、性格・記憶入りのシステムプロンプトを受け取る
             instructions = self._wake()
             if match.rest:
+                # 「ふたまる、今日カレー食べた」のように続きがある → その続きに返事する
                 self._record("user", match.rest)
                 return TurnDecision("reply", match.rest, instructions)
+            # 「ふたまる」だけ → 植物から話しかける（挨拶なのでユーザー発話は記録しない）
             return TurnDecision("greet", instructions=instructions)
 
+        # 3. 起きているとき: 発話を記録し、無言タイマーをリセットして返事する
         self._record("user", text)
         self._controller.on_user_activity(self._clock())
         return TurnDecision("reply", text)
