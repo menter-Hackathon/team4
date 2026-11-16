@@ -18,7 +18,7 @@
 
 ### 範囲外
 - ESP32 ファームウェア、3Dプリント筐体（ただし ESP32 側に求める要件は §9 で定義する）
-- GPU サーバーへのモデルのデプロイ作業（ただし API 契約は §8 で定義する）
+- 各 PC へのモデルの導入作業（ただし API 契約は §8 で定義する）
 - 話者識別（1株を誰が話しかけても同一ユーザーとして扱う）
 - 眠っている間の自発的な発話、時刻ベースのスケジュール発話
 - 性格・記憶を可視化するダッシュボード（デモでは `scripts/simulate.py` の出力を使う）
@@ -29,11 +29,11 @@
 |---|---|
 | 音声エージェントフレームワーク | LiveKit Agents (Python) |
 | LiveKit サーバー | LiveKit Cloud |
-| LLM | Gemma 4（GPU サーバー上の vLLM ≥ 0.19、OpenAI 互換 API）。モデルサイズは**未決**（§13） |
-| STT | kotoba-whisper v2.0（GPU サーバー上の Speaches、OpenAI 互換 API） |
+| LLM | Gemma 4 E4B（`google/gemma-4-E4B-it`）。チームの誰かの PC 上で OpenAI 互換 API として動かす（vLLM ≥ 0.19 など、§8.1） |
+| STT | kotoba-whisper v2.0（誰かの PC 上の Speaches、OpenAI 互換 API） |
 | TTS | OpenAI TTS（`gpt-4o-mini-tts`、クラウド API）。LiveKit 公式の OpenAI プラグインを使う |
 | VAD | Silero VAD（エージェント内で実行） |
-| エージェント実行場所 | GPU サーバー（開発時はローカル PC） |
+| エージェント実行場所 | 誰かの PC（デモでは決めた 1 台）。オンライン開催で共有の GPU サーバーは無い。鉢の中はマイコン・マイク・スピーカーだけにする（#23） |
 | 個体の単位 | 1デバイス = 1株。`plant_id` で識別 |
 | 植物の名前 | 全株共通で「ふたまる」（ウェイクワードと同じ） |
 | 起動方法 | ウェイクワード「ふたまる」。サーバー側で文字起こし結果から検出 |
@@ -285,29 +285,29 @@ CREATE TABLE trait_history (
 
 ## 8. モデル API 契約
 
-URL・モデル名はすべて環境変数で指定する。開発時はローカル PC 上のモデルやクラウド API に向けて同じ環境変数を設定して動かす。
+URL・モデル名はすべて環境変数で指定する。開発時はローカル PC 上のモデルやクラウド API（OpenAI など）に向けて同じ環境変数を設定して動かす。
 
-### 8.1 LLM: Gemma 4 on vLLM（GPU サーバー）
+### 8.1 LLM: Gemma 4 on vLLM（PC）
 
 | 項目 | 内容 |
 |---|---|
 | 環境変数 | `LLM_BASE_URL`, `LLM_MODEL` |
 | エンドポイント | `POST {LLM_BASE_URL}/chat/completions`（OpenAI 互換、ストリーミング） |
 | vLLM バージョン | 0.19 以上（Gemma 4 のネイティブ実装が入った版） |
-| 起動例 | `vllm serve google/gemma-4-26B-A4B-it --max-model-len 32768 --gpu-memory-utilization 0.90` |
+| 起動例 | `vllm serve google/gemma-4-E4B-it --max-model-len 32768 --gpu-memory-utilization 0.80`（STT の分を残す） |
 | 思考モード | 使わない（`enable_thinking` を指定しない）。応答遅延を抑えるため |
 
-モデルサイズは GPU メモリで決める（BF16 の目安、vLLM 公式レシピより）。
+**決定（2026-11-16、#23）: `google/gemma-4-E4B-it` を使う。** 下の表は検討時の参考（BF16 の目安、vLLM 公式レシピより）。NVIDIA の GPU が無い PC では、Ollama・LM Studio などの OpenAI 互換 API で動かす。
 
 | GPU メモリ | モデル | 備考 |
 |---|---|---|
-| 80GB（A100/H100 等） | `google/gemma-4-26B-A4B-it`（MoE、アクティブ 4B） | **推奨**。日本語の会話品質と速度のバランスが良い |
+| 80GB（A100/H100 等） | `google/gemma-4-26B-A4B-it`（MoE、アクティブ 4B） | 日本語の会話品質と速度のバランスが良いが、GPU サーバーが無いため見送り |
 | 40GB 以上 | `google/gemma-4-12B-it` | 12B は stable 版 vLLM 未対応（nightly のみ）のため、使う場合は版を固定して事前検証する |
-| 24GB 以上 | `google/gemma-4-E4B-it` | 最小構成。性格の演じ分けの品質はデモ前に要確認 |
+| 24GB 以上 | `google/gemma-4-E4B-it` | **採用**。性格の演じ分けの品質はデモ前に要確認 |
 
 **reflection の JSON 出力**: vLLM の構造化出力（`response_format: {"type": "json_schema", ...}`）で Gemma 4 がサポートされている。reflection では §6.3 の JSON スキーマを `json_schema` として渡し、加えてシステムメッセージにも出力形式を書く（公式レシピの推奨）。構造化出力を使っても、必須キー欠落などに備えて §6.3 の検証と1回再試行は残す。
 
-### 8.2 STT: kotoba-whisper on Speaches（GPU サーバー）
+### 8.2 STT: kotoba-whisper on Speaches（PC）
 
 | 項目 | 内容 |
 |---|---|
@@ -331,7 +331,7 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 | 料金 | 目安 1 分の音声あたり約 $0.015。30 文字程度の応答なら 1,000 応答で数ドル程度 |
 
 - 会場ネットワークから OpenAI API への接続が必要になる。デモ前に会場回線で初回音声までの遅延を測る。
-- 代替: OpenAI に繋がらない・遅い場合は、`TTS_BASE_URL` を OpenAI 互換の自前 TTS（例: GPU サーバー上の MioTTS）に向けるだけで切り替える。この場合 `instructions` は無視される前提で動くようにする。
+- 代替: OpenAI に繋がらない・遅い場合は、`TTS_BASE_URL` を OpenAI 互換の自前 TTS（例: PC 上の MioTTS）に向けるだけで切り替える。この場合 `instructions` は無視される前提で動くようにする。
 
 ### 8.4 その他の環境変数
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（LiveKit Cloud）
@@ -412,4 +412,4 @@ ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk
 
 | # | 事項 | 現在の仮置き | 決まったら変わる箇所 |
 |---|---|---|---|
-| 1 | GPU サーバーのメモリ容量 | 未定。80GB なら `gemma-4-26B-A4B-it`、24GB なら `gemma-4-E4B-it`（§8.1 の表） | §2、§8.1 の `LLM_MODEL` |
+| 1 | GPU サーバーのメモリ容量 | **決定済み（2026-11-16、#23）**: GPU サーバーは使わず誰かの PC で動かす。モデルは `gemma-4-E4B-it` | §2、§8.1 に反映済み |
