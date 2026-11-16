@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import AsyncIterable
 
@@ -39,7 +38,6 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     llm,
-    tts,
 )
 from livekit.plugins import silero
 
@@ -168,7 +166,7 @@ class FutamaruAgent(Agent):
     async def transcription_node(
         self, text: AsyncIterable[str], model_settings: ModelSettings
     ) -> AsyncIterable[str]:
-        # 画面・ログ用の文字起こしからもタグを除く（表情は tts_node から送る）
+        # 画面・ログ用の文字起こしからもタグを除く（表情のログは tts_node で出す）
         parser = ExpressionParser()
         async for delta in text:
             out = parser.feed(delta).text
@@ -243,19 +241,10 @@ async def entrypoint(ctx: JobContext) -> None:
     device_identity = f"device-{plant_id}"  # この株の ESP32 がルームで名乗る名前（仕様 §3）
     store = PlantStore(cfg.db_path)
 
-    async def send_expression(name: str) -> None:
-        """表情を ESP32 に送る（LiveKit の RPC で set_expression を呼ぶ）。#22 でなくなる予定。"""
-        await ctx.room.local_participant.perform_rpc(
-            destination_identity=device_identity,
-            method="set_expression",
-            payload=json.dumps({"expression": name}),
-        )
-
     conv = PlantConversation(
         store=store,
         plant_id=plant_id,
         complete_json=create_json_completer(cfg),
-        send_expression=send_expression,
         clock=jst_now,
         wake_words=cfg.wake_words,
         sleep_after=cfg.sleep_after,
@@ -305,18 +294,6 @@ async def entrypoint(ctx: JobContext) -> None:
         item = ev.item
         if isinstance(item, ChatMessage) and item.role == "assistant":
             conv.on_plant_utterance(item.text_content or "")
-
-    # STT・LLM・TTS のどこかでエラーが起きた。声が出せないときは眠そうな顔にする
-    @session.on("error")
-    def _on_error(ev) -> None:
-        if isinstance(ev.source, tts.TTS):
-            conv.express("sleepy")
-
-    # 誰かがルームに入ってきた。この株の ESP32 なら、眠っている顔を出す
-    @ctx.room.on("participant_connected")
-    def _on_join(p: rtc.RemoteParticipant) -> None:
-        if p.identity == device_identity:
-            conv.express("sleepy")
 
     # 誰かがルームから出たときに LiveKit から呼ばれる。
     # 出たのがこの株の ESP32 なら、セッションを終える（眠らせて振り返り、会話履歴も捨てる。#5）

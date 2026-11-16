@@ -1,4 +1,4 @@
-"""1株ぶんの会話の進行: 起床・記録・睡眠・reflection の起動・表情送信（仕様 §5, §7）。
+"""1株ぶんの会話の進行: 起床・記録・睡眠・reflection の起動・表情のログ（仕様 §5, §7）。
 
 LiveKit には依存しない。main.py が LiveKit のイベントをこのクラスのメソッドに配線する。
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -29,9 +29,6 @@ from .timeutil import Clock
 from .wake import WakeController, detect_wake, normalize
 
 logger = logging.getLogger(__name__)
-
-# 表情を ESP32 に送る関数の型。main.py が LiveKit の RPC で送る関数を渡す（#22 でなくなる予定）
-SendExpression = Callable[[str], Awaitable[None]]
 
 # 起動時に再実行する未処理 reflection の上限。LLM が落ちていても起動を何分も止めないため
 RECOVERY_LIMIT = 3
@@ -53,7 +50,6 @@ class PlantConversation:
         store: 会話ログ・記憶・性格を保存する DB
         plant_id: どの株か（例: "a1"）
         complete_json: 振り返りで LLM に JSON を作らせる関数
-        send_expression: 表情を ESP32 に送る関数
         clock: 現在時刻を返す関数（テストでは偽物の時計）
         wake_words: ウェイクワードの一覧（例: ("ふたまる", "二丸")）
         sleep_after: 何秒だれも話さなければ眠るか
@@ -65,7 +61,6 @@ class PlantConversation:
         store: PlantStore,
         plant_id: str,
         complete_json: JsonCompleter,
-        send_expression: SendExpression,
         clock: Clock,
         wake_words: Sequence[str],
         sleep_after: float,
@@ -73,7 +68,6 @@ class PlantConversation:
         self._store = store
         self._plant_id = plant_id
         self._complete_json = complete_json
-        self._send_expression = send_expression
         self._clock = clock
         self._wake_words = tuple(wake_words)
         self._controller = WakeController(
@@ -82,7 +76,6 @@ class PlantConversation:
         self._session_id: int | None = None  # 今のセッションの DB 上の id。眠っている間は None
         # 裏で動いている振り返りのタスク。終了時に待つために覚えておく
         self._reflections: set[asyncio.Task] = set()
-        self._expression_tasks: set[asyncio.Task] = set()  # 送信中の表情のタスク
 
     @property
     def awake(self) -> bool:
@@ -99,7 +92,6 @@ class PlantConversation:
         pending = self._store.unreflected_sessions(self._plant_id)[-RECOVERY_LIMIT:]
         if pending:
             self._track(self._reflect_all(pending, self._clock()))
-        self.express("sleepy")
 
     # --- ユーザー・植物の発話 ---
 
@@ -166,15 +158,11 @@ class PlantConversation:
     def on_user_speaking(self, speaking: bool) -> None:
         """ユーザーが話し始めた・話し終えた（LiveKit の音声検出から呼ばれる）。"""
         self._controller.set_user_speaking(speaking, self._clock())
-        if speaking and self.awake:
-            self.express("listening")
 
     def on_agent_state(self, state: str) -> None:
         """植物（エージェント）の状態が変わった。"thinking"（考え中）・"speaking"（話し中）など。"""
         # 考え中・話し中は無言ではないので、無言タイマーを止める
         self._controller.set_plant_busy(state in ("thinking", "speaking"), self._clock())
-        if state == "thinking" and self.awake:
-            self.express("thinking")
 
     async def tick(self) -> Literal["none", "nudge", "slept"]:
         """main.py が 1 秒ごとに呼ぶ。無言が続いていたら眠る（"slept"）か、話題を振る（"nudge"）。"""
@@ -204,7 +192,6 @@ class PlantConversation:
     async def _sleep(self) -> None:
         """眠る。セッションを終わらせ、その会話の振り返りを裏で始める。"""
         self._controller.sleep()
-        self.express("sleepy")
         # 今のセッション id を取り出し、同時に「セッションなし」に戻す
         session_id, self._session_id = self._session_id, None
         if session_id is None:
@@ -242,15 +229,11 @@ class PlantConversation:
     # --- 表情 ---
 
     def express(self, name: str) -> None:
-        """表情をログに出し、ESP32 に送る（送り終わるのは待たない）。#22 で送信はなくなる予定。"""
-        logger.info("expression=%s (plant=%s)", name, self._plant_id)
-        task = asyncio.create_task(self._send(name))
-        self._expression_tasks.add(task)
-        task.add_done_callback(self._expression_tasks.discard)
+        """LLM の返事の先頭で決まった表情を、ログに残す（仕様 §7.1）。
 
-    async def _send(self, name: str) -> None:
-        """表情を送る。ESP32 が受け取れなくても会話は止めず、警告をログに残すだけにする。"""
-        try:
-            await self._send_expression(name)
-        except Exception:
-            logger.warning("failed to send expression %s", name, exc_info=True)
+        顔のディスプレイは付けないことにしたので（2026-11-16、#22）、ESP32 には送らない。
+        ログに残すのは、console や docker compose logs で「どんな気持ちで返事したか」を確かめるため。
+
+        例: express("happy") → ログに "expression=happy (plant=a1)" と出る
+        """
+        logger.info("expression=%s (plant=%s)", name, self._plant_id)
