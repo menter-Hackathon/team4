@@ -38,7 +38,26 @@ class WakeMatch:
 
 
 def detect_wake(text: str, wake_words: Sequence[str]) -> WakeMatch | None:
-    # 正規化後の各文字が、元の文字列の何文字目から来たかを記録する
+    """文字起こし `text` にウェイクワードがあれば、その後ろに続く文（rest）を返す（仕様 §5.3）。
+
+    ウェイクワードが無ければ None。ウェイクワードだけ（後ろが 2 文字未満）なら rest は ""。
+    敬称と繰り返したウェイクワードは rest に含めない（#6）。
+
+    例:
+        "ふたまる、今日カレー食べた" → rest = "今日カレー食べた"
+        "ふたまるちゃん"             → rest = ""（挨拶する）
+        "ふたまるくん元気？"         → rest = "元気？"
+        "ふたまる、ふたまる、聞いて" → rest = "聞いて"
+        "ふたまる、さんぽ行こう"     → rest = "さんぽ行こう"（区切りの後ろの「さん」は敬称ではない）
+        "おはよう"                   → None
+
+    手順:
+        1. 表記ゆれ（カタカナ・全角・記号）をなくした文字列 joined を作り、そこでウェイクワードを探す
+        2. ウェイクワードの直後にある敬称と、繰り返しのウェイクワードを読み飛ばす
+        3. 読み飛ばした位置から後ろを、元の text から切り出して rest にする
+    """
+    # 1. joined は記号を消しているので位置が元の text とずれる。
+    #    rest を元の表記のまま切り出せるよう、各文字が text の何文字目から来たか（origin）を残す
     normalized: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
@@ -56,6 +75,7 @@ def detect_wake(text: str, wake_words: Sequence[str]) -> WakeMatch | None:
     if best is None:
         return None
 
+    # 2. end は joined の中で「ここから後ろが発話の中身」になる位置。敬称・繰り返しがある限り後ろへ進める
     end = best[1]
     while True:
         # 「ふたまる、さんぽ」の「さん」は敬称ではないので、区切りを挟まず続くときだけ取る
@@ -66,11 +86,13 @@ def detect_wake(text: str, wake_words: Sequence[str]) -> WakeMatch | None:
             break
         end += len(suffix)
 
+    # 3. 元の text から切り出し、先頭の読点・空白などと末尾の空白を落とす
     rest = text[origin[end - 1] + 1 :]
     i = 0
     while i < len(rest) and not _normalize_char(rest[i]):
         i += 1
     rest = rest[i:].rstrip()
+    # 「ふたまる、ね」の「ね」のような短すぎる残りは、話しかけではなく呼びかけとして扱う
     if len(normalize(rest)) < MIN_REST_CHARS:
         rest = ""
     return WakeMatch(rest)
