@@ -141,6 +141,13 @@ server = AgentServer(setup_fnc=prewarm)
 
 
 def resolve_plant_id(room_name: str, cfg: Config) -> str | None:
+    """ルーム名から、どの株（plant_id）として会話するかを決める。None なら参加せず退出する。
+
+    例:
+        "plant-a1"                       → "a1"（ESP32 の株。本番・dev モード）
+        "console-room"＋DEV_PLANT_ID=dev → "dev"（PC のマイクで試す console モード）
+        "other-room"                     → None（DEV_PLANT_ID があっても退出。#11）
+    """
     if room_name.startswith(ROOM_PREFIX) and len(room_name) > len(ROOM_PREFIX):
         return room_name[len(ROOM_PREFIX) :]
     # DEV_PLANT_ID は console 専用。dev / start モードで他のルームに呼ばれたら退出する（仕様 §3・§10）
