@@ -1,0 +1,115 @@
+# ふたまるの「脳」をまとめて起動する compose ファイル（設計: docs/superpowers/specs/2026-11-16-docker-backend-design.md）
+#
+#   docker compose up -d       … 起動（初回はモデルのダウンロードで時間がかかる）
+#   docker compose logs -f agent  … エージェントのログを見る
+#   docker compose down        … 停止
+#
+# 手順書: docs/deploy.md
+# 前提: NVIDIA の GPU（24GB 以上）と、ドライバ 580 以上（CUDA 13.0 対応）がある PC。鉢（ESP32）とは LiveKit Cloud 経由でつながる。
+#
+# 中身:
+#   llm      … Gemma 4 E4B を動かす（vLLM、GPU を使う）
+#   stt      … kotoba-whisper で声を文字にする（Speaches、GPU を使う）
+#   stt-init … 起動時に一度だけ動き、stt に音声認識のモデルをダウンロード・読み込みさせて終わる
+#   agent    … ふたまるのエージェント。llm の準備と stt-init の完了を待ってから起動する
+
+# GPU を使うサービスに共通の設定。NVIDIA の GPU を全部見えるようにする
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  llm:
+    <<: *gpu
+    # vLLM 公式イメージ。Gemma 4 に対応した 0.19 以上の版を固定する。
+    # この版は CUDA 13.0 で作られているので、NVIDIA ドライバ 580 以上が必要（docs/deploy.md）
+    image: vllm/vllm-openai:v0.33.0
+    # 思考モードは使わない（enable_thinking を渡さない。仕様 §8.1）
+    # --gpu-memory-utilization 0.8: GPU メモリの 8 割まで使う。残りを stt に回す
+    #   （E4B の重みだけで約 16GB あるので、24GB の GPU ではこれより大きく下げられない）
+    # --max-model-len 16384: 一度に扱える文章の長さの上限。メモリ不足のときの調整方法は docs/deploy.md
+    command:
+      - google/gemma-4-E4B-it
+      - --max-model-len
+      - "16384"
+      - --gpu-memory-utilization
+      - "0.8"
+    environment:
+      # Hugging Face のトークン（任意）。Gemma 4 E4B は同意不要の公開モデルなので、空でもダウンロードできる。
+      # 書くと Hugging Face の回数制限に当たりにくくなる
+      HF_TOKEN: ${HF_TOKEN:-}
+    # vLLM の推奨設定。プロセス間で共有メモリを使えるようにする
+    ipc: host
+    volumes:
+      # ダウンロードしたモデルを残し、2 回目からはダウンロードしない
+      - hf-cache:/root/.cache/huggingface
+    healthcheck:
+      # /health が応答したら準備完了。初回はダウンロードに時間がかかるので、最大 60 分ほど待つ
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 240
+      start_period: 60s
+    restart: unless-stopped
+
+  stt:
+    <<: *gpu
+    # Speaches 公式イメージ（CUDA 版）
+    image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda
+    environment:
+      # モデルを使い終わっても外さない（外すと次の発話の文字起こしが遅くなる）
+      STT_MODEL_TTL: "-1"
+    volumes:
+      - speaches-cache:/home/ubuntu/.cache/huggingface/hub
+    restart: unless-stopped
+
+  stt-init:
+    # stt と同じイメージ（ダウンロード済み）の Python で scripts/stt_init.py を動かす。
+    # 1. モデルのダウンロードを頼む（stt が起動するまで最大 10 分ほど再試行）
+    # 2. 無音を一度文字起こしさせて、モデルを GPU に読み込ませる（最初の「ふたまる」が遅れないように）
+    # 成功したら終わる。失敗したらエラーで止まり、agent は起動しない
+    image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda
+    entrypoint: ["python", "/stt_init.py"]
+    command: []
+    environment:
+      STT_URL: http://stt:8000
+      STT_MODEL: ${DOCKER_STT_MODEL:-kotoba-tech/kotoba-whisper-v2.0-faster}
+    volumes:
+      - ./scripts/stt_init.py:/stt_init.py:ro
+    depends_on:
+      - stt
+    restart: "no"
+
+  agent:
+    build: .
+    # キー類（LiveKit・OpenAI）は .env から読む
+    env_file: .env
+    # LLM・STT の場所は、.env の値（開発用に OpenAI を向けていても）より、こちらを優先する
+    environment:
+      LLM_BASE_URL: http://llm:8000/v1
+      LLM_MODEL: google/gemma-4-E4B-it
+      LLM_API_KEY: EMPTY
+      STT_BASE_URL: http://stt:8000/v1
+      STT_MODEL: ${DOCKER_STT_MODEL:-kotoba-tech/kotoba-whisper-v2.0-faster}
+      STT_API_KEY: EMPTY
+      FUTAMARU_DB_PATH: /app/data/futamaru.db
+      # console 専用の設定なので、コンテナでは空にする
+      DEV_PLANT_ID: ""
+    volumes:
+      # 会話ログ・記憶の DB をホストの ./data に残す（コンテナを作り直しても植物の記憶が消えない）
+      - ./data:/app/data
+    depends_on:
+      llm:
+        condition: service_healthy
+      stt-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  speaches-cache:
