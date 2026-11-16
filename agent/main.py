@@ -45,6 +45,7 @@ load_dotenv()
 logger = logging.getLogger("futamaru")
 
 ROOM_PREFIX = "plant-"
+CONSOLE_ROOM = "console-room"  # LiveKit Agents の console モードが使うルーム名
 TICK_SECONDS = 1.0
 
 
@@ -142,7 +143,10 @@ server = AgentServer(setup_fnc=prewarm)
 def resolve_plant_id(room_name: str, cfg: Config) -> str | None:
     if room_name.startswith(ROOM_PREFIX) and len(room_name) > len(ROOM_PREFIX):
         return room_name[len(ROOM_PREFIX) :]
-    return cfg.dev_plant_id  # console モードなど（開発用）。無ければ退出
+    # DEV_PLANT_ID は console 専用。dev / start モードで他のルームに呼ばれたら退出する（仕様 §3・§10）
+    if room_name == CONSOLE_ROOM:
+        return cfg.dev_plant_id
+    return None
 
 
 @server.rtc_session()
