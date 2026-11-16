@@ -43,17 +43,13 @@ python3 - <<'PY'
 import json
 s = json.load(open("/tmp/compose.json"))["services"]
 assert s["agent"]["environment"]["STT_MODEL"] == "Systran/faster-whisper-large-v3", s["agent"]["environment"]
-assert s["stt-init"]["command"][-1] == "http://stt:8000/v1/models/Systran/faster-whisper-large-v3", s["stt-init"]["command"]
+assert s["stt-init"]["environment"]["STT_MODEL"] == "Systran/faster-whisper-large-v3", s["stt-init"]["environment"]
 print("ok: DOCKER_STT_MODEL で STT のモデルを切り替えられる")
 PY
 
-# 3. HF_TOKEN が空なら、起動前にエラーで止まること
+# 3. HF_TOKEN は任意（Gemma 4 E4B は同意不要の公開モデル）。空でも compose の設定が組み立てられること
 cp .env.example .env
-if docker compose config -q 2>/tmp/err.txt; then
-  echo "NG: HF_TOKEN が空なのに compose config が通ってしまった" >&2
-  exit 1
-fi
-grep -q "HF_TOKEN" /tmp/err.txt
-echo "ok: HF_TOKEN が空ならエラーで止まる"
+docker compose config -q
+echo "ok: HF_TOKEN が空でも起動できる"
 
 rm -f .env
