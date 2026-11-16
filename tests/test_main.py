@@ -127,3 +127,12 @@ async def test_end_session_closes_conversation_and_forgets_history():
     # 会話が閉じられ（＝振り返りが走る）、次に起きたとき前の会話が混ざらないよう履歴が空になる
     assert conv.closed
     assert agent.chat_ctx.items == []
+
+
+def test_turn_handling_uses_endpointing_delay_from_config():
+    # 返事を作り始めるまでの待ちを .env で変えられる（#39）。先回りの返事は使わないまま
+    cfg = load_config({**CFG, "ENDPOINTING_DELAY_SECONDS": "0.2"})
+    opts = main.turn_handling(cfg)
+    assert opts["turn_detection"] == "vad"
+    assert opts["endpointing"] == {"min_delay": 0.2}
+    assert opts["preemptive_generation"] == {"enabled": False}
