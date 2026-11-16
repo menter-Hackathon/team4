@@ -44,7 +44,10 @@ from agent.plugins.whisper_stt import create_stt
 load_dotenv()
 logger = logging.getLogger("futamaru")
 
+# ESP32 の株が入るルームは "plant-<plant_id>"（仕様 §3）
 ROOM_PREFIX = "plant-"
+# LiveKit Agents の console モード（PC のマイク・スピーカーで試すモード）が使うルーム名
+CONSOLE_ROOM = "console-room"
 TICK_SECONDS = 1.0
 
 
@@ -150,9 +153,23 @@ server = AgentServer(setup_fnc=prewarm)
 
 
 def resolve_plant_id(room_name: str, cfg: Config) -> str | None:
+    """ルーム名から、どの株（plant_id）として会話するかを決める。None なら参加せず退出する。
+
+    例:
+        "plant-a1"                       → "a1"（ESP32 の株。本番・dev モード）
+        "console-room"＋DEV_PLANT_ID=dev → "dev"（PC のマイクで試す console モード）
+        "other-room"                     → None（DEV_PLANT_ID があっても退出。#11）
+    """
+    # 1. ESP32 の株: ルーム名が "plant-<id>" なら、"plant-" を外した残りが plant_id
+    #    （"plant-" だけで id が空のときは株ではないので 2 以降へ）
     if room_name.startswith(ROOM_PREFIX) and len(room_name) > len(ROOM_PREFIX):
         return room_name[len(ROOM_PREFIX) :]
-    return cfg.dev_plant_id  # console モードなど（開発用）。無ければ退出
+    # 2. console モード: ESP32 が無いので、.env の DEV_PLANT_ID を株として使う（未設定なら None）
+    if room_name == CONSOLE_ROOM:
+        return cfg.dev_plant_id
+    # 3. それ以外のルーム: DEV_PLANT_ID があっても使わず退出する（仕様 §3・§10、#11）。
+    #    dev / start モードで関係ないルームに呼ばれたとき、開発用の株として話し出さないように
+    return None
 
 
 @server.rtc_session()

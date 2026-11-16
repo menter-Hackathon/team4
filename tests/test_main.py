@@ -34,6 +34,14 @@ def test_resolve_plant_id():
     )
 
 
+def test_dev_plant_id_is_ignored_outside_console_room():
+    # dev / start モードで plant- 以外のルームに呼ばれたら、DEV_PLANT_ID があっても退出する（#11）
+    cfg = load_config({**CFG, "DEV_PLANT_ID": "dev"})
+    assert main.resolve_plant_id("other-room", cfg) is None
+    assert main.resolve_plant_id("plant-", cfg) is None
+    assert main.resolve_plant_id("plant-a1", cfg) == "a1"
+
+
 def chunk(text):
     return llm.ChatChunk(id="c", delta=llm.ChoiceDelta(role="assistant", content=text))
 
