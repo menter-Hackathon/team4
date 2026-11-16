@@ -24,6 +24,8 @@ uv run python -m agent.main dev     # 開発用（ホットリロード）
 uv run python -m agent.main start   # 本番
 ```
 
+NVIDIA の GPU がある PC では、エージェント・LLM・STT をまとめて Docker で動かせます（`docker compose up -d`）。手順は [docs/deploy.md](docs/deploy.md) を見てください。
+
 「ふたまる」と呼ぶと起き、60秒黙ると眠ります。眠るたびに会話から記憶と性格が更新されます（`data/futamaru.db`）。
 
 ## ESP32 用トークンの発行
