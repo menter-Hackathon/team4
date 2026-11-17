@@ -23,8 +23,9 @@ TRAIT_NAMES = ("talkativeness", "affection", "energy", "curiosity")
 # 1 回の振り返りで動かせる最大の量。1 回の会話で性格が急に変わらないようにする（仕様 §6.3）
 MAX_DELTA = 0.05
 
-# 値を 3 段階に分けたもの。プロンプトの指示文を選ぶのに使う（prompt.py）
-Level = Literal["low", "mid", "high"]
+# 値を 5 段階に分けたもの。プロンプトの指示文を選ぶのに使う（prompt.py）
+# 3 段階では、初期値 0.5 から段階が変わるまでに 4 回以上の会話が要り、変化が話し方に出にくかった（#57）
+Level = Literal["very_low", "low", "mid", "high", "very_high"]
 
 
 @dataclass(frozen=True)
@@ -47,12 +48,27 @@ def clamp(x: float, lo: float, hi: float) -> float:
 
 
 def level(value: float) -> Level:
-    """値を 3 段階に分ける（仕様 §6.4）。0.0〜0.33 → "low"、〜0.66 → "mid"、0.67〜1.0 → "high"。"""
-    if value <= 0.33:
+    """値を 5 段階に分ける（仕様 §6.4）。
+
+    真ん中の 0.5 から 0.1 以上離れると「やや」、0.3 以上離れると「かなり」になる。
+        〜0.2 → "very_low"、〜0.4 → "low"、0.4 と 0.6 の間 → "mid"、0.6〜 → "high"、0.8〜 → "very_high"
+    境目の値（0.2・0.4・0.6・0.8）は、0.5 から遠いほうの段階に入れる。
+    1 回の会話で動くのは最大 ±0.05 なので、初期値 0.5 からは最短 2 回の会話で段階が変わる。
+
+    例: 0.5 → "mid"、0.4 → "low"、0.6 → "high"、0.85 → "very_high"
+    """
+    # 小数の足し引きで 0.6 が 0.6000000000000001 や 0.5999999999999999 になることがあるので、
+    # 細かい誤差を丸めてから比べる（同じ 2 回の会話でも、上がるときと下がるときで結果が変わらないように）
+    v = round(value, 6)
+    if v <= 0.2:
+        return "very_low"
+    if v <= 0.4:
         return "low"
-    if value < 0.67:
+    if v < 0.6:
         return "mid"
-    return "high"
+    if v < 0.8:
+        return "high"
+    return "very_high"
 
 
 def _as_delta(value: object) -> float:
