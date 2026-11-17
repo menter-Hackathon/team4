@@ -15,8 +15,9 @@ from dataclasses import dataclass
 
 # TTS に渡す話し方の指示（gpt-4o-mini-tts が対応。自前の TTS では無視される）
 TTS_INSTRUCTIONS = "やわらかく、少しゆっくり、のんびりした植物らしい話し方で話す。"
-# WAKE_WORDS が .env に無いときに使うウェイクワード。STT がよく書く表記をまとめている
-DEFAULT_WAKE_WORDS = ("ふたまる", "二丸", "ふた丸", "2丸")
+# WAKE_WORDS が .env に無いときに使うウェイクワード。STT がよく書く表記をまとめている。
+# 「下丸」は「ふたまるくん」が「下丸くん」と聞き取られたことがあるので足した（2026-11-16、#2）
+DEFAULT_WAKE_WORDS = ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
 # FUTAMARU_DB_PATH が .env に無いときの DB ファイルの場所
 DEFAULT_DB_PATH = "./data/futamaru.db"
 
