@@ -306,7 +306,7 @@ CREATE TABLE trait_history (
 - セッションの相手は `sessions.person_id` に記録する。
 
 **方言の決め方**
-1. `people.dialect_override` があれば、判定に関係なくその方言で話す（手で固定できる。NULL なら自動）。
+1. `people.dialect_override` があれば、判定に関係なくその方言で話す（手で固定できる。NULL なら自動）。手で固定するコマンド（`scripts/people.py`）で登録する名前も、会話で名乗った名前と同じく、改行を空白にして長さを切ってから保存する。
 2. 無ければ、その人との直近 5 回のセッションの `owner_dialect`（`unknown` を除く）の多数決。同数なら新しいほうを優先する。
 3. 判定が 1 つも無ければ標準語。
 

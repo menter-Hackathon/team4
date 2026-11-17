@@ -30,6 +30,24 @@ def test_katakana_finds_the_same_person(tmp_path):
     assert people[0].dialect_override is None
 
 
+def test_registered_name_is_cleaned_like_a_spoken_name(tmp_path):
+    # 改行は空白にし、長さを切ってから登録する（プロンプトに改行入りの名前を入れないため）
+    store = make_store(tmp_path)
+    code = main(["--plant-id", "a1", "--person", " 山田\n太郎 ", "--dialect", "kansai"], store, NOW)
+    assert code == 0
+    assert [p.name for p in store.get_people("a1")] == ["山田 太郎"]
+    long_name = "あ" * 30
+    main(["--plant-id", "a1", "--person", long_name, "--dialect", "hakata"], store, NOW)
+    assert store.get_people("a1")[1].name == "あ" * 20
+
+
+def test_blank_name_is_an_error(tmp_path):
+    store = make_store(tmp_path)
+    code = main(["--plant-id", "a1", "--person", " \n ", "--dialect", "kansai"], store, NOW)
+    assert code == 1
+    assert store.get_people("a1") == []
+
+
 def test_auto_on_unknown_name_is_an_error(tmp_path):
     store = make_store(tmp_path)
     code = main(["--plant-id", "a1", "--person", "はなこ", "--auto"], store, NOW)

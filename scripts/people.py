@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 from agent.config import db_path_from_env
 from agent.plant.dialect import DIALECTS, resolve_dialect
+from agent.plant.people import clean_name
 from agent.plant.store import Person, PlantStore
 from agent.plant.wake import normalize
 
@@ -79,12 +80,18 @@ def main(argv: list[str], store: PlantStore, now: datetime) -> int:
             print(f"person-id {args.person_id} は株 {args.plant_id} にいません")
             return 1
     else:
-        person = _find_by_name(store, args.plant_id, args.person)
+        # 会話で名乗った名前と同じく、改行を空白にして長さを切ってから使う。
+        # 改行入りの名前がプロンプトに入ると、名前の行の外に別の指示を書けてしまうため（#41 のレビュー）
+        name = clean_name(args.person)
+        if name is None:
+            print("名前が空です")
+            return 1
+        person = _find_by_name(store, args.plant_id, name)
         if person is None:
             if args.auto:
-                print(f"「{args.person}」はまだ登録されていません")
+                print(f"「{name}」はまだ登録されていません")
                 return 1
-            person = store.add_person(args.plant_id, args.person, now)
+            person = store.add_person(args.plant_id, name, now)
 
     store.set_dialect_override(person.id, args.dialect)  # --auto のときは None
     print(
