@@ -54,6 +54,13 @@ def test_bad_delta_values_are_zero():
     assert t.energy == 0.5 and t.curiosity == 0.5 and t.affection == 0.5
 
 
+def test_non_finite_deltas_are_zero():
+    # NaN / Infinity は上限（+0.05）ではなく、変化なしにする（#7）
+    nan, inf = float("nan"), float("inf")
+    t = apply_deltas(Traits(), {"energy": nan, "curiosity": inf, "affection": -inf}, 50)
+    assert t.energy == 0.5 and t.curiosity == 0.5 and t.affection == 0.5
+
+
 @pytest.mark.parametrize("t,expected", [(0.9, 13.0), (0.5, 25.0), (0.3, 31.0), (0.29, None)])
 def test_nudge_delay(t, expected):
     result = nudge_delay(t)
