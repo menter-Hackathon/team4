@@ -2,6 +2,7 @@
 
 - 日付: 2026-11-13
 - 更新: 2026-11-16 ディスプレイをやめた（表情の表示と `set_expression` RPC をなくした）
+- 更新: 2026-11-17 TTS をローカルの AivisSpeech でも動かせるようにした（§8.3、#56）
 - 更新: 2026-11-17 性格・成長・記憶を見せるダッシュボードを足した（§6.6、#59）
 - 更新: 2026-11-17 性格の段階を 3 段階から 5 段階にした（§6.4、#57）
 - 対象: サーバー側の音声AIエージェントの骨組み（Python / LiveKit Agents）
@@ -33,7 +34,7 @@
 | LiveKit サーバー | LiveKit Cloud |
 | LLM | Gemma 4 E4B（`google/gemma-4-E4B-it`）。チームの誰かの PC 上で OpenAI 互換 API として動かす（vLLM ≥ 0.19 など、§8.1） |
 | STT | kotoba-whisper v2.0（誰かの PC 上の Speaches、OpenAI 互換 API） |
-| TTS | OpenAI TTS（`gpt-4o-mini-tts`、クラウド API）。LiveKit 公式の OpenAI プラグインを使う |
+| TTS | ローカルの AivisSpeech Engine（GPU の PC 上、2026-11-17 #56）。`.env` の `TTS_PROVIDER` で OpenAI TTS（`gpt-4o-mini-tts`）にも戻せる |
 | VAD | Silero VAD（エージェント内で実行） |
 | エージェント実行場所 | 誰かの PC（デモでは決めた 1 台）。オンライン開催で共有の GPU サーバーは無い。鉢の中はマイコン・マイク・スピーカーだけにする（#23） |
 | 個体の単位 | 1デバイス = 1株。`plant_id` で識別 |
@@ -77,6 +78,7 @@ agent/
   plugins/
     whisper_stt.py     STT の生成（LiveKit の OpenAI 互換 STT プラグインに base_url を渡す薄いラッパー）
     openai_tts.py      TTS の生成（LiveKit の OpenAI TTS プラグインに model / voice / instructions を渡す薄いラッパー）
+    aivis_tts.py       TTS: ローカルの AivisSpeech Engine を呼ぶ小さな TTS（§8.3）
     llm.py             会話用 LLM の生成と、reflection 用の JSON 補完関数（OpenAI 互換クライアント）
   plant/
     store.py           SQLite の読み書き（plants / memories / sessions / utterances / trait_history）
@@ -90,6 +92,7 @@ agent/
 scripts/
   issue_token.py       ESP32 用の LiveKit トークン発行
   simulate.py          会話ログを流し込んで成長を早送りするデモ用スクリプト
+  aivis_voices.py      AivisSpeech の声の一覧とサンプル作り（声を選ぶ用、§8.3）
   dashboard.py         性格・成長・記憶を見せるダッシュボード（§6.6）。dashboard.html と組
 tests/
 ```
@@ -317,7 +320,7 @@ CREATE TABLE trait_history (
 3. 判定が 1 つも無ければ標準語。
 
 - 判定は振り返り（§6.3）の `owner_dialect` で行い、セッションごとに保存する。
-- 話し方への反映は、システムプロンプトの方言の指示（§6.4）と、TTS の指示（`TTS_INSTRUCTIONS`）の後ろに足す方言のイントネーションの指示。標準語なら足さない。TTS 側で違和感があれば TTS の指示だけ外す。
+- 話し方への反映は、システムプロンプトの方言の指示（§6.4）と、TTS の指示（`TTS_INSTRUCTIONS`）の後ろに足す方言のイントネーションの指示。標準語なら足さない。TTS 側で違和感があれば TTS の指示だけ外す。AivisSpeech（§8.3）には話し方の指示が無いので、TTS の方言の指示は使わない。
 
 **DB の引き継ぎ**
 - 起動時に、無いテーブル（`people`）と無い列（`memories.person_id`・`sessions.person_id`・`sessions.owner_dialect`・`trait_history.person_id`）を足す。今あるデータは消さない。
@@ -402,7 +405,28 @@ URL・モデル名はすべて環境変数で指定する。開発時はロー�
 | モデル | `kotoba-tech/kotoba-whisper-v2.0-faster`（kotoba-whisper v2.0 の CTranslate2 変換版、MIT ライセンス、日本語特化） |
 | 代替 | Speaches で上記モデルが読めない場合は `vllm serve kotoba-tech/kotoba-whisper-v2.0`（vLLM の Transcriptions API、`vllm[audio]` が必要）、それも不可なら Speaches 標準の `large-v3` 系 Whisper |
 
-### 8.3 TTS: OpenAI TTS（外部 API）
+### 8.3 TTS: AivisSpeech（ローカル）または OpenAI TTS（外部 API）
+
+`.env` の `TTS_PROVIDER` で選ぶ。`aivis` ならローカルの AivisSpeech Engine、`openai`（既定）なら OpenAI TTS。
+
+**AivisSpeech（`TTS_PROVIDER=aivis`、2026-11-17 #56 で決定）**
+
+OpenAI の声（`coral`）は低く男性っぽく聞こえ、`nova`・`sage` でも「幼い女の子の声」に寄せきれなかった。また会話のたびに外部 API の料金と会場回線への依存がある。そこで、GPU の PC で動かす AivisSpeech Engine（Style-Bert-VITS2 ベースの日本語 TTS、VOICEVOX 互換の API）を使う。
+
+| 項目 | 内容 |
+|---|---|
+| 環境変数 | `TTS_PROVIDER=aivis`, `AIVIS_BASE_URL`（既定: `http://127.0.0.1:10101`）, `AIVIS_SPEAKER`（必須。声のスタイル ID）, `AIVIS_SPEED`（話す速さ、既定 1.0）, `AIVIS_PITCH`（声の高さ、既定 0.0）。`OPENAI_API_KEY` は要らない |
+| エンドポイント | 1. `POST {AIVIS_BASE_URL}/audio_query?text=…&speaker=…` で読み方（JSON）を作る 2. 速さ・高さ・出力の形式（24kHz・モノラル）を書き換える 3. `POST {AIVIS_BASE_URL}/synthesis?speaker=…` に渡して WAV を受け取る |
+| 出力 | 24kHz 16bit mono（WAV） |
+| 声の選び方 | 声はモデルとスタイルで決まる（OpenAI のような話し方の指示は無い）。`scripts/aivis_voices.py` で入っている声の一覧とスタイル ID を出し、サンプルを作って聞き比べて `AIVIS_SPEAKER` を決める。明るく幼い女の子の声のモデルを選ぶ。高さは `AIVIS_PITCH` で少し上げられる |
+| 方言 | 話し方の指示が無いので、TTS の方言のイントネーションの指示（§6.5）は使わない。方言は LLM の文面（語尾など）だけで出す |
+| 料金 | かからない（自分の PC の GPU で動く） |
+
+- LiveKit のプラグインには AivisSpeech 用が無いので、`agent/plugins/aivis_tts.py` に小さな TTS を作る（文 1 つごとに上の 1〜3 を行う。ストリーミングはしない）。
+- エージェントから `AIVIS_BASE_URL` に届く必要がある。AivisSpeech と同じ PC でエージェントを動かすのが簡単。
+- AivisSpeech が落ちている・遅いときは、その応答をスキップする（§10 の TTS エラーと同じ）。
+
+**OpenAI TTS（`TTS_PROVIDER=openai`）**
 
 LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.TTS`）をそのまま使う。独自の TTS プラグインは実装しない。
 

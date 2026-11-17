@@ -28,6 +28,28 @@ NVIDIA の GPU がある PC では、エージェント・LLM・STT をまとめ
 
 「ふたまる」と呼ぶと起き、60秒黙ると眠ります。眠るたびに会話から記憶と性格が更新されます（`data/futamaru.db`）。
 
+## 声（TTS）をローカルの AivisSpeech にする
+
+ふたまるの声は、GPU の PC で動かす [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine) で作れます（仕様 §8.3）。OpenAI の API キーも料金も要りません。
+
+1. エージェントを動かす PC で AivisSpeech Engine を起動する（既定では `http://127.0.0.1:10101` で待ち受けます）
+2. 入っている声の一覧を出し、気になる声のサンプルを作って聞き比べる
+
+```bash
+uv run python -m scripts.aivis_voices --list                          # 声とスタイル ID の一覧
+uv run python -m scripts.aivis_voices --speaker <ID> <ID> --pitch 0.05  # data/voice-samples/<ID>.wav ができる
+```
+
+3. 決めた声を `.env` に書く
+
+```bash
+TTS_PROVIDER=aivis
+AIVIS_SPEAKER=<決めたスタイル ID>
+AIVIS_PITCH=0.05   # 任意。少し上げると幼く聞こえる
+```
+
+AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。声のモデルにはモデルごとの利用規約があります。発表で使うモデルを決めたら、名前と規約をこの README に書いてください。
+
 ## ESP32 用トークンの発行
 
 ```bash

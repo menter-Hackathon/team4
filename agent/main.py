@@ -49,6 +49,7 @@ from agent.plant.expression import ExpressionParser
 from agent.plant.prompt import FALLBACK_REPLY, NUDGE_INSTRUCTION, WAKE_GREETING_INSTRUCTION
 from agent.plant.store import PlantStore
 from agent.plant.timeutil import jst_now
+from agent.plugins.aivis_tts import create_aivis_tts
 from agent.plugins.llm import create_json_completer, create_llm
 from agent.plugins.openai_tts import create_tts
 from agent.plugins.whisper_stt import create_stt
@@ -311,7 +312,8 @@ async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession(
         stt=create_stt(cfg),
         llm=create_llm(cfg),
-        tts=create_tts(cfg),
+        # TTS は .env の TTS_PROVIDER で選ぶ。aivis ならローカルの AivisSpeech（仕様 §8.3、#56）
+        tts=create_aivis_tts(cfg) if cfg.tts_provider == "aivis" else create_tts(cfg),
         vad=vad,  # prewarm で読み込んでおいた VAD
         turn_handling=turn_handling(cfg),  # 話し終わりの判定（turn_handling の説明を参照）
         user_away_timeout=None,  # 黙っているときの扱いは、こちらの無言タイマーで行うので LiveKit 側は切る
