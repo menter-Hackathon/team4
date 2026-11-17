@@ -51,6 +51,9 @@ class Config:
     stt_timeout: float
     tts_timeout: float
     dev_plant_id: str | None  # console モードで使う株の id（開発用）
+    # --- 話し終わりの判定（#39）。短くするほど返事が早いが、言葉の途中の間で割り込みやすくなる ---
+    vad_min_silence: float  # 声が途切れてから「話し終わった」とみなすまでの無音の秒数（VAD）
+    endpointing_delay: float  # VAD が話し終わりと判定してから、返事を作り始めるまでの待ちの秒数
 
 
 def db_path_from_env(env: Mapping[str, str] = os.environ) -> str:
@@ -119,4 +122,7 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         stt_timeout=float(get("STT_TIMEOUT", "10")),
         tts_timeout=float(get("TTS_TIMEOUT", "10")),
         dev_plant_id=get("DEV_PLANT_ID"),
+        # 既定の値は LiveKit の既定と同じ（Silero VAD 0.55 秒、endpointing 0.5 秒）。#39 で測って決める
+        vad_min_silence=float(get("VAD_MIN_SILENCE_SECONDS", "0.55")),
+        endpointing_delay=float(get("ENDPOINTING_DELAY_SECONDS", "0.5")),
     )

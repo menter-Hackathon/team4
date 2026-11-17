@@ -19,6 +19,8 @@ def test_defaults():
     assert c.wake_words == ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
     assert (c.sleep_after, c.llm_timeout, c.stt_timeout, c.tts_timeout) == (60.0, 15.0, 10.0, 10.0)
     assert c.tts_instructions == TTS_INSTRUCTIONS and c.dev_plant_id is None
+    # 話し終わりの判定は、LiveKit の既定と同じ値から始める（#39）
+    assert (c.vad_min_silence, c.endpointing_delay) == (0.55, 0.5)
     assert c.llm_reasoning_effort is None
 
 
@@ -30,9 +32,12 @@ def test_overrides():
             "SLEEP_AFTER_SECONDS": "30",
             "TTS_BASE_URL": "http://gpu:8002/v1",
             "DEV_PLANT_ID": "dev",
+            "VAD_MIN_SILENCE_SECONDS": "0.35",
+            "ENDPOINTING_DELAY_SECONDS": "0.2",
             "LLM_REASONING_EFFORT": "none",
         }
     )
+    assert (c.vad_min_silence, c.endpointing_delay) == (0.35, 0.2)
     assert c.llm_reasoning_effort == "none"
     assert c.wake_words == ("ふたまる", "ふーちゃん") and c.sleep_after == 30.0
     assert c.tts_base_url == "http://gpu:8002/v1" and c.dev_plant_id == "dev"

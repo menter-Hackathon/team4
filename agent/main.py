@@ -212,6 +212,23 @@ def direction_ctx(chat_ctx: ChatContext, direction: str) -> ChatContext:
     return ctx
 
 
+def turn_handling(cfg: Config) -> TurnHandlingOptions:
+    """話し終わりの判定と、返事の始め方の設定を作る（#39）。
+
+    - turn_detection="vad": 話し終わりは VAD（無音が続いたか）で判定する
+    - endpointing.min_delay: VAD が話し終わりと判定してから、返事を作り始めるまでの待ち（.env で変える）
+    - preemptive_generation: 話し終わる前に返事を作り始める機能。返事するかどうかは、話し終えてから
+      on_user_turn_completed で決める作りなので使わない
+
+    例: ENDPOINTING_DELAY_SECONDS=0.2 → {"turn_detection": "vad", "endpointing": {"min_delay": 0.2}, ...}
+    """
+    return TurnHandlingOptions(
+        turn_detection="vad",
+        endpointing={"min_delay": cfg.endpointing_delay},
+        preemptive_generation={"enabled": False},
+    )
+
+
 def room_options() -> room_io.RoomOptions:
     """ルームでの音声のやりとりの設定を作る。
 
@@ -287,17 +304,16 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     # --- 3. 声 → 文字 → 返事 → 声 の流れ（AgentSession）を作る ---
+    # 話し終わりと判定するまでの無音の長さを .env の値にする（#39）。
+    # VAD は prewarm で読み込み済みなので、ここで設定だけ変える
+    vad = ctx.proc.userdata["vad"]
+    vad.update_options(min_silence_duration=cfg.vad_min_silence)
     session = AgentSession(
         stt=create_stt(cfg),
         llm=create_llm(cfg),
         tts=create_tts(cfg),
-        vad=ctx.proc.userdata["vad"],  # prewarm で読み込んでおいた VAD
-        # 話し終わりは VAD（無音が続いたか）で判定する。
-        # preemptive_generation: 話し終わる前に返事を作り始める機能。
-        # 返事するかどうかは、話し終えてから on_user_turn_completed で決める作りなので使わない
-        turn_handling=TurnHandlingOptions(
-            turn_detection="vad", preemptive_generation={"enabled": False}
-        ),
+        vad=vad,  # prewarm で読み込んでおいた VAD
+        turn_handling=turn_handling(cfg),  # 話し終わりの判定（turn_handling の説明を参照）
         user_away_timeout=None,  # 黙っているときの扱いは、こちらの無言タイマーで行うので LiveKit 側は切る
         conn_options=SessionConnectOptions(
             # リトライしない（タイムアウトが何倍にもならないように）。STT/TTS の読み取り待ちは

@@ -401,6 +401,7 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 - `WAKE_WORDS`（カンマ区切り、既定は §5.3）
 - `SLEEP_AFTER_SECONDS`（既定: 60）
 - `LLM_TIMEOUT` / `STT_TIMEOUT` / `TTS_TIMEOUT`（秒、既定: 15 / 10 / 10）
+- `VAD_MIN_SILENCE_SECONDS` / `ENDPOINTING_DELAY_SECONDS`（秒、既定: 0.55 / 0.5）: 話し終わりの判定の待ち。声が途切れてから、この 2 つを足した時間で返事を作り始める。返事の遅さ（§11 の 1 秒以内）の調整に使う（#39）
 - TTS 関連（`OPENAI_API_KEY`, `TTS_MODEL`, `TTS_VOICE`, `TTS_BASE_URL`）は §8.3
 
 ## 9. ESP32 側への要件（ハード担当との取り決め）

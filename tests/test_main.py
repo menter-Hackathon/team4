@@ -131,6 +131,15 @@ async def test_end_session_closes_conversation_and_forgets_history():
     assert agent.chat_ctx.items == []
 
 
+def test_turn_handling_uses_endpointing_delay_from_config():
+    # 返事を作り始めるまでの待ちを .env で変えられる（#39）。先回りの返事は使わないまま
+    cfg = load_config({**CFG, "ENDPOINTING_DELAY_SECONDS": "0.2"})
+    opts = main.turn_handling(cfg)
+    assert opts["turn_detection"] == "vad"
+    assert opts["endpointing"] == {"min_delay": 0.2}
+    assert opts["preemptive_generation"] == {"enabled": False}
+
+
 def test_room_options_keep_session_when_device_leaves():
     # ESP32 が出て入り直しても、同じセッションで話を続けられるようにする
     assert main.room_options().close_on_disconnect is False
