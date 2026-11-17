@@ -1,6 +1,12 @@
 import pytest
 
-from agent.config import TTS_INSTRUCTIONS, ConfigError, db_path_from_env, load_config
+from agent.config import (
+    TTS_INSTRUCTIONS,
+    ConfigError,
+    aivis_base_url_from_env,
+    db_path_from_env,
+    load_config,
+)
 
 BASE = {
     "LLM_BASE_URL": "http://gpu:8000/v1",
@@ -69,3 +75,43 @@ def test_db_path_from_env_needs_no_other_variables():
     assert db_path_from_env({"FUTAMARU_DB_PATH": "  "}) == "./data/futamaru.db"
     assert db_path_from_env({"FUTAMARU_DB_PATH": "/data/x.db"}) == "/data/x.db"
     assert load_config({**BASE, "FUTAMARU_DB_PATH": "/data/x.db"}).db_path == "/data/x.db"
+
+
+# --- TTS の種類と AivisSpeech（仕様 §8.3、#56） ---
+def test_tts_provider_defaults_to_openai_with_aivis_defaults():
+    c = load_config(BASE)
+    assert c.tts_provider == "openai" and c.aivis_speaker == 888753762  # まお / あまあま
+    assert (c.aivis_base_url, c.aivis_speed, c.aivis_pitch) == ("http://127.0.0.1:10101", 1.0, 0.0)
+
+
+def test_aivis_reads_its_settings_and_needs_no_openai_key():
+    env = {k: v for k, v in BASE.items() if k != "OPENAI_API_KEY"}
+    c = load_config(
+        {
+            **env,
+            "TTS_PROVIDER": "Aivis",
+            "AIVIS_BASE_URL": "http://gpu:10101",
+            "AIVIS_SPEAKER": "888753760",
+            "AIVIS_SPEED": "1.1",
+            "AIVIS_PITCH": "0.05",
+        }
+    )
+    assert c.tts_provider == "aivis" and c.tts_api_key == "EMPTY"
+    assert (c.aivis_base_url, c.aivis_speaker) == ("http://gpu:10101", 888753760)
+    assert (c.aivis_speed, c.aivis_pitch) == (1.1, 0.05)
+
+
+def test_aivis_speaker_must_be_numeric():
+    assert load_config({**BASE, "TTS_PROVIDER": "aivis"}).aivis_speaker == 888753762
+    with pytest.raises(ConfigError, match="AIVIS_SPEAKER"):
+        load_config({**BASE, "TTS_PROVIDER": "aivis", "AIVIS_SPEAKER": "anneli"})
+
+
+def test_unknown_tts_provider_is_rejected():
+    with pytest.raises(ConfigError, match="TTS_PROVIDER"):
+        load_config({**BASE, "TTS_PROVIDER": "voicevox"})
+
+
+def test_aivis_base_url_from_env_needs_no_other_variables():
+    assert aivis_base_url_from_env({}) == "http://127.0.0.1:10101"
+    assert aivis_base_url_from_env({"AIVIS_BASE_URL": "http://gpu:10101"}) == "http://gpu:10101"

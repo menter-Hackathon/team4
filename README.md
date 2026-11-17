@@ -23,7 +23,7 @@
 [鉢: ESP32-S3 ＋ マイク・スピーカー] ──WebRTC──> [LiveKit Cloud] <── [チームの PC: エージェント]
                                                                       ├─ 文字起こし: kotoba-whisper
                                                                       ├─ 会話: Gemma 4 E4B
-                                                                      ├─ 声: OpenAI TTS（クラウド）
+                                                                      ├─ 声: AivisSpeech（ローカル）
                                                                       └─ 性格・記憶: SQLite
 ```
 
@@ -36,7 +36,7 @@
 | 音声エージェント | LiveKit Agents（Python） |
 | 会話の LLM | Gemma 4 E4B（`google/gemma-4-E4B-it`）。チームの PC で動かす |
 | 文字起こし | kotoba-whisper v2.0（日本語向けの Whisper） |
-| 声 | OpenAI `gpt-4o-mini-tts` |
+| 声 | AivisSpeech Engine（声のモデル「まお」）。`.env` で OpenAI `gpt-4o-mini-tts` にも切り替えられる |
 | 鉢のハード | Seeed XIAO ESP32S3 ＋ M5Stack Atomic Voice Base（[部品の選び方](docs/hardware/parts-selection.md)） |
 
 詳しい設計は [仕様書](docs/superpowers/specs/2026-11-13-futamaru-agent-design.md) にあります。
@@ -51,16 +51,16 @@
 | ✅ できた | GPU のある PC でまとめて動かす Docker 構成 |
 | ✅ できた | 性格を5段階にして、変化が話し方に出やすくした（#57） |
 | ✅ できた | 2株の性格・成長曲線・記憶を並べて見せる Web 画面（ダッシュボード、#59） |
+| ✅ できた | 声をローカルの AivisSpeech で作る（明るい女の子の声「まお」、#56） |
 | 🔧 作業中 | PC で Gemma 4 と kotoba-whisper を動かす（#1・#2）、ESP32 の実機との通し確認（#3） |
 | 🔧 作業中 | 鉢の筐体の設計（#16） |
 | 🔧 作業中 | 返事の速さ。今は話し終えてから約4〜5秒かかっていて、1秒以内が目標（#39） |
-| 📝 これから | 土の水分センサーで「のど渇いた」と言わせる（#58） |
-| 📝 これから | 声を明るいキャラクターの声にする（#56） |
+| ⏸ 見送り | 土の水分センサーで「のど渇いた」と言わせる（印刷済みの筐体を作り直す必要があるため、#58） |
 
 ## FB をいただきたいこと
 
 1. **「育っている」と感じてもらえるか。** 性格は少しずつ変わるようにしているので、変化に気づきにくいおそれがあります。発表の短い時間で「育てた結果」を伝えるには、どう見せるのがよいでしょうか（今は、2株の性格と成長曲線をグラフで並べる画面を用意しています）
-2. **植物らしさ。** 今は「育て方」が会話だけです。土の水分センサーで水やりを反映する予定ですが、ほかに「ただの AI スピーカーではない」と感じてもらえる工夫はあるでしょうか
+2. **植物らしさ。** 今は「育て方」が会話だけです。土の水分センサーで水やりを反映する案は、筐体の都合で今回は見送りました。ほかに「ただの AI スピーカーではない」と感じてもらえる工夫はあるでしょうか
 3. **返事の速さ。** 今は約4〜5秒かかっています。どこまで速ければ会話として気にならないか、遅いときの間のつなぎ方（「んー…」と先に言うなど）について、ご意見をいただきたいです
 4. **人の見分け方。** 今は毎回名乗ってもらう方式です。体験として不自然でないか、声で見分ける必要があるか迷っています
 5. **誰に届けるか。** 一人暮らしの人、子ども、高齢の家族の見守りなど、どの人に向けると一番価値が伝わるでしょうか
@@ -96,6 +96,31 @@ uv run python -m agent.main start   # 本番
 NVIDIA の GPU がある PC では、エージェント・LLM・STT をまとめて Docker で動かせます（`docker compose up -d`）。手順は [docs/deploy.md](docs/deploy.md) を見てください。
 
 会話・記憶・性格は `data/futamaru.db` に保存されます。
+
+### 声（TTS）をローカルの AivisSpeech にする
+
+ふたまるの声は、GPU の PC で動かす [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine) で作れます（仕様 §8.3）。OpenAI の API キーも料金も要りません。
+
+1. エージェントを動かす PC で AivisSpeech Engine を起動する（既定では `http://127.0.0.1:10101` で待ち受けます）
+2. 入っている声の一覧を出し、気になる声のサンプルを作って聞き比べる
+
+```bash
+uv run python -m scripts.aivis_voices --list                          # 声とスタイル ID の一覧
+uv run python -m scripts.aivis_voices --speaker <ID> <ID> --pitch 0.05  # data/voice-samples/<ID>.wav ができる
+```
+
+3. `.env` に書く
+
+```bash
+TTS_PROVIDER=aivis
+AIVIS_BASE_URL=http://127.0.0.1:10101   # AivisSpeech の URL（空ならこの値）
+```
+
+`AIVIS_SPEAKER` を書かなければ、聞き比べて決めた「まお」の「あまあま」（`888753762`）を使います。AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。
+
+使っている外部の技術・素材:
+- [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)（音声合成エンジン、LGPL v3）
+- 音声合成モデル「まお」（制作: オズチャット / Trippy / ねゆたろ、Aivis Common Model License (ACML) 1.0）
 
 ### ESP32 用トークンの発行
 

@@ -18,6 +18,13 @@ TTS_INSTRUCTIONS = "やわらかく、少しゆっくり、のんびりした植
 # WAKE_WORDS が .env に無いときに使うウェイクワード。STT がよく書く表記をまとめている。
 # 「下丸」は「ふたまるくん」が「下丸くん」と聞き取られたことがあるので足した（2026-11-16、#2）
 DEFAULT_WAKE_WORDS = ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
+# 使える TTS の種類（TTS_PROVIDER）。openai: OpenAI TTS、aivis: ローカルの AivisSpeech（仕様 §8.3、#56）
+TTS_PROVIDERS = ("openai", "aivis")
+# AIVIS_BASE_URL が .env に無いときの AivisSpeech Engine の URL（AivisSpeech の既定のポートは 10101）
+DEFAULT_AIVIS_BASE_URL = "http://127.0.0.1:10101"
+# AIVIS_SPEAKER が .env に無いときの声: 「まお」の「あまあま」スタイル（2026-11-17 に聞き比べて決定、#56）。
+# AivisSpeech に「まお」のモデルが入っている前提。入っていなければ --list で別の ID を調べて .env に書く
+DEFAULT_AIVIS_SPEAKER = 888753762
 # FUTAMARU_DB_PATH が .env に無いときの DB ファイルの場所
 DEFAULT_DB_PATH = "./data/futamaru.db"
 
@@ -43,7 +50,12 @@ class Config:
     tts_voice: str  # 声の種類（例: coral）
     tts_base_url: str | None  # None なら本物の OpenAI
     tts_api_key: str
-    tts_instructions: str  # 話し方の指示
+    tts_instructions: str  # 話し方の指示（OpenAI TTS だけ。AivisSpeech には無い）
+    tts_provider: str  # "openai" か "aivis"（仕様 §8.3）
+    aivis_base_url: str  # AivisSpeech Engine の URL
+    aivis_speaker: int  # AivisSpeech の声のスタイル ID（既定: まお / あまあま）
+    aivis_speed: float  # AivisSpeech の話す速さ（1.0 がふつう）
+    aivis_pitch: float  # AivisSpeech の声の高さ（0.0 がふつう）
     db_path: str  # 会話ログ・記憶を保存する DB ファイルの場所
     wake_words: tuple[str, ...]  # ウェイクワードの一覧
     sleep_after: float  # 何秒だれも話さなければ眠るか
@@ -66,6 +78,15 @@ def db_path_from_env(env: Mapping[str, str] = os.environ) -> str:
     return env.get("FUTAMARU_DB_PATH", "").strip() or DEFAULT_DB_PATH
 
 
+def aivis_base_url_from_env(env: Mapping[str, str] = os.environ) -> str:
+    """AivisSpeech Engine の URL（AIVIS_BASE_URL）だけを読む。未設定・空なら DEFAULT_AIVIS_BASE_URL。
+
+    声を選ぶコマンド（scripts/aivis_voices.py）用。db_path_from_env と同じく、
+    LLM・STT の設定が無くても使えるように load_config() と分けている。
+    """
+    return env.get("AIVIS_BASE_URL", "").strip() or DEFAULT_AIVIS_BASE_URL
+
+
 def load_config(env: Mapping[str, str] = os.environ) -> Config:
     """環境変数を読んで Config を作る。必須の値が無ければ ConfigError。
 
@@ -84,14 +105,30 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
             raise ConfigError(f"環境変数 {name} が設定されていません")
         return value
 
-    # TTS のキー: 本物の OpenAI を使う（TTS_BASE_URL が無い）ならキーが必須。
-    # 自前の TTS を使うならキーは要らないので、仮の値 "EMPTY" にする
+    # 1. どの TTS を使うか。既定は今までどおり OpenAI
+    tts_provider = get("TTS_PROVIDER", "openai").lower()
+    if tts_provider not in TTS_PROVIDERS:
+        raise ConfigError(
+            f"TTS_PROVIDER は {' / '.join(TTS_PROVIDERS)} のどれかにしてください: {tts_provider}"
+        )
+
+    # 2. TTS のキー: 本物の OpenAI を使う（OpenAI TTS で TTS_BASE_URL が無い）ならキーが必須。
+    #    自前の TTS・AivisSpeech ならキーは要らないので、仮の値 "EMPTY" にする
     tts_base_url = get("TTS_BASE_URL")
     tts_api_key = get("OPENAI_API_KEY")
     if tts_api_key is None:
-        if tts_base_url is None:
+        if tts_provider == "openai" and tts_base_url is None:
             raise ConfigError("環境変数 OPENAI_API_KEY が設定されていません（TTS に必要）")
         tts_api_key = "EMPTY"
+
+    # 3. AivisSpeech の声のスタイル ID。無ければ聞き比べて決めた声（まお / あまあま）
+    aivis_speaker_raw = get("AIVIS_SPEAKER", str(DEFAULT_AIVIS_SPEAKER))
+    try:
+        aivis_speaker = int(aivis_speaker_raw)
+    except ValueError as e:
+        raise ConfigError(
+            f"AIVIS_SPEAKER は数字（スタイル ID）にしてください: {aivis_speaker_raw}"
+        ) from e
 
     # WAKE_WORDS はカンマ区切り（例: "ふたまる,二丸"）。空の項目は捨てる
     wake_words_raw = get("WAKE_WORDS")
@@ -115,6 +152,11 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         tts_base_url=tts_base_url,
         tts_api_key=tts_api_key,
         tts_instructions=TTS_INSTRUCTIONS,
+        tts_provider=tts_provider,
+        aivis_base_url=aivis_base_url_from_env(env),
+        aivis_speaker=aivis_speaker,
+        aivis_speed=float(get("AIVIS_SPEED", "1.0")),
+        aivis_pitch=float(get("AIVIS_PITCH", "0.0")),
         db_path=db_path_from_env(env),
         wake_words=wake_words,
         sleep_after=float(get("SLEEP_AFTER_SECONDS", "60")),
