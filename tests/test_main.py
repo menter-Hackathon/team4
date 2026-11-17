@@ -131,6 +131,11 @@ async def test_end_session_closes_conversation_and_forgets_history():
     assert agent.chat_ctx.items == []
 
 
+def test_room_options_keep_session_when_device_leaves():
+    # ESP32 が出て入り直しても、同じセッションで話を続けられるようにする
+    assert main.room_options().close_on_disconnect is False
+
+
 # --- 方言を TTS の指示に反映する ---
 class FakeTTS:
     def __init__(self):
