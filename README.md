@@ -44,6 +44,15 @@ uv run python -m scripts.simulate scripts/samples/plant-a.json scripts/samples/p
 
 同じ初期状態の2株に別々の会話ログを流し込み、性格値の推移・最終的なシステムプロンプト・返答の違いを表示します（LLM サーバーが必要）。
 
+## ダッシュボード（性格・成長・記憶を見る）
+
+```bash
+uv run python -m scripts.dashboard --plants a1,b1                                    # 本番の DB（data/futamaru.db）
+uv run python -m scripts.dashboard --db data/sim.db --plants sample-a,sample-b       # 早送りデモの結果
+```
+
+ブラウザで http://127.0.0.1:8765 を開くと、2株の性格のレーダーチャート・成長曲線・覚えていることが並びます。3 秒ごとに読み直すので、会話して眠らせると数秒後にグラフが動きます。DB は読むだけなので、エージェントと同時に動かして大丈夫です。会話の記憶が見えるため、この PC からしか開けません（仕様 §6.6）。グラフの描画には [Chart.js](https://www.chartjs.org/)（MIT ライセンス）を CDN から読み込んでいます。
+
 ## 人の一覧と方言の固定（デモ用）
 
 ```bash
