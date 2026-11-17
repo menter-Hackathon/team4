@@ -379,6 +379,27 @@ async def test_slow_identification_does_not_block_reply(store, clock, monkeypatc
     await c.close()
 
 
+async def test_timed_out_identifications_do_not_count_toward_guest(store, clock, monkeypatch):
+    # 名前探しが 3 回とも時間切れでも、お客さんにしない（LLM が遅いだけかもしれないため）
+    monkeypatch.setattr(conversation_module, "IDENTIFY_TIMEOUT", 0.01)
+    gate = asyncio.Event()
+    # 時間切れの 3 回は応答を取る前に止められるので、応答は 4 回目の名乗りと振り返りの分だけ
+    completer = FakeCompleter([identify_json("new", name="たろう"), reflection_json()], gate=gate)
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる、ただいま")
+    await c.on_user_turn("今日は晴れ")
+    d3 = await c.on_user_turn("カレー食べた")
+    assert (d3.instructions, d3.dialect) == (None, None)
+    assert not c._guest
+    # LLM が速くなったら、4 回目の名乗りでその人に決まる
+    gate.set()
+    await settle()
+    d4 = await c.on_user_turn("ぼくはたろう")
+    assert d4.instructions and "今話している相手は たろう。" in d4.instructions
+    assert [p.name for p in store.get_people("a")] == ["たろう"]
+    await c.close()
+
+
 async def test_sleep_forgets_the_person(store, clock):
     store.get_or_create_plant("a", T0)
     taro = store.add_person("a", "たろう", T0)

@@ -99,7 +99,8 @@ class PlantConversation:
         self._expression_tasks: set[asyncio.Task] = set()  # 送信中の表情のタスク
         # --- 今のセッションの話し相手（眠ったら _forget_person で消す） ---
         self._person: Person | None = None  # 決まった相手。未確定・お客さんの間は None
-        self._user_turns = 0  # このセッションで記録したユーザー発話の数（挨拶だけの起床は数えない）
+        # このセッションで名前探しができたユーザー発話の数（挨拶だけの起床と、名前探しが時間切れの回は数えない）
+        self._user_turns = 0
         self._guest = False  # お客さんに決まったか。決まったら名前探しをやめる
         # 植物が最後に言ったこと（表情タグなし）。次のユーザー発話の名前探しに渡し、渡したら消す。
         # 「お名前は？」→「はなこ」のような、名前だけの答えを見分けやすくするため（最終レビュー I2）
@@ -209,9 +210,7 @@ class PlantConversation:
         # 1. 相手が決まっている・お客さんに決まっているなら、もう何もしない（LLM も呼ばない）
         if self._person is not None or self._guest:
             return None
-        # 2. 何回目のユーザー発話かを数える（1 から数える）
-        self._user_turns += 1
-        # 3. 名前探し。遅すぎたら（IDENTIFY_TIMEOUT 秒）名乗っていない扱いにして返事を優先する。
+        # 2. 名前探し。遅すぎたら（IDENTIFY_TIMEOUT 秒）名乗っていない扱いにして返事を優先する。
         #    IDENTIFY_TIMEOUT はテストで書き換えられるよう、呼ぶたびにモジュールの値を読む
         known = self._store.get_people(self._plant_id)
         session_id = self._session_id  # 待っている間に眠ったかどうかを、後で確かめるため
@@ -220,12 +219,19 @@ class PlantConversation:
                 identify(self._complete_json, text, known, previous_plant=previous_plant),
                 IDENTIFY_TIMEOUT,
             )
+            timed_out = False
         except TimeoutError:
             logger.warning("identification timed out (plant=%s)", self._plant_id)
             result = None
+            timed_out = True
         # LLM を待っている間に眠った（close された）なら、もう別のセッションなので何もしない
         if self._session_id != session_id:
             return None
+        # 3. 名前を聞けた回を数える（1 から数える）。時間切れの回は数えない。
+        #    LLM が遅いだけで「たろうだよ」が聞き取れず、3 回でお客さんにされるのを防ぐため（#41 のレビュー）
+        if timed_out:
+            return None
+        self._user_turns += 1
         # 4. 名乗った → その人に決める（初めての人なら登録する）
         if result is not None and result.kind == "known" and result.person_id is not None:
             return self._decide_person(self._store.get_person(result.person_id))
