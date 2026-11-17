@@ -177,20 +177,23 @@ class PlantConversation:
             # TTS の指示に残ったまま挨拶しないようにするため（最終レビュー I1）
             return TurnDecision("greet", instructions=instructions, dialect="standard")
 
-        # 3. 起きているとき: 発話を記録し、無言タイマーをリセットする
-        self._record("user", text)
+        # 3. 起きているとき: 先頭の呼びかけ（「ふたまる、」）を外す（#68）。
+        #    眠っているときに起こす発話（上の match.rest）と同じく、外した文で返事・記録・名前探しをする。
+        #    元の「ふたまる太郎だよ。」のまま会話の LLM に渡すと、名前を「太郎」と登録していても、
+        #    植物が「ふたまる太郎」と呼んでしまうため
+        content = self._without_leading_wake_word(text)
+        # 4. 発話を記録し、無言タイマーをリセットする
+        self._record("user", content if content is not None else text)
         self._controller.on_user_activity(self._clock())
-        # 4. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する。
-        #    名前探しには、先頭の呼びかけ（「ふたまる、」）を外した文を渡す（#68）。
-        #    返事と会話ログは、元の発話 text のまま使う
-        name_text = self._without_leading_wake_word(text)
-        if name_text is None:
-            # 「ふたまる」とだけ呼ばれた → 名乗りではないので、名前探しはしない（3 回にも数えない）
+        if content is None:
+            # 「ふたまる」とだけ呼ばれた → 返事はするが、名乗りではないので名前探しはしない
+            # （名前を聞く 3 回にも数えない）
             return TurnDecision("reply", text)
-        decided = await self._identify_turn(name_text)
+        # 5. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する
+        decided = await self._identify_turn(content)
         if decided is not None:
-            return TurnDecision("reply", text, decided[0], decided[1])
-        return TurnDecision("reply", text)
+            return TurnDecision("reply", content, decided[0], decided[1])
+        return TurnDecision("reply", content)
 
     def _without_leading_wake_word(self, text: str) -> str | None:
         """起きている間の発話から、先頭の呼びかけ（ウェイクワードと敬称）を外す（#68）。

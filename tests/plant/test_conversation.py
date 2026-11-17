@@ -461,9 +461,10 @@ async def test_awake_name_after_the_wake_word_drops_the_wake_word(store, clock):
     d = await c.on_user_turn("ふたまる太郎だよ。")
     assert identified_utterance(completer) == "太郎だよ。"
     assert [p.name for p in store.get_people("a")] == ["太郎"]
-    # 返事と会話ログは、元の発話のまま
-    assert d.text == "ふたまる太郎だよ。"
-    assert [u.text for u in store.get_utterances(current_sid(store))] == ["ふたまる太郎だよ。"]
+    # 返事と会話ログも、呼びかけを外した文にする（眠っているときに起こす発話と同じ）。
+    # 元の文のまま会話の LLM に渡すと、植物が「ふたまる太郎」と呼んでしまうため
+    assert d.text == "太郎だよ。"
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["太郎だよ。"]
     await c.close()
 
 
