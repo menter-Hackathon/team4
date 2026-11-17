@@ -3,7 +3,13 @@ from datetime import datetime, timedelta
 import pytest
 
 from agent.plant.personality import Traits
-from agent.plant.prompt import build_system_prompt, rank_memories, recency_factor
+from agent.plant.prompt import (
+    LENGTH,
+    TRAIT_TEXT,
+    build_system_prompt,
+    rank_memories,
+    recency_factor,
+)
 from agent.plant.store import Memory
 from agent.plant.timeutil import JST, iso
 
@@ -29,9 +35,11 @@ def test_base_and_tag_line():
 @pytest.mark.parametrize(
     "v,text",
     [
-        (0.2, "少し素っ気なく接する。"),
+        (0.1, "素っ気なく接し、甘えたりはしない。"),
+        (0.35, "少し素っ気なく接する。"),
         (0.5, "普通に親しく接する。"),
-        (0.8, "持ち主に甘えて親しげに話す。"),
+        (0.65, "親しげに、うれしそうに接する。"),
+        (0.9, "持ち主に甘えて、「会いたかった」など好きな気持ちをよく伝える。"),
     ],
 )
 def test_affection_levels(v, text):
@@ -44,16 +52,31 @@ def test_all_axes_present_in_order():
     )
     lines = p.split("\n\n")[2].split("\n")
     assert lines == [
-        "口数は少なめで、静かに返す。",
+        "口数はとても少なく、ひと言で静かに返す。",
         "普通に親しく接する。",
         "テンション高めで、「！」を多めに使う。",
         "ときどき持ち主に質問する。",
     ]
 
 
+def test_every_axis_has_text_for_every_level():
+    # 4 軸 × 5 段階の文がそろっていて、同じ軸の中で同じ文が無い（段階が変わると必ず話し方が変わる）
+    levels = ("very_low", "low", "mid", "high", "very_high")
+    for name in TRAIT_TEXT:
+        assert tuple(TRAIT_TEXT[name]) == levels
+        assert len(set(TRAIT_TEXT[name].values())) == len(levels)
+    assert tuple(LENGTH) == levels and len(set(LENGTH.values())) == len(levels)
+
+
 def test_talkativeness_changes_length():
-    assert "1回の返答は1文。" in build_system_prompt(
+    assert "1回の返答は短い1文。" in build_system_prompt(
         "ふたまる", Traits(talkativeness=0.1), [], None, NOW
+    )
+    assert "1回の返答は1文。" in build_system_prompt(
+        "ふたまる", Traits(talkativeness=0.35), [], None, NOW
+    )
+    assert "1回の返答は2文くらい。" in build_system_prompt(
+        "ふたまる", Traits(talkativeness=0.65), [], None, NOW
     )
     assert "1回の返答は2〜3文で、ときどき自分から話題も振る。" in build_system_prompt(
         "ふたまる", Traits(talkativeness=0.9), [], None, NOW
