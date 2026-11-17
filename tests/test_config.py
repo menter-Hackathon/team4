@@ -1,6 +1,6 @@
 import pytest
 
-from agent.config import TTS_INSTRUCTIONS, ConfigError, load_config
+from agent.config import TTS_INSTRUCTIONS, ConfigError, db_path_from_env, load_config
 
 BASE = {
     "LLM_BASE_URL": "http://gpu:8000/v1",
@@ -19,6 +19,7 @@ def test_defaults():
     assert c.wake_words == ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
     assert (c.sleep_after, c.llm_timeout, c.stt_timeout, c.tts_timeout) == (60.0, 15.0, 10.0, 10.0)
     assert c.tts_instructions == TTS_INSTRUCTIONS and c.dev_plant_id is None
+    assert c.llm_reasoning_effort is None
 
 
 def test_overrides():
@@ -29,8 +30,10 @@ def test_overrides():
             "SLEEP_AFTER_SECONDS": "30",
             "TTS_BASE_URL": "http://gpu:8002/v1",
             "DEV_PLANT_ID": "dev",
+            "LLM_REASONING_EFFORT": "none",
         }
     )
+    assert c.llm_reasoning_effort == "none"
     assert c.wake_words == ("ふたまる", "ふーちゃん") and c.sleep_after == 30.0
     assert c.tts_base_url == "http://gpu:8002/v1" and c.dev_plant_id == "dev"
 
@@ -54,3 +57,10 @@ def test_openai_key_required_only_without_tts_base_url():
     with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
         load_config(env)
     assert load_config({**env, "TTS_BASE_URL": "http://gpu:8002/v1"}).tts_api_key == "EMPTY"
+
+
+def test_db_path_from_env_needs_no_other_variables():
+    assert db_path_from_env({}) == "./data/futamaru.db"
+    assert db_path_from_env({"FUTAMARU_DB_PATH": "  "}) == "./data/futamaru.db"
+    assert db_path_from_env({"FUTAMARU_DB_PATH": "/data/x.db"}) == "/data/x.db"
+    assert load_config({**BASE, "FUTAMARU_DB_PATH": "/data/x.db"}).db_path == "/data/x.db"

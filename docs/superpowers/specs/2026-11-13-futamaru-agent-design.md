@@ -1,6 +1,7 @@
 # ふたまる 音声AIエージェント 設計書
 
 - 日付: 2026-11-13
+- 更新: 2026-11-16 ディスプレイをやめた（表情の表示と `set_expression` RPC をなくした）
 - 対象: サーバー側の音声AIエージェントの骨組み（Python / LiveKit Agents）
 - 企画: 「ふたまる」— 育て方によって個性が変わる、話せる観葉植物
 
@@ -13,8 +14,7 @@
 1. 「ふたまる」と呼びかけると植物が起き、実機（ESP32-S3）とリアルタイムに音声会話できる（割り込み対応）
 2. 会話内容・ユーザーの好みを長期記憶し、次回以降の会話に反映できる
 3. 性格パラメータが会話履歴に応じて変化し、話し方に違いが出る
-4. 応答に合わせてディスプレイの表情が変わる
-5. 同じ初期状態の2株を異なる会話履歴で育て、個性の違いをデモできる
+4. 同じ初期状態の2株を異なる会話履歴で育て、個性の違いをデモできる
 
 ### 範囲外
 - ESP32 ファームウェア、3Dプリント筐体（ただし ESP32 側に求める要件は §9 で定義する）
@@ -22,6 +22,7 @@
 - 話者識別（1株を誰が話しかけても同一ユーザーとして扱う）
 - 眠っている間の自発的な発話、時刻ベースのスケジュール発話
 - 性格・記憶を可視化するダッシュボード（デモでは `scripts/simulate.py` の出力を使う）
+- ディスプレイによる表情の表示（目は筐体の造形で表す。2026-11-16 決定、§2）
 
 ## 2. 決定事項
 
@@ -39,6 +40,7 @@
 | 起動方法 | ウェイクワード「ふたまる」。サーバー側で文字起こし結果から検出 |
 | 会話の区切り | 最後のユーザー発話から 60 秒無言で終了（眠る） |
 | 個性の表現 | 数値パラメータ（4軸） + 長期記憶 |
+| デバイスの役割 | 話すだけ（マイクとスピーカー）。ディスプレイは付けず、目は筐体の造形で表す。実装の手間を減らすため、2026-11-16 にハード担当で決定 |
 | 永続化 | SQLite（WAL モード） |
 | 時刻 | すべて JST（`+09:00` 付き ISO 8601 文字列）で保存 |
 | パッケージ管理 | uv |
@@ -49,7 +51,6 @@
 [ESP32-S3 (植物)] ──WebRTC──> [LiveKit Cloud] <──── [Agent ワーカー (GPU サーバー)]
    マイク(常時送信)            ルーム: plant-<id>         │
    スピーカー                                           │
-   ディスプレイ <── RPC: 表情 ──────────────────────────┤
                                                        ├─> vLLM (Gemma 4)          [GPU サーバー]
                                                        ├─> Speaches (kotoba-whisper) [GPU サーバー]
                                                        ├─> OpenAI TTS (gpt-4o-mini-tts) [外部 API]
@@ -83,7 +84,7 @@ agent/
     reflection.py      会話終了時の記憶抽出・性格変化量の判定（LLM 呼び出し）
     expression.py      表情タグの解析・除去（ストリーミング対応）
     wake.py            ウェイクワード検出・正規化、起きている/眠っている状態の管理
-    conversation.py    1株ぶんの会話の進行（起床・記録・睡眠・reflection の起動・表情送信）。LiveKit 非依存
+    conversation.py    1株ぶんの会話の進行（起床・記録・睡眠・reflection の起動）。LiveKit 非依存
     timeutil.py        JST の現在時刻と ISO 8601 変換
 scripts/
   issue_token.py       ESP32 用の LiveKit トークン発行
@@ -100,10 +101,10 @@ tests/
 
 ### 5.1 状態
 
-| 状態 | STT | 応答 | 記録 | 表情 |
-|---|---|---|---|---|
-| `SLEEPING` 眠っている | 動く（VAD で検出した発話のみ） | しない | しない（文字起こし結果は破棄） | `sleepy` |
-| `AWAKE` 起きている | 動く | する | `utterances` に即時保存 | 応答に応じて変化 |
+| 状態 | STT | 応答 | 記録 |
+|---|---|---|---|
+| `SLEEPING` 眠っている | 動く（VAD で検出した発話のみ） | しない | しない（文字起こし結果は破棄） |
+| `AWAKE` 起きている | 動く | する | `utterances` に即時保存 |
 
 起動時・ESP32 参加時の初期状態は `SLEEPING`。
 
@@ -129,10 +130,9 @@ AWAKE    --(ESP32 退出)--> (終了)                   : セッション終了 
 - LiveKit Agents 上では、`Agent.on_user_turn_completed` で状態を確認し、`SLEEPING` 中かつウェイクワードを含まない発話は `StopResponse` で応答を止め、チャット履歴にも残さない。
 
 ### 5.4 セッションの終了処理
-1. 表情 `sleepy` を送る。
-2. `sessions.ended_at` を記録する。
-3. reflection（§6.3）を非同期で実行する。reflection の完了を待たずに `SLEEPING` に戻り、次のウェイクワードを受け付ける。
-4. 次のセッションの開始時点で reflection が終わっていなければ、更新前の性格・記憶でプロンプトを組み立てる。
+1. `sessions.ended_at` を記録する。
+2. reflection（§6.3）を非同期で実行する。reflection の完了を待たずに `SLEEPING` に戻り、次のウェイクワードを受け付ける。
+3. 次のセッションの開始時点で reflection が終わっていなければ、更新前の性格・記憶でプロンプトを組み立てる。
 
 ## 6. 性格と記憶
 
@@ -159,9 +159,22 @@ CREATE TABLE plants (
   curiosity      REAL NOT NULL DEFAULT 0.5
 );
 
+CREATE TABLE people (            -- 株ごとの話し相手（§6.5）
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  plant_id         TEXT NOT NULL REFERENCES plants(plant_id),
+  name             TEXT NOT NULL,
+  talkativeness    REAL NOT NULL DEFAULT 0.5,   -- 人ごとの性格（§6.1 と同じ 4 軸）
+  affection        REAL NOT NULL DEFAULT 0.5,
+  energy           REAL NOT NULL DEFAULT 0.5,
+  curiosity        REAL NOT NULL DEFAULT 0.5,
+  dialect_override TEXT,                        -- NULL = 自動、値は §6.5 の方言
+  created_at       TEXT NOT NULL
+);
+
 CREATE TABLE memories (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   plant_id    TEXT NOT NULL REFERENCES plants(plant_id),
+  person_id   INTEGER REFERENCES people(id),  -- NULL = 全員に共通の記憶
   content     TEXT NOT NULL,          -- 例: 「ユーザーはカレーが好き」
   kind        TEXT NOT NULL,          -- preference | event | habit
   importance  REAL NOT NULL,          -- 0.0〜1.0
@@ -176,6 +189,8 @@ CREATE TABLE sessions (
   ended_at    TEXT,
   user_turns  INTEGER NOT NULL DEFAULT 0,
   summary     TEXT,                    -- reflection で生成
+  person_id   INTEGER REFERENCES people(id),  -- NULL = お客さん（相手が未確定）
+  owner_dialect TEXT,                  -- standard | kansai | hakata | hiroshima | unknown、NULL = 未判定
   reflected   INTEGER NOT NULL DEFAULT 0  -- 0: 未処理, 1: 処理済み
 );
 
@@ -191,6 +206,7 @@ CREATE TABLE trait_history (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   plant_id       TEXT NOT NULL REFERENCES plants(plant_id),
   session_id     INTEGER REFERENCES sessions(id),
+  person_id      INTEGER REFERENCES people(id),  -- NULL = 株の性格
   talkativeness  REAL NOT NULL,
   affection      REAL NOT NULL,
   energy         REAL NOT NULL,
@@ -201,13 +217,14 @@ CREATE TABLE trait_history (
 
 - 会話ログは `AWAKE` 中の発話ごとに `utterances` へ即時保存する。
 - 植物を作成した時点で、初期値の行を `trait_history` に1行入れる（成長グラフの起点）。
+- 既存の DB には、起動時に無いテーブル・列だけを足す（§6.5「DB の引き継ぎ」）。
 
 ### 6.3 reflection：記憶と性格の更新（`reflection.py` + `personality.py`）
 セッション終了時（§5.4）に実行する。
 
 1. 以下を LLM に渡す。
    - そのセッションの発話ログ
-   - 既存の記憶（重要度 × 新しさの上位 30 件、`id` 付き）
+   - 既存の記憶（重要度 × 新しさの上位 30 件、`id` 付き）。**そのセッションの相手の記憶と共通の記憶だけ**を見せる（お客さんなら共通の記憶だけ）。ほかの人の記憶は見せない
 2. 以下の JSON を返させる。
    ```json
    {
@@ -218,16 +235,22 @@ CREATE TABLE trait_history (
      "updated_memories": [
        {"id": 12, "content": "ユーザーは辛いカレーが好き", "importance": 0.7}
      ],
-     "trait_deltas": {"talkativeness": 0.02, "affection": 0.03, "energy": -0.01, "curiosity": 0.0}
+     "trait_deltas": {"talkativeness": 0.02, "affection": 0.03, "energy": -0.01, "curiosity": 0.0},
+     "owner_dialect": "kansai"
    }
    ```
    - 既存の記憶と同じ内容は `new_memories` に入れず、内容が変わった・補強された場合は `updated_memories` で更新するよう指示する。
-   - `updated_memories` の `id` が既存の記憶に無ければ無視する。
+   - `updated_memories` の `id` が既存の記憶に無ければ無視する。LLM に見せていない記憶（ほかの人の記憶）の `id` が返ってきた場合も無視する。
+   - `owner_dialect` はそのセッションの相手の話し方の判定で、`standard` / `kansai` / `hakata` / `hiroshima` / `unknown` のどれか。発話が短い・少なくて判断できないときは `unknown`。`sessions.owner_dialect` に保存する（§6.5）。
 3. 各 `trait_deltas` は **±0.05 にクランプ**し、適用後の値は 0.0〜1.0 にクランプする。
 4. `talkativeness` は LLM の判定値と、行動統計からの目標値をブレンドする。
    - 行動目標値 `t_behavior = min(1.0, 直近7日の AWAKE 中のユーザー発話数 / 100)`
    - 最終変化量 `delta = clamp(0.5 * llm_delta + 0.5 * (t_behavior - 現在値) * 0.1, -0.05, 0.05)`
-5. 1つのトランザクションで、`plants` の性格値更新、`memories` の追加・更新、`trait_history` への1行追加、`sessions.summary` の保存と `reflected = 1` を行う。
+   - 人ごとの性格を使うときは、`t_behavior` の発話数もその人との AWAKE 中の発話だけで数える（§6.5）。
+5. 1つのトランザクションで、性格値の更新、`memories` の追加・更新、`trait_history` への1行追加、`sessions.summary` と `sessions.owner_dialect` の保存と `reflected = 1` を行う。人ごとの書き分けは以下のとおり。
+   - 相手が決まっているセッション: 性格値は `people` のその人の行を更新し、`trait_history` の行にも `person_id` を入れる。新しい記憶はその人の記憶（`memories.person_id`）として保存する
+   - お客さんのセッション（`person_id` が NULL）: 性格値は `plants` を更新し、`trait_history.person_id` は NULL。新しい記憶は共通の記憶として保存する
+   - 共通の記憶を `updated_memories` で更新しても、共通の記憶のまま（その人の記憶には移さない）
 6. LLM の出力が JSON として不正、または必須キーが無い場合は1回だけ再試行し、それでも失敗したら `reflected = 0` のまま残す。
 7. ユーザー発話が0件のセッション（ウェイクワードだけで終わった等）は LLM を呼ばず、`reflected = 1` にするだけとする。
 8. エージェント起動時に以下を処理する。
@@ -246,20 +269,61 @@ CREATE TABLE trait_history (
    - 4軸×3段階の文言はすべて `prompt.py` 内の定数として持つ
 4. **記憶**: `importance * 新しさ係数` の上位10件を箇条書き
    - 新しさ係数 = `0.5 ** (最終更新からの経過日数 / 7)`（1週間で半減）
-5. **前回の会話**: 直近の `reflected = 1` のセッションの `summary`（無ければ省略）
+5. **前回の会話**: 直近の `reflected = 1` のセッションの `summary`（無ければ省略）。相手が決まっていればその人のセッション、お客さんならお客さんのセッション（`person_id` が NULL）の要約を使う（§6.5）
+6. **方言の指示**: 相手の方言（§6.5）が標準語以外なら 1 段落足す（例:「関西弁で話す（例: 〜やで、〜やん、ほんまに）」）。標準語なら足さない。方言ごとの文面と語尾の例は `prompt.py` の定数にする
+7. **話し相手の名前**: 相手が決まっていれば「今話している相手は{名前}」を足す。相手が未確定の間は、「まだ相手の名前がわからないので、自然に名前を聞く」を足す（ウェイクワードだけで起こされたときの挨拶も同様）。聞くのは最初の 3 回の発話まで（§6.5）
+
+性格指示（3）と記憶（4）は、相手が決まっていればその人の性格と、その人の記憶＋共通の記憶の中の上位 10 件を使う。お客さんなら株の性格と共通の記憶だけを使う。
+
+### 6.5 話し相手と方言
+一つの株に複数の人が話しかけるため、今話している人を見分け、その人ごとの性格・記憶・方言で接する。見分けは名乗り（名前）による。声での見分けはしない。
+
+**前提**
+- 一人ずつ話す。1 セッション（起きてから眠るまで）に話し相手は 1 人で、途中で替わらない。替わるときは一度眠らせてから次の人が起こす。
+- 方言は標準語・関西弁・博多弁・広島弁の 4 つ（値は `standard` / `kansai` / `hakata` / `hiroshima`）。
+
+**話し相手の見分け**
+- 相手が未確定の間、ユーザーの発話ごとに、返事の前に LLM で名前を探す。「ふたまる、たろうだよ」の「たろうだよ」も対象にする。
+  - 知っている人（`people`）の一覧を渡し、「一覧のこの人」「新しい人（名前）」「名乗っていない」のどれかを構造化出力（JSON スキーマ）で返させる。STT は「たろう」「太郎」「タロウ」と書き方が揺れるため、文字の一致では比べない。
+  - 時間切れは 3.0 秒。切れたら名乗っていない扱いにして返事を優先する。時間切れの回は、下の「最初の 3 回」に数えない（LLM が遅いだけで、名乗った人がお客さんにされないようにするため）。
+  - 新しい人なら `people` に登録する（性格は 4 軸とも 0.5 から始める）。
+- 相手が決まったら、その人の性格・記憶・前回の会話・方言でシステムプロンプトを作り直し、TTS の指示も方言に合わせて替える。話題を振るまでの秒数（§7.2）も、その人の性格で決め直す。
+- 名前を聞くのは、セッションの最初の 3 回のユーザー発話まで。それでも名乗らなければ「お客さん」として扱い、それ以上は聞かない。お客さんに決まったら、そのセッションでは名前探しもやめる（返事の遅れを増やさないため。途中で名乗っても、そのセッションはお客さんのまま）。
+- 名前探しで返事が遅れるのは、相手が確定するまでの最初の数回だけ。
+
+**人ごとに分けるもの**
+
+| もの | 相手が決まっている | お客さん（`person_id` が NULL） |
+|---|---|---|
+| 性格（4 軸） | `people` のその人の値。振り返りでその人の値だけが動く | 株の性格（`plants`）。お客さんとの振り返りで動く |
+| 記憶 | その人の記憶＋共通の記憶 | 共通の記憶だけ。新しい記憶も共通として保存 |
+| 前回の会話 | その人の直近のセッションの要約 | `person_id` が NULL のセッションの直近の要約（名前のわかった人の会話は見せない） |
+| 方言 | 下記の決め方 | 標準語 |
+
+- **ある人の記憶は、ほかの人との会話では使わない。** 一人ひとりと別々の関係を育て、人に話されたくないことをほかの人にばらさないため。振り返りで LLM に見せる記憶も、その相手の記憶と共通の記憶だけにする（§6.3）。
+- 今ある記憶・前回の会話（すべて `person_id` が NULL）は、共通の記憶・お客さん側の要約として扱う。今ある性格は株の性格（お客さん用）になる。
+- 成長の早送りデモ（`scripts/simulate.py`）は人を使わず、今までどおり株の性格で動く。
+- おしゃべり度の行動目標値（直近 7 日の話しかけ回数 ÷ 100）は、相手が決まっていればその人の話しかけ回数で数える。
+- セッションの相手は `sessions.person_id` に記録する。
+
+**方言の決め方**
+1. `people.dialect_override` があれば、判定に関係なくその方言で話す（手で固定できる。NULL なら自動）。手で固定するコマンド（`scripts/people.py`）で登録する名前も、会話で名乗った名前と同じく、改行を空白にして長さを切ってから保存する。
+2. 無ければ、その人との直近 5 回のセッションの `owner_dialect`（`unknown` を除く）の多数決。同数なら新しいほうを優先する。
+3. 判定が 1 つも無ければ標準語。
+
+- 判定は振り返り（§6.3）の `owner_dialect` で行い、セッションごとに保存する。
+- 話し方への反映は、システムプロンプトの方言の指示（§6.4）と、TTS の指示（`TTS_INSTRUCTIONS`）の後ろに足す方言のイントネーションの指示。標準語なら足さない。TTS 側で違和感があれば TTS の指示だけ外す。
+
+**DB の引き継ぎ**
+- 起動時に、無いテーブル（`people`）と無い列（`memories.person_id`・`sessions.person_id`・`sessions.owner_dialect`・`trait_history.person_id`）を足す。今あるデータは消さない。
 
 ## 7. 会話中の動作
 
 ### 7.1 表情（`expression.py`）
 
-**表情一覧**（ESP32 が表示できる必要があるもの、計8種）
+デバイスにディスプレイが無いため（§2）、表情はどこにも表示しない。表情タグの仕組み（§6.4 の出力形式と本節の解析）は変えずに残す。表情をログに残せば会話の確認に使えるうえ、仕組みを外すとプロンプト・解析・テストの作り直しが要るため。
 
-| 名前 | 送るタイミング |
-|---|---|
-| `neutral` `happy` `sad` `surprised` `love` | LLM 応答の表情タグ |
-| `sleepy` | LLM 応答の表情タグ / `SLEEPING` 中 |
-| `listening` | `AWAKE` 中にユーザーが話し始めたとき |
-| `thinking` | `AWAKE` 中にユーザー発話が終わり、応答を待っている間 |
+**表情一覧**（LLM が返すもの、計6種）: `neutral` `happy` `sad` `surprised` `love` `sleepy`
 
 **表情タグの解析**
 - LLM 応答はストリーミングで届くため、先頭から `]` が出るまで（最大 16 文字）バッファする。
@@ -267,14 +331,11 @@ CREATE TABLE trait_history (
   - 16 文字以内に `]` が出ない場合は、バッファをそのまま TTS に流し、表情は `neutral` とする。
   - 不明なタグ名は `neutral` とする。
 - タグは TTS に渡す前に除去する。
-- LLM が 6 種以外（`listening` / `thinking`）を返した場合も `neutral` とする。
+- LLM が 6 種以外を返した場合も `neutral` とする。
 
-**ESP32 への送信**
-- LiveKit RPC
-  - メソッド名: `set_expression`
-  - ペイロード: `{"expression": "<name>"}`
-  - 宛先: identity `device-<plant_id>`
-- RPC の失敗（ESP32 未応答など）はログに残して無視し、会話は止めない。
+**表情の扱い**
+- 確定した表情はログ（`expression=<name>`）に残すだけにする。
+- ESP32 には送らない。以前の LiveKit RPC `set_expression` は使わない。
 
 ### 7.2 植物から話しかける
 - **起こされたとき**: ウェイクワードだけで呼ばれた場合、記憶と前回要約をもとに植物から話し始める（例: 「あ、おかえり！昨日言ってたテスト、どうだった？」）。
@@ -292,7 +353,7 @@ URL・モデル名はすべて環境変数で指定する。開発時はロー�
 
 | 項目 | 内容 |
 |---|---|
-| 環境変数 | `LLM_BASE_URL`, `LLM_MODEL` |
+| 環境変数 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`（任意。Ollama の Gemma 4 では `none` にして思考モードを切る） |
 | エンドポイント | `POST {LLM_BASE_URL}/chat/completions`（OpenAI 互換、ストリーミング） |
 | vLLM バージョン | 0.19 以上（Gemma 4 のネイティブ実装が入った版） |
 | 起動例 | `vllm serve google/gemma-4-E4B-it --max-model-len 32768 --gpu-memory-utilization 0.80`（STT の分を残す） |
@@ -344,7 +405,7 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 
 ## 9. ESP32 側への要件（ハード担当との取り決め）
 
-ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk-esp32`）で作る前提とする。この SDK は ESP32-S3 に対応し、Opus 音声の双方向送受信、エコーキャンセル（AEC）、RPC メソッドの登録（エージェントから呼び出される側）を備えている。ただし現在は Developer Preview で API が変わる可能性があるため、使う版を固定する。
+ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk-esp32`）で作る前提とする。この SDK は ESP32-S3 に対応し、Opus 音声の双方向送受信とエコーキャンセル（AEC）を備えている。ただし現在は Developer Preview で API が変わる可能性があるため、使う版を固定する。
 
 エージェントが正しく動くために、ESP32 ファームウェアに以下を求める。
 
@@ -352,18 +413,17 @@ ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk
 2. マイク音声を常時 publish する（ウェイクワードはサーバー側で検出するため）。
 3. エージェントの音声トラックを subscribe してスピーカーで再生する。
 4. **エコーキャンセル（AEC）を有効にする**（SDK の AEC 機能を使う）。植物自身の声をマイクで拾うと、割り込みやウェイクワードの誤検出が起きるため。
-5. RPC メソッド `set_expression` を登録し（`livekit_room_rpc_register`）、§7.1 の8種の表情を表示する。未知の表情名は `neutral` として表示する。
-6. 起動直後の表示は `sleepy` とする。
+
+ディスプレイは付けないため（§2）、表情の表示と RPC メソッドの登録は求めない。
 
 ## 10. エラー処理
 
 | 状況 | 振る舞い |
 |---|---|
 | LLM タイムアウト・エラー（会話中） | 定型文「ん…ちょっとぼーっとしてた」を TTS で返す |
-| TTS エラー | 表情 `sleepy` を送ってその応答をスキップ |
+| TTS エラー | その応答をスキップ |
 | STT エラー | その発話を無視して待機を継続（`SLEEPING` 中はウェイクワード判定もスキップ） |
 | reflection 失敗 | `reflected = 0` のまま残し、次回起動時に再処理 |
-| RPC 失敗 | ログのみ |
 | 回線切断 | LiveKit の再接続に任せる。ESP32 退出時はセッション終了扱い（`AWAKE` だった場合） |
 | ルーム名が `plant-` で始まらない | 即座に退出 |
 
@@ -387,7 +447,7 @@ ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk
 
 | # | 確認した前提 | 結果 | 仕様への反映 |
 |---|---|---|---|
-| 1 | LiveKit ESP32 SDK が RPC と AEC に対応しているか | **対応**。ESP32-S3 / P4 対応、Opus 双方向、AEC、RPC メソッド登録あり。Developer Preview（API 変更の可能性あり）。既知の問題として「リモート参加者の退出で切断される場合がある」 | §9。表情はエージェントからの RPC 呼び出しで送る方式のまま |
+| 1 | LiveKit ESP32 SDK が RPC と AEC に対応しているか | **対応**。ESP32-S3 / P4 対応、Opus 双方向、AEC、RPC メソッド登録あり。Developer Preview（API 変更の可能性あり）。既知の問題として「リモート参加者の退出で切断される場合がある」 | §9。表情はエージェントからの RPC 呼び出しで送る方式のまま（2026-11-16 にディスプレイをやめたため、RPC は使わなくなった） |
 | 2a | kotoba TTS を OpenAI 互換で自前ホストできるか | **不可**。Kotoba TTS v2 は fal.ai 上のホスト型 API のみで、重みは非公開。なお企画メモの「kotoba」は STT の kotoba-whisper を指していたと確認（2026-11-15） | §8.3。TTS は OpenAI TTS に決定。`TTS_BASE_URL` で OpenAI 互換の自前 TTS へ切り替え可能 |
 | 2b | Whisper を OpenAI 互換で立てられるか | **可能**。Speaches（faster-whisper ベース）や vLLM の Transcriptions API が OpenAI 互換。日本語特化の `kotoba-whisper-v2.0-faster`（CTranslate2 版、MIT）がある | §8.2 |
 | 3 | vLLM の Gemma 4 で JSON 出力が使えるか | **使える**。vLLM ≥ 0.19 で Gemma 4 をネイティブ対応。公式レシピで `response_format` の `json_schema` による構造化出力がサポートされている | §8.1、§6.3 |

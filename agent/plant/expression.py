@@ -17,10 +17,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-# LLM に使わせる表情（プロンプトで指示している 6 種）
+# LLM に使わせる表情（プロンプトで指示している 6 種）。
+# 以前はエージェントが自分で出す listening / thinking もあったが、画面に出すためだけのものだったので
+# ディスプレイをやめたときになくした（#22）
 LLM_EXPRESSIONS = frozenset({"neutral", "happy", "sad", "surprised", "love", "sleepy"})
-# エージェントが自分で出す表情も含めた全種類（聞いている・考えている）
-ALL_EXPRESSIONS = LLM_EXPRESSIONS | {"listening", "thinking"}
 
 # タグとみなす最大の長さ（"[" と "]" を含む）。これより長い括弧書きは、タグではなく本文として扱う
 MAX_TAG_LEN = 16
