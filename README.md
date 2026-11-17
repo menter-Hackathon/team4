@@ -44,6 +44,16 @@ uv run python -m scripts.simulate scripts/samples/plant-a.json scripts/samples/p
 
 同じ初期状態の2株に別々の会話ログを流し込み、性格値の推移・最終的なシステムプロンプト・返答の違いを表示します（LLM サーバーが必要）。
 
+## 人の一覧と方言の固定（デモ用）
+
+```bash
+uv run python -m scripts.people --plant-id a1                                  # 知っている人の一覧
+uv run python -m scripts.people --plant-id a1 --person たろう --dialect kansai   # 方言を固定（未登録なら登録）
+uv run python -m scripts.people --plant-id a1 --person タロウ --auto            # 固定を外して自動判定に戻す
+```
+
+名前はひらがな・カタカナの違いを無視して照合します。`--dialect` は `standard` / `kansai` / `hakata` / `hiroshima`。発表の前に人を登録し方言を固定しておくと、確実に見せられます。Docker では `docker compose exec agent python -m scripts.people ...` です。
+
 ## テスト
 
 ```bash

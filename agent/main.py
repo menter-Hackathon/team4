@@ -46,6 +46,7 @@ from livekit.plugins import silero
 
 from agent.config import Config, load_config
 from agent.plant.conversation import PlantConversation
+from agent.plant.dialect import dialect_tts
 from agent.plant.expression import ExpressionParser
 from agent.plant.prompt import FALLBACK_REPLY, NUDGE_INSTRUCTION, WAKE_GREETING_INSTRUCTION
 from agent.plant.store import PlantStore
@@ -76,10 +77,27 @@ class FutamaruAgent(Agent):
         transcription_node:     画面・ログに出す文字からも表情タグを外す
     """
 
-    def __init__(self, conv: PlantConversation) -> None:
+    def __init__(self, conv: PlantConversation, tts_instructions: str = "") -> None:
         # システムプロンプト（instructions）は起きるたびに作るので、最初は空にしておく
         super().__init__(instructions="")
         self._conv = conv
+        # TTS（声）の基本の話し方の指示。方言が決まったら、これの後ろに方言の指示を足す
+        self._tts_instructions = tts_instructions
+
+    def _apply_dialect(self, dialect: str) -> None:
+        """話し相手の方言に合わせて、TTS の話し方の指示を差し替える。
+
+        標準語（dialect_tts が None）のときは基本の指示だけに戻す。
+        前の相手の方言が残らないようにするためで、必ず毎回まるごと渡し直す。
+        TTS が無い・指示を替えられない種類のとき（テストなど）は、何もしない。
+        """
+        tts_obj = self.session.tts
+        update_options = getattr(tts_obj, "update_options", None)
+        if update_options is None:
+            return
+        extra = dialect_tts(dialect)
+        instructions = f"{self._tts_instructions} {extra}" if extra else self._tts_instructions
+        update_options(instructions=instructions)
 
     async def end_session(self) -> None:
         """ESP32 が退出したときの後始末（#5）。entrypoint の _on_leave から呼ばれる。
@@ -106,6 +124,9 @@ class FutamaruAgent(Agent):
             await self.update_instructions(decision.instructions)
             # 今回の返答も新しいプロンプトで作るため、一時コンテキストも差し替える
             turn_ctx.items[:] = self.chat_ctx.copy().items
+        # 話し相手（の方言）が決まったときだけ、声の出し方も方言に合わせる
+        if decision.dialect is not None:
+            self._apply_dialect(decision.dialect)
         if decision.kind == "ignore":
             raise StopResponse()  # ユーザー発話は履歴にも残らない
         if decision.kind == "greet":
@@ -297,7 +318,7 @@ async def entrypoint(ctx: JobContext) -> None:
             max_unrecoverable_errors=1_000_000,
         ),
     )
-    agent = FutamaruAgent(conv)
+    agent = FutamaruAgent(conv, cfg.tts_instructions)
 
     # --- 4. LiveKit の出来事を、植物のロジックにつなぐ ---
     # @session.on("名前") / @ctx.room.on("名前") を付けた関数は、その出来事が起きるたびに LiveKit から呼ばれる

@@ -78,3 +78,22 @@ def test_memory_section_top10_and_summary():
     assert "覚えていること:" in p and p.count("\n- ") == 10
     assert "- 記憶0\n" not in p and "- 記憶1\n" not in p and "- 記憶11" in p
     assert p.endswith("前回の会話: テストの話をした")
+
+
+def test_prompt_mentions_dialect_and_person():
+    p = build_system_prompt(
+        "ふたまる", Traits(), [], None, NOW, dialect="kansai", person_name="たろう"
+    )
+    assert "関西弁" in p and "たろう" in p
+    assert "名前を聞" not in p
+    asking = build_system_prompt("ふたまる", Traits(), [], None, NOW, ask_name=True)
+    assert "名前を聞" in asking
+
+
+def test_prompt_defaults_add_nothing():
+    base = build_system_prompt("ふたまる", Traits(), [], None, NOW)
+    same = build_system_prompt(
+        "ふたまる", Traits(), [], None, NOW, dialect="standard", person_name=None, ask_name=False
+    )
+    assert base == same
+    assert "今話している相手" not in base
