@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from typing import Literal
@@ -58,10 +59,14 @@ def _as_delta(value: object) -> float:
     """LLM が返した変化量を、安全な数値に直す。
 
     LLM の出力は信用できないので、数値でないもの（文字列・None・True/False など）は 0.0（変化なし）とし、
-    数値は ±MAX_DELTA の範囲に収める。例: 0.2 → 0.05、"abc" → 0.0
+    数値は ±MAX_DELTA の範囲に収める。例: 0.2 → 0.05、"abc" → 0.0、NaN → 0.0
     """
     # bool は Python では int の仲間（True == 1）なので、先に弾かないと 1 として扱われてしまう
     if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    # NaN・Infinity も変化なしにする。json.loads は NaN / Infinity を読めてしまい、
+    # clamp(NaN) は上限（+0.05）を返すので、壊れた出力で性格が勝手に上がっていた（#7）
+    if not math.isfinite(value):
         return 0.0
     return clamp(float(value), -MAX_DELTA, MAX_DELTA)
 
