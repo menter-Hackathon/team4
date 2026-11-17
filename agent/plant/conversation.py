@@ -180,11 +180,41 @@ class PlantConversation:
         # 3. 起きているとき: 発話を記録し、無言タイマーをリセットする
         self._record("user", text)
         self._controller.on_user_activity(self._clock())
-        # 4. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する
-        decided = await self._identify_turn(text)
+        # 4. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する。
+        #    名前探しには、先頭の呼びかけ（「ふたまる、」）を外した文を渡す（#68）。
+        #    返事と会話ログは、元の発話 text のまま使う
+        name_text = self._without_leading_wake_word(text)
+        if name_text is None:
+            # 「ふたまる」とだけ呼ばれた → 名乗りではないので、名前探しはしない（3 回にも数えない）
+            return TurnDecision("reply", text)
+        decided = await self._identify_turn(name_text)
         if decided is not None:
             return TurnDecision("reply", text, decided[0], decided[1])
         return TurnDecision("reply", text)
+
+    def _without_leading_wake_word(self, text: str) -> str | None:
+        """起きている間の発話から、先頭の呼びかけ（ウェイクワードと敬称）を外す（#68）。
+
+        起きている間に「ふたまる、たろうだよ」と言うと、STT が読点を落として「ふたまる太郎だよ。」と
+        書くことがある。そのまま名前探しに渡すと、LLM が「ふたまる太郎」を名前だと思って登録してしまう。
+
+        戻り値:
+            先頭に呼びかけが無ければ text のまま。呼びかけの後ろに続きがあれば、その続き。
+            呼びかけだけ（「ふたまる」「ふたまるちゃん」）なら None。
+
+        例: "ふたまる太郎だよ。" → "太郎だよ。"、"フタマルちゃん、はなこです" → "はなこです"、
+            "たろうだよ、ふたまるよろしく" → そのまま（先頭でなければ呼びかけではない）、"ふたまる" → None
+        """
+        # detect_wake は文の途中のウェイクワードでも見つける。途中のものまで外すと、その前に言った
+        # 名前（「たろうだよ、ふたまる…」の「たろう」）が消えてしまうので、先頭にあるときだけ使う
+        joined = normalize(text)
+        words = [w for w in (normalize(word) for word in self._wake_words) if w]
+        if not any(joined.startswith(w) for w in words):
+            return text
+        match = detect_wake(text, self._wake_words)
+        if match is None or not match.rest:
+            return None
+        return match.rest
 
     def on_plant_utterance(self, text: str) -> None:
         """植物が話し終えたときに呼ばれる。起きている間だけ、表情タグを外して会話ログに記録する。"""
