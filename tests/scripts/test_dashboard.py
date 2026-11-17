@@ -10,6 +10,7 @@ import pytest
 from agent.plant.personality import Traits
 from agent.plant.store import NewMemory, PlantStore
 from agent.plant.timeutil import JST
+from scripts import dashboard
 from scripts.dashboard import HOST, dashboard_state, make_server, plant_state
 
 T0 = datetime(2026, 11, 15, 10, 0, tzinfo=JST)
@@ -151,6 +152,62 @@ def test_server_listens_on_localhost_and_serves_html_and_json(db):
         with pytest.raises(urllib.error.HTTPError) as e:
             urllib.request.urlopen(base + "/nope")
         assert e.value.code == 404
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_views_include_the_plant_type(db, monkeypatch, tmp_path):
+    # イラストがまだ無いフォルダを指す（絵文字で出す状態）
+    monkeypatch.setattr(dashboard, "TYPE_IMAGE_DIR", tmp_path / "types")
+    store = PlantStore(db, readonly=True)
+    state = plant_state(store, "a1", T0 + timedelta(hours=4))
+    store.close()
+    guest, taro = state["views"]
+    # 株の性格（0.6, 0.45, 0.5, 0.5）: おしゃべり度が「やや高い」に出たのでタイプが決まる
+    assert guest["type"]["key"] == "mint"
+    assert guest["type"]["name"] == "ミントふたまる"
+    assert guest["type"]["emoji"] and guest["type"]["description"]
+    assert guest["type"]["image"] is None  # イラストが無いので、画面は絵文字を出す
+    # たろうの性格（0.5, 0.55, 0.5, 0.5）は 4 軸とも「ふつう」なので、まだふたば
+    assert taro["type"]["key"] == "sprout"
+
+
+def test_type_image_is_listed_when_the_file_exists(db, monkeypatch, tmp_path):
+    images = tmp_path / "types"
+    images.mkdir()
+    (images / "mint.png").write_bytes(b"\x89PNG fake")
+    monkeypatch.setattr(dashboard, "TYPE_IMAGE_DIR", images)
+    store = PlantStore(db, readonly=True)
+    guest = plant_state(store, "a1", T0 + timedelta(hours=4))["views"][0]
+    store.close()
+    assert guest["type"]["image"] == "/types/mint.png"
+
+
+def test_server_serves_type_images_only_for_known_types(db, monkeypatch, tmp_path):
+    images = tmp_path / "types"
+    images.mkdir()
+    (images / "mint.png").write_bytes(b"\x89PNG fake")
+    (images / "secret.png").write_bytes(b"not a type")  # 17 タイプ以外の名前のファイル
+    monkeypatch.setattr(dashboard, "TYPE_IMAGE_DIR", images)
+    server = make_server(db, ["a1"], 0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://{HOST}:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(base + "/types/mint.png") as res:
+            assert res.headers["Content-Type"] == "image/png"
+            assert res.read() == b"\x89PNG fake"
+        # 一覧に無い名前・まだ描かれていないタイプ・フォルダの外を指す道は、どれも 404
+        for path in (
+            "/types/secret.png",
+            "/types/sunflower.png",
+            "/types/../dashboard.py",
+            "/types/%2e%2e/dashboard.py",
+            "/types/mint.PNG",
+        ):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(base + path)
+            assert e.value.code == 404, path
     finally:
         server.shutdown()
         server.server_close()
