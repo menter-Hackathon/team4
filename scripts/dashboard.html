@@ -246,6 +246,12 @@ function renderView(c, view) {
   c.meta.append(summary, dialect, count);
 }
 
+// 最初に開くタブを決める。views は先頭がお客さん、続いて登録された人（dashboard.py の plant_state）。
+// 例: [お客さん, ショーン] → ショーンのタブ、[お客さん] や [お客さん, たろう, はなこ] → お客さんのタブ
+function defaultView(views) {
+  return views.length === 2 ? views[1].key : "guest";
+}
+
 // 株 1 つぶんを描く（タブ = お客さんと、知っている人）
 function renderPlant(plant, index) {
   const c = cards[plant.plant_id] || (cards[plant.plant_id] = createCard(plant, index));
@@ -261,9 +267,15 @@ function renderPlant(plant, index) {
   c.charts.style.display = "";
   c.ptype.style.display = "";
   c.title.replaceChildren(document.createTextNode(plant.name), el("small", null, plant.plant_id));
-  // 選んでいた人がいなくなっていたら（DB を替えたなど）、お客さんに戻す
   const views = plant.views;
-  if (!views.some(v => v.key === c.selected)) c.selected = "guest";
+  // 最初に開くタブ。まだ誰もタブを押していない間は、登録されている人が 1 人だけの株なら
+  // その人のタブ、それ以外はお客さん（株の性格）のタブにする。
+  // デモでは「a1 はショーンさん、b1 はちゃむさんのふたまる」と 1 株に 1 人が育てるので、
+  // 開いた直後からその人が育てた結果（タイプ・成長曲線）を見せるため。
+  // 開いたあとに人が登録されたときも、タブを押していなければ自動で切り替える
+  if (!c.picked) c.selected = defaultView(views);
+  // 選んでいた人がいなくなっていたら（DB を替えたなど）、最初のタブに戻す
+  if (!views.some(v => v.key === c.selected)) c.selected = defaultView(views);
   c.plant = plant;  // タブを押したときは、最後に読んだ内容で描き直す
   // タブのボタンは、人の顔ぶれが変わったときだけ作り直す（毎回作り直すと押した瞬間に消えることがある）
   const keys = views.map(v => v.key + ":" + v.label).join("|");
@@ -272,7 +284,8 @@ function renderPlant(plant, index) {
     c.tabs.replaceChildren(...views.map(v => {
       const b = el("button", null, v.label);
       b.dataset.key = v.key;
-      b.onclick = () => { c.selected = v.key; renderPlant(c.plant, index); };
+      // 押したら、それ以降は自動で切り替えない（見たいタブを勝手に変えないため）
+      b.onclick = () => { c.selected = v.key; c.picked = true; renderPlant(c.plant, index); };
       return b;
     }));
   }
