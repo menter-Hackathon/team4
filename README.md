@@ -148,13 +148,15 @@ uv run python -m scripts.people --plant-id a1 --person タロウ --auto         
 ```bash
 # LLM（#1）: 会話・表情タグ・振り返りの JSON・起こされたときの挨拶・初回トークンまでの時間
 LLM_BASE_URL=http://<pc>:8000/v1 LLM_MODEL=google/gemma-4-E4B-it uv run python -m scripts.check_llm
+# Ollama の Gemma 4（Mac など）: 思考モードを切って、エージェントと同じ条件で測る
+LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=gemma4:latest LLM_REASONING_EFFORT=none uv run python -m scripts.check_llm
 
 # STT（#2）: 無音・雑音で変な文字が出ないか。録音したファイルを渡すと、ウェイクワードを聞き取れるかも確かめる
 uv run python -m scripts.check_stt
 uv run python -m scripts.check_stt futamaru1.wav futamaru2.m4a
 ```
 
-`check_llm` は `.env` を読まないので、上のように環境変数か `--base-url` と `--model` で指定します。`check_stt` は `.env` の `STT_BASE_URL`・`STT_MODEL` を使います。
+`check_llm` は `.env` を読まないので、上のように環境変数か `--base-url`・`--model`・`--reasoning-effort` で指定します。Ollama の Gemma 4 は思考モードが既定でオンなので、`LLM_REASONING_EFFORT=none` を付けないと、エージェントで使うときより遅く測れてしまいます（#54）。`check_stt` は `.env` の `STT_BASE_URL`・`STT_MODEL` を使います。
 
 ### テスト
 
