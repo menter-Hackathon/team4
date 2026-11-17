@@ -132,3 +132,17 @@ def test_json_completer_client_does_not_retry(cfg, monkeypatch):
     monkeypatch.setattr(mod, "AsyncOpenAI", spy)
     create_json_completer(cfg)
     assert seen["max_retries"] == 0
+
+
+async def test_reasoning_effort_is_sent_only_when_set(server, cfg):
+    # Ollama の Gemma 4 は既定で思考するので、LLM_REASONING_EFFORT=none で切れるようにする（#1）
+    assert cfg.llm_reasoning_effort is None
+    await create_json_completer(cfg)([{"role": "user", "content": "x"}], {"type": "object"})
+    _, body = server.requests["/v1/chat/completions"][-1]
+    assert "reasoning_effort" not in json.loads(body)
+
+    none_cfg = replace(cfg, llm_reasoning_effort="none")
+    await create_json_completer(none_cfg)([{"role": "user", "content": "x"}], {"type": "object"})
+    _, body = server.requests["/v1/chat/completions"][-1]
+    assert json.loads(body)["reasoning_effort"] == "none"
+    assert create_llm(none_cfg)._opts.reasoning_effort == "none"
