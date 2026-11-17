@@ -1,7 +1,9 @@
-from livekit.agents import Agent, ChatContext, llm
+from livekit.agents import Agent, ChatContext, ChatMessage, llm
 
 from agent import main
 from agent.config import load_config
+from agent.plant.conversation import TurnDecision
+from agent.plant.dialect import dialect_tts
 from agent.plant.prompt import FALLBACK_REPLY
 
 CFG = {
@@ -127,3 +129,68 @@ async def test_end_session_closes_conversation_and_forgets_history():
     # 会話が閉じられ（＝振り返りが走る）、次に起きたとき前の会話が混ざらないよう履歴が空になる
     assert conv.closed
     assert agent.chat_ctx.items == []
+
+
+def test_room_options_keep_session_when_device_leaves():
+    # ESP32 が出て入り直しても、同じセッションで話を続けられるようにする
+    assert main.room_options().close_on_disconnect is False
+
+
+# --- 方言を TTS の指示に反映する ---
+class FakeTTS:
+    def __init__(self):
+        self.calls = []
+
+    def update_options(self, *, instructions):
+        self.calls.append(instructions)
+
+
+class FakeSession:
+    def __init__(self, tts):
+        self.tts = tts
+
+
+class DecidingConv(FakeConv):
+    """on_user_turn が決まった TurnDecision を返す偽の会話。"""
+
+    def __init__(self, decision):
+        super().__init__()
+        self._decision = decision
+
+    async def on_user_turn(self, text):
+        return self._decision
+
+
+async def run_turn(monkeypatch, dialect, session_tts, base="やさしく話す。"):
+    decision = TurnDecision(kind="reply", text="こんにちは", dialect=dialect)
+    agent = main.FutamaruAgent(DecidingConv(decision), tts_instructions=base)
+    monkeypatch.setattr(
+        main.FutamaruAgent, "session", property(lambda self: FakeSession(session_tts))
+    )
+    msg = ChatMessage(role="user", content=["こんにちは"])
+    await agent.on_user_turn_completed(ChatContext.empty(), msg)
+
+
+async def test_dialect_updates_tts_instructions(monkeypatch):
+    fake = FakeTTS()
+    await run_turn(monkeypatch, "hakata", fake)
+    assert len(fake.calls) == 1
+    assert fake.calls[0].startswith("やさしく話す。")
+    assert fake.calls[0] == "やさしく話す。 " + dialect_tts("hakata")
+
+
+async def test_standard_dialect_resets_tts_to_base_instructions(monkeypatch):
+    fake = FakeTTS()
+    await run_turn(monkeypatch, "standard", fake)
+    assert fake.calls == ["やさしく話す。"]
+
+
+async def test_no_dialect_leaves_tts_untouched(monkeypatch):
+    fake = FakeTTS()
+    await run_turn(monkeypatch, None, fake)
+    assert fake.calls == []
+
+
+async def test_missing_tts_is_skipped_silently(monkeypatch):
+    await run_turn(monkeypatch, "hakata", None)
+    await run_turn(monkeypatch, "hakata", object())

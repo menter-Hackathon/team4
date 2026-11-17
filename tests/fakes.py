@@ -34,13 +34,16 @@ class FakeClock:
         self.now += timedelta(seconds=seconds)
 
 
-def reflection_json(summary="テストの話をした", new=None, updated=None, deltas=None) -> str:
+def reflection_json(
+    summary="テストの話をした", new=None, updated=None, deltas=None, dialect="unknown"
+) -> str:
     return json.dumps(
         {
             "summary": summary,
             "new_memories": new if new is not None else [],
             "updated_memories": updated if updated is not None else [],
             "trait_deltas": deltas if deltas is not None else {},
+            "owner_dialect": dialect,
         },
         ensure_ascii=False,
     )

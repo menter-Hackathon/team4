@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import AsyncIterable
 
@@ -39,12 +38,13 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     llm,
-    tts,
+    room_io,
 )
 from livekit.plugins import silero
 
 from agent.config import Config, load_config
 from agent.plant.conversation import PlantConversation
+from agent.plant.dialect import dialect_tts
 from agent.plant.expression import ExpressionParser
 from agent.plant.prompt import FALLBACK_REPLY, NUDGE_INSTRUCTION, WAKE_GREETING_INSTRUCTION
 from agent.plant.store import PlantStore
@@ -77,10 +77,27 @@ class FutamaruAgent(Agent):
         transcription_node:     画面・ログに出す文字からも表情タグを外す
     """
 
-    def __init__(self, conv: PlantConversation) -> None:
+    def __init__(self, conv: PlantConversation, tts_instructions: str = "") -> None:
         # システムプロンプト（instructions）は起きるたびに作るので、最初は空にしておく
         super().__init__(instructions="")
         self._conv = conv
+        # TTS（声）の基本の話し方の指示。方言が決まったら、これの後ろに方言の指示を足す
+        self._tts_instructions = tts_instructions
+
+    def _apply_dialect(self, dialect: str) -> None:
+        """話し相手の方言に合わせて、TTS の話し方の指示を差し替える。
+
+        標準語（dialect_tts が None）のときは基本の指示だけに戻す。
+        前の相手の方言が残らないようにするためで、必ず毎回まるごと渡し直す。
+        TTS が無い・指示を替えられない種類のとき（テストなど）は、何もしない。
+        """
+        tts_obj = self.session.tts
+        update_options = getattr(tts_obj, "update_options", None)
+        if update_options is None:
+            return
+        extra = dialect_tts(dialect)
+        instructions = f"{self._tts_instructions} {extra}" if extra else self._tts_instructions
+        update_options(instructions=instructions)
 
     async def end_session(self) -> None:
         """ESP32 が退出したときの後始末（#5）。entrypoint の _on_leave から呼ばれる。
@@ -107,6 +124,9 @@ class FutamaruAgent(Agent):
             await self.update_instructions(decision.instructions)
             # 今回の返答も新しいプロンプトで作るため、一時コンテキストも差し替える
             turn_ctx.items[:] = self.chat_ctx.copy().items
+        # 話し相手（の方言）が決まったときだけ、声の出し方も方言に合わせる
+        if decision.dialect is not None:
+            self._apply_dialect(decision.dialect)
         if decision.kind == "ignore":
             raise StopResponse()  # ユーザー発話は履歴にも残らない
         if decision.kind == "greet":
@@ -170,7 +190,7 @@ class FutamaruAgent(Agent):
     async def transcription_node(
         self, text: AsyncIterable[str], model_settings: ModelSettings
     ) -> AsyncIterable[str]:
-        # 画面・ログ用の文字起こしからもタグを除く（表情は tts_node から送る）
+        # 画面・ログ用の文字起こしからもタグを除く（表情のログは tts_node で出す）
         parser = ExpressionParser()
         async for delta in text:
             out = parser.feed(delta).text
@@ -190,6 +210,18 @@ def direction_ctx(chat_ctx: ChatContext, direction: str) -> ChatContext:
     ctx = chat_ctx.copy()
     ctx.add_message(role="user", content=f"（{direction}）")
     return ctx
+
+
+def room_options() -> room_io.RoomOptions:
+    """ルームでの音声のやりとりの設定を作る。
+
+    close_on_disconnect=False: ESP32 がルームを出ても、エージェントのセッションを閉じない。
+    LiveKit の既定（True）だと、ESP32 が出た時点でセッションが閉じる。一方でエージェント自身は、
+    ルームが空になるまで（約 20 秒）ルームに残る。その間に ESP32 が入り直すと、新しいエージェントは
+    呼ばれず、閉じたセッションのまま何も聞かない（2026-11-17 の通し試験で、5 分以上黙ったままだった）。
+    ESP32 が出たときの後始末（眠らせる・振り返り・会話履歴を空にする）は、_on_leave が行う（#5）。
+    """
+    return room_io.RoomOptions(close_on_disconnect=False)
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -245,19 +277,10 @@ async def entrypoint(ctx: JobContext) -> None:
     device_identity = f"device-{plant_id}"  # この株の ESP32 がルームで名乗る名前（仕様 §3）
     store = PlantStore(cfg.db_path)
 
-    async def send_expression(name: str) -> None:
-        """表情を ESP32 に送る（LiveKit の RPC で set_expression を呼ぶ）。#22 でなくなる予定。"""
-        await ctx.room.local_participant.perform_rpc(
-            destination_identity=device_identity,
-            method="set_expression",
-            payload=json.dumps({"expression": name}),
-        )
-
     conv = PlantConversation(
         store=store,
         plant_id=plant_id,
         complete_json=create_json_completer(cfg),
-        send_expression=send_expression,
         clock=jst_now,
         wake_words=cfg.wake_words,
         sleep_after=cfg.sleep_after,
@@ -286,7 +309,7 @@ async def entrypoint(ctx: JobContext) -> None:
             max_unrecoverable_errors=1_000_000,
         ),
     )
-    agent = FutamaruAgent(conv)
+    agent = FutamaruAgent(conv, cfg.tts_instructions)
 
     # --- 4. LiveKit の出来事を、植物のロジックにつなぐ ---
     # @session.on("名前") / @ctx.room.on("名前") を付けた関数は、その出来事が起きるたびに LiveKit から呼ばれる
@@ -307,18 +330,6 @@ async def entrypoint(ctx: JobContext) -> None:
         item = ev.item
         if isinstance(item, ChatMessage) and item.role == "assistant":
             conv.on_plant_utterance(item.text_content or "")
-
-    # STT・LLM・TTS のどこかでエラーが起きた。声が出せないときは眠そうな顔にする
-    @session.on("error")
-    def _on_error(ev) -> None:
-        if isinstance(ev.source, tts.TTS):
-            conv.express("sleepy")
-
-    # 誰かがルームに入ってきた。この株の ESP32 なら、眠っている顔を出す
-    @ctx.room.on("participant_connected")
-    def _on_join(p: rtc.RemoteParticipant) -> None:
-        if p.identity == device_identity:
-            conv.express("sleepy")
 
     # 誰かがルームから出たときに LiveKit から呼ばれる。
     # 出たのがこの株の ESP32 なら、セッションを終える（眠らせて振り返り、会話履歴も捨てる。#5）
@@ -342,7 +353,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # --- 5. ルームに参加して会話を始める ---
     await ctx.connect()
     await conv.start()
-    await session.start(agent=agent, room=ctx.room)
+    await session.start(agent=agent, room=ctx.room, room_options=room_options())
 
     # --- 6. 1 秒ごとに無言タイマーを確かめる ---
     async def ticker() -> None:

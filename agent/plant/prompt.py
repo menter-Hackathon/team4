@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from .dialect import dialect_prompt
 from .personality import TRAIT_NAMES, Traits, level
 from .store import Memory
 from .timeutil import parse_iso
@@ -82,8 +83,23 @@ def rank_memories(memories: list[Memory], now: datetime, limit: int) -> list[Mem
     return ranked[:limit]
 
 
+# 名前がまだ分からない相手に、自然に名前を聞かせる指示
+ASK_NAME_INSTRUCTION = (
+    "話している相手の名前をまだ知らない。会話の流れの中で自然に名前を聞く。"
+    "聞くのは短い質問1つだけで、答えてもらえなくても毎回は繰り返さない。"
+)
+
+
 def build_system_prompt(
-    name: str, traits: Traits, memories: list[Memory], last_summary: str | None, now: datetime
+    name: str,
+    traits: Traits,
+    memories: list[Memory],
+    last_summary: str | None,
+    now: datetime,
+    *,
+    dialect: str = "standard",
+    person_name: str | None = None,
+    ask_name: bool = False,
 ) -> str:
     """その株のシステムプロンプトを組み立てる（仕様 §6.4）。
 
@@ -93,6 +109,9 @@ def build_system_prompt(
         memories: その株の記憶（全件。この中から上位 10 件を使う）
         last_summary: 前回の会話の要約。初めてなら None
         now: 現在時刻（記憶の新しさの計算に使う）
+        dialect: 話し相手に合わせる方言。"standard" なら何も足さない
+        person_name: 今話している相手の名前。分からなければ None
+        ask_name: True なら、自然に名前を聞く指示を足す
 
     できあがる文の例:
         あなたは観葉植物のふたまる。持ち主と話し言葉で短く話す。1回の返答は1〜2文。
@@ -124,5 +143,15 @@ def build_system_prompt(
     # 5. 前回の会話の要約（初めての会話なら省く）
     if last_summary:
         parts.append(f"前回の会話: {last_summary}")
+    # 6. 今話している相手の名前（例: 「今話している相手は たろう。」）
+    if person_name:
+        parts.append(f"今話している相手は {person_name}。")
+    # 7. 方言の指示（標準語なら None で、何も足さない）
+    dialect_text = dialect_prompt(dialect)
+    if dialect_text:
+        parts.append(dialect_text)
+    # 8. 名前を聞く指示
+    if ask_name:
+        parts.append(ASK_NAME_INSTRUCTION)
     # 段落の間を空行でつなぐ
     return "\n\n".join(parts)
