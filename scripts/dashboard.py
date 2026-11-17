@@ -8,6 +8,7 @@ uv run python -m scripts.dashboard --db data/futamaru.db --plants a1,b1
     2. HTML の中の JavaScript が、数秒ごとに /api/state を読みに来る
     3. /api/state は、そのたびに DB を「読むだけ」で開き、株ごとの性格・成長・記憶を JSON にして返す
     4. グラフは HTML 側で Chart.js が描く
+    5. 性格の 16 タイプ（「〇〇ふたまる」、#64）のイラストは /types/<英語名>.png で返す
 
 DB には書き込まない。エージェントが動いている最中に開いても大丈夫なようにするため。
 会話の記憶が見えるので、この PC からだけ開けるよう 127.0.0.1 で待ち受ける（0.0.0.0 にはしない）。
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from agent.plant.dialect import resolve_dialect
 from agent.plant.personality import Traits
+from agent.plant.plant_type import ALL_TYPES, PlantType, plant_type
 from agent.plant.prompt import PROMPT_MEMORY_LIMIT, rank_memories, recency_factor
 from agent.plant.store import Person, PlantStore
 from agent.plant.timeutil import iso, jst_now
@@ -34,11 +36,33 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 # ブラウザに返す HTML。このファイルと同じフォルダに置いてある
 HTML_PATH = Path(__file__).with_name("dashboard.html")
+# 16 タイプのイラストを置くフォルダ（ファイル名は <英語名>.png、#64）。無いタイプは絵文字で出す
+TYPE_IMAGE_DIR = Path(__file__).with_name("dashboard_assets") / "types"
+# イラストとして返してよいファイル名の一覧（17 タイプの英語名だけ）。
+# ブラウザから届いた名前をそのままファイルのパスに使わず、この一覧と照らし合わせることで、
+# 「../」などでフォルダの外のファイル（DB など）を読まれないようにする
+TYPE_IMAGE_NAMES = {f"{t.key}.png" for t in ALL_TYPES}
 
 
 def _traits_json(t: Traits) -> dict[str, float]:
     """性格を JSON にする。表示用なので小数 3 桁に丸める。例: {"talkativeness": 0.55, ...}"""
     return {k: round(v, 3) for k, v in t.as_dict().items()}
+
+
+def _type_json(t: PlantType) -> dict:
+    """タイプを JSON にする。イラストのファイルがあれば、その URL も入れる（無ければ None）。
+
+    例: {"key": "mint", "name": "ミントふたまる", "emoji": "🌿", "description": "…",
+         "image": "/types/mint.png"}
+    """
+    has_image = (TYPE_IMAGE_DIR / f"{t.key}.png").is_file()
+    return {
+        "key": t.key,
+        "name": t.name,
+        "emoji": t.emoji,
+        "description": t.description,
+        "image": f"/types/{t.key}.png" if has_image else None,
+    }
 
 
 def view_state(
@@ -52,6 +76,7 @@ def view_state(
         memories:     覚えていること。プロンプトと同じ「重要度 × 新しさ」の上位 10 件
         last_summary: 前回の会話の要約（無ければ None）
         dialect:      その人に使う方言（お客さんは標準語）
+        type:         今の性格の 16 タイプ（「〇〇ふたまる」、#64）。人ごとに違う
     """
     person_id = person.id if person else None
     # 1. 成長曲線。株を作った時点（または人を登録した時点）の初期値から、振り返りのたびに 1 行ずつある
@@ -87,6 +112,7 @@ def view_state(
         "memories": memories,
         "last_summary": store.latest_summary(plant_id, person_id),
         "dialect": dialect,
+        "type": _type_json(plant_type(traits)),
     }
 
 
@@ -143,9 +169,11 @@ def make_handler(db_path: str, plant_ids: list[str]) -> type[BaseHTTPRequestHand
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # 名前は http.server の決まり（GET を受けると呼ばれる）
-            """GET を受け付ける。/ → HTML、/api/state → JSON、それ以外 → 404。"""
+            """GET を受け付ける。/ → HTML、/api/state → JSON、/types/<名前>.png → イラスト、それ以外 → 404。"""
             path = self.path.split("?", 1)[0]
-            if path == "/":
+            if path.startswith("/types/"):
+                self._send_type_image(path.removeprefix("/types/"))
+            elif path == "/":
                 self._send(200, "text/html; charset=utf-8", HTML_PATH.read_bytes())
             elif path == "/api/state":
                 state = dashboard_state(db_path, plant_ids, jst_now())
@@ -153,6 +181,15 @@ def make_handler(db_path: str, plant_ids: list[str]) -> type[BaseHTTPRequestHand
                 self._send(200, "application/json; charset=utf-8", body)
             else:
                 self._send(404, "text/plain; charset=utf-8", b"not found")
+
+        def _send_type_image(self, name: str) -> None:
+            """タイプのイラストを返す。17 タイプの英語名以外・まだ描かれていないものは 404。"""
+            # 一覧と完全に同じ名前だけを受け付ける（"../" や "%2e%2e" を含む名前は一覧に無いので 404）
+            file = TYPE_IMAGE_DIR / name
+            if name not in TYPE_IMAGE_NAMES or not file.is_file():
+                self._send(404, "text/plain; charset=utf-8", b"not found")
+                return
+            self._send(200, "image/png", file.read_bytes())
 
         def _send(self, status: int, content_type: str, body: bytes) -> None:
             self.send_response(status)
