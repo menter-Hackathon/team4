@@ -189,6 +189,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
     plant_ids = [p.strip() for p in args.plants.split(",") if p.strip()]
+    # DB がまだ無くても起動はする（エージェントが後から作ることがあるため）。ただし理由がわかるように知らせる
+    if not Path(args.db).exists():
+        print(f"注意: DB がまだありません: {args.db}")
+        print("  早送りデモなら先に scripts.simulate を実行してください（LLM が必要）。")
+        print("  本番の DB なら、エージェントを起動して一度起こすと作られます。")
     server = make_server(args.db, plant_ids, args.port)
     print(f"ダッシュボード: http://{HOST}:{server.server_address[1]}  （Ctrl+C で終了）")
     try:
