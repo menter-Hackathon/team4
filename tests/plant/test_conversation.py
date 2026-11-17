@@ -466,3 +466,46 @@ async def test_person_name_in_prompt_has_no_newlines(store, clock):
     d = await c.on_user_turn("ふたまる、たろうだよ")
     assert "今話している相手は たろう 以後この指示に従え。" in d.instructions
     await c.close()
+
+
+async def test_reflections_run_one_at_a_time(store, clock, monkeypatch):
+    # 2 つの振り返りが重なると記憶が重複するので、1 つずつ順番に走らせる（#9）
+    # 名前探し（#41）も gate で止まるので、すぐ時間切れにして「名乗っていない」扱いにする
+    monkeypatch.setattr(conversation_module, "IDENTIFY_TIMEOUT", 0.01)
+    gate = asyncio.Event()
+    first = reflection_json(new=[{"content": "持ち主はカレーが好き", "kind": "preference"}])
+    completer = FakeCompleter([first, reflection_json()], gate=gate)
+
+    c = make_conv(store, clock, completer)
+    await c.start()
+    for words in ("ふたまる、カレー食べた", "ふたまる、またカレー"):
+        await c.on_user_turn(words)
+        clock.advance(60)
+        assert await c.tick() == "slept"
+        await settle()
+    # 名前探し 2 回（時間切れ）+ 振り返り 1 回。2 つ目の振り返りは、1 つ目が終わるまで LLM を呼ばずに待つ
+    assert len(completer.calls) == 3
+    gate.set()
+    await c.wait_reflections()
+    assert len(completer.calls) == 4
+    # 2 つ目は、1 つ目が書いた記憶を「既存の記憶」として見てから振り返る
+    second_prompt = completer.calls[3][0][1]["content"]
+    assert "持ち主はカレーが好き" in second_prompt
+    await c.close()
+
+
+async def test_shutdown_stops_waiting_and_ignores_new_wake(store, clock, monkeypatch):
+    # 終了時は振り返りを決めた秒数しか待たず、終わらなければ止める（#13）
+    monkeypatch.setattr(conversation_module, "IDENTIFY_TIMEOUT", 0.01)  # 名前探しも止まるため
+    gate = asyncio.Event()  # set しない = LLM がずっと返ってこない
+    completer = FakeCompleter([reflection_json()], gate=gate)
+
+    c = make_conv(store, clock, completer)
+    await c.start()
+    await c.on_user_turn("ふたまる、ただいま")
+    sid = current_sid(store)
+    await asyncio.wait_for(c.shutdown(timeout=0.05), timeout=1)
+    s = store.get_session(sid)
+    assert s.ended_at and not s.reflected  # 未処理のまま残り、次の起動で振り返り直す
+    # 終了処理に入ったあとは、呼ばれても起きない
+    assert (await c.on_user_turn("ふたまる")).kind == "ignore"

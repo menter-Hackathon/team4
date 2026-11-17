@@ -90,6 +90,11 @@ class PlantConversation:
         self._session_id: int | None = None  # 今のセッションの DB 上の id。眠っている間は None
         # 裏で動いている振り返りのタスク。終了時に待つために覚えておく
         self._reflections: set[asyncio.Task] = set()
+        # 振り返りを 1 つずつ順番に走らせるための鍵（#9）。2 つが同時に走ると、どちらも
+        # 「既存の記憶」を読んでから書くので、同じ記憶が 2 件入ることがあるため
+        self._reflect_lock = asyncio.Lock()
+        # エージェントの終了処理に入ったか（#13）。入ったら、新しく起きない
+        self._shutting_down = False
         # --- 今のセッションの話し相手（眠ったら _forget_person で消す） ---
         self._person: Person | None = None  # 決まった相手。未確定・お客さんの間は None
         # このセッションで名前探しができたユーザー発話の数（挨拶だけの起床と、名前探しが時間切れの回は数えない）
@@ -137,6 +142,11 @@ class PlantConversation:
             "。"       → ignore（#10）
         """
         text = text.strip()
+
+        # 0. エージェントの終了処理中は、何を言われても起きない・返事しない（#13）。
+        #    起きると新しいセッションと振り返りが始まり、閉じかけの DB に書いてしまうため
+        if self._shutting_down:
+            return TurnDecision("ignore")
 
         # 1. 中身の無い発話を捨てる。
         #    STT は雑音を「。」「…」などと文字起こしすることがある。normalize() は空白・句読点・記号を
@@ -372,10 +382,24 @@ class PlantConversation:
             await reflect_session(self._store, self._plant_id, session_id, self._complete_json, now)
 
     def _track(self, coro) -> None:
-        """振り返りを裏で走らせるタスクとして登録する。終わったら一覧から自動で外れる。"""
-        task = asyncio.create_task(coro)
+        """振り返りを裏で走らせるタスクとして登録する。終わったら一覧から自動で外れる。
+
+        振り返りは鍵（_reflect_lock）を取ってから 1 つずつ走る（#9）。
+        前の振り返りが終わるまで、次の振り返りは LLM を呼ばずに待つ。
+        """
+        task = asyncio.create_task(self._run_locked(coro))
         self._reflections.add(task)
         task.add_done_callback(self._reflections.discard)
+
+    async def _run_locked(self, coro) -> None:
+        """鍵を取ってから coro（振り返り）を実行する。"""
+        try:
+            async with self._reflect_lock:
+                await coro
+        finally:
+            # 鍵を待っている間に止められた（cancel された）ときは、coro は一度も動いていない。
+            # そのままだと「await されなかった」という警告が出るので、閉じておく
+            coro.close()
 
     async def close(self) -> None:
         """会話を終える（ESP32 の退出時・エージェントの終了時）。起きていれば眠らせ、振り返りが終わるまで待つ。"""
@@ -383,10 +407,39 @@ class PlantConversation:
             await self._sleep()
         await self.wait_reflections()
 
-    async def wait_reflections(self) -> None:
-        """裏で動いている振り返りが全部終わるまで待つ。1 つが失敗しても他は待ち続ける。"""
-        if self._reflections:
-            await asyncio.gather(*self._reflections, return_exceptions=True)
+    async def shutdown(self, timeout: float) -> None:
+        """エージェントの終了時に呼ぶ。新しく起きるのをやめ、振り返りを最大 timeout 秒だけ待つ（#13）。
+
+        LiveKit は終了処理を一定時間（既定 10 秒）で打ち切るので、振り返りを待ちすぎると
+        main.py の store.close() まで進めない。時間内に終わらなかった振り返りは止める。
+        止めた振り返りのセッションは「未処理」のまま DB に残り、次の起動で振り返り直す
+        （DB への書き込みは 1 回のトランザクションなので、途中まで書かれることはない）。
+        """
+        self._shutting_down = True
+        if self.awake:
+            await self._sleep()
+        await self.wait_reflections(timeout)
+
+    async def wait_reflections(self, timeout: float | None = None) -> None:
+        """裏で動いている振り返りが全部終わるまで待つ。1 つが失敗しても他は待ち続ける。
+
+        timeout を渡すと、その秒数で待つのをやめ、終わっていない振り返りを止める。
+        """
+        if not self._reflections:
+            return
+        # 1. 終わるのを待つ（timeout が None なら、全部終わるまで）
+        _, pending = await asyncio.wait(set(self._reflections), timeout=timeout)
+        if not pending:
+            return
+        # 2. 時間切れ: 残りを止めて、止まるのを待つ
+        logger.warning(
+            "stopping %d unfinished reflection(s) on shutdown (plant=%s)",
+            len(pending),
+            self._plant_id,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
     # --- 表情 ---
 
