@@ -19,6 +19,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from .dialect import DIALECTS, UNKNOWN
 from .personality import TRAIT_NAMES, apply_deltas, clamp
 from .prompt import rank_memories
 from .store import MemoryUpdate, NewMemory, PlantStore
@@ -71,8 +72,10 @@ REFLECTION_SCHEMA: dict = {
             "properties": {name: {"type": "number"} for name in TRAIT_NAMES},
             "required": list(TRAIT_NAMES),
         },
+        # 持ち主の方言の判定。判断できなければ unknown
+        "owner_dialect": {"type": "string", "enum": [*DIALECTS, UNKNOWN]},
     },
-    "required": ["summary", "new_memories", "updated_memories", "trait_deltas"],
+    "required": ["summary", "new_memories", "updated_memories", "trait_deltas", "owner_dialect"],
 }
 
 # 振り返りで LLM に渡す指示文。スキーマとは別に、ここにも出力の形を書く（Gemma 4 の公式の推奨）
@@ -81,12 +84,16 @@ SYSTEM_MESSAGE = """あなたは観葉植物「ふたまる」の記憶係。持
   "summary": "会話の要約（1〜2文）",
   "new_memories": [{"content": "持ち主について覚えておくこと", "kind": "preference | event | habit", "importance": 0.0〜1.0}],
   "updated_memories": [{"id": 既存記憶の id, "content": "更新後の内容", "importance": 0.0〜1.0}],
-  "trait_deltas": {"talkativeness": -0.05〜0.05, "affection": -0.05〜0.05, "energy": -0.05〜0.05, "curiosity": -0.05〜0.05}
+  "trait_deltas": {"talkativeness": -0.05〜0.05, "affection": -0.05〜0.05, "energy": -0.05〜0.05, "curiosity": -0.05〜0.05},
+  "owner_dialect": "standard | kansai | hakata | hiroshima | unknown"
 }
 - 既存の記憶と同じ内容は new_memories に入れない。内容が変わった・補強された場合は updated_memories でその id を更新する。
 - trait_deltas は今回の会話で性格がどう変わるかの判定:
   talkativeness は話しかけ頻度・会話の長さ、affection は褒め言葉・優しい言葉の量、
-  energy はユーザーの口調・話題の明るさ、curiosity はユーザーが自分の話をする量で判断する。"""
+  energy はユーザーの口調・話題の明るさ、curiosity はユーザーが自分の話をする量で判断する。
+- owner_dialect は「持ち主」の発言（ふたまるの発言は見ない）の方言を判定する。
+  standard（標準語）/ kansai（関西弁）/ hakata（博多弁）/ hiroshima（広島弁）のどれか。
+  発言が短い・少ない・方言の特徴が読み取れないなど判断できないときは unknown にする。"""
 
 
 class ReflectionError(Exception):
@@ -101,6 +108,8 @@ class ReflectionResult:
     new_memories: list[NewMemory]
     updated_memories: list[MemoryUpdate]
     trait_deltas: dict[str, object]
+    # 持ち主の方言。DIALECTS のどれか、判断できなければ UNKNOWN
+    owner_dialect: str = UNKNOWN
 
 
 def _importance(value: object) -> float:
@@ -170,10 +179,17 @@ def parse_reflection(raw: str) -> ReflectionResult:
         and isinstance(m.get("content"), str)
         and m["content"].strip()
     ]
-    return ReflectionResult(data["summary"], new_memories, updated_memories, data["trait_deltas"])
+    # 5. 方言: 無い・知らない値なら unknown にする（エラーにはしない。古い出力にも対応するため）
+    dialect = data.get("owner_dialect")
+    owner_dialect = dialect if isinstance(dialect, str) and dialect in DIALECTS else UNKNOWN
+    return ReflectionResult(
+        data["summary"], new_memories, updated_memories, data["trait_deltas"], owner_dialect
+    )
 
 
-def _build_messages(store: PlantStore, plant_id: str, session_id: int, now: datetime) -> list[dict]:
+def _build_messages(
+    store: PlantStore, plant_id: str, session_id: int, person_id: int | None, now: datetime
+) -> list[dict]:
     """振り返りで LLM に渡すメッセージを作る。
 
     ユーザー側のメッセージの例:
@@ -190,7 +206,8 @@ def _build_messages(store: PlantStore, plant_id: str, session_id: int, now: date
         for u in store.get_utterances(session_id)
     ]
     # 既存の記憶は id 付きで見せる。LLM が「この記憶を更新する」と id で指定できるように
-    memories = rank_memories(store.get_memories(plant_id), now, REFLECTION_MEMORY_LIMIT)
+    # 見せるのは、この人の記憶と全員共通の記憶だけ（ほかの人の記憶は混ぜない）
+    memories = rank_memories(store.get_memories(plant_id, person_id), now, REFLECTION_MEMORY_LIMIT)
     memory_lines = [f"[id={m.id}] {m.content} (importance={m.importance:g})" for m in memories]
     user = (
         "## 会話ログ\n"
@@ -210,12 +227,13 @@ async def reflect_session(
     次にエージェントが起動したとき、もう一度試される（conversation.py の start）。
     """
     # 1. ユーザーが一言も話していない（「ふたまる」だけで終わった）なら、LLM を呼ばず処理済みにする
-    if store.get_session(session_id).user_turns == 0:
+    session = store.get_session(session_id)
+    if session.user_turns == 0:
         store.mark_reflected(session_id)
         return True
 
     # 2. LLM に振り返らせる。出力が壊れていたら 1 回だけ再試行する
-    messages = _build_messages(store, plant_id, session_id, now)
+    messages = _build_messages(store, plant_id, session_id, session.person_id, now)
     result: ReflectionResult | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
@@ -229,8 +247,13 @@ async def reflect_session(
         return False
 
     # 3. 新しい性格を計算する。おしゃべり度には直近 7 日間に話しかけられた回数も使う
-    recent = store.count_user_utterances_since(plant_id, now - timedelta(days=7))
-    traits = apply_deltas(store.get_plant(plant_id).traits, result.trait_deltas, recent)
+    #    話し相手が分かっていればその人の性格・発話数、いなければ（ゲスト）株の性格を使う
+    person_id = session.person_id
+    recent = store.count_user_utterances_since(
+        plant_id, now - timedelta(days=7), person_id=person_id
+    )
+    base = store.get_person(person_id).traits if person_id else store.get_plant(plant_id).traits
+    traits = apply_deltas(base, result.trait_deltas, recent)
     # 4. 要約・記憶・性格を、まとめて 1 回で DB に保存する（途中で失敗しても半端に残らない）
     store.apply_reflection(
         plant_id,
@@ -240,6 +263,8 @@ async def reflect_session(
         result.updated_memories,
         traits,
         now,
+        person_id=person_id,
+        owner_dialect=result.owner_dialect,
     )
     return True
 

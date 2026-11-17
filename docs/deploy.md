@@ -92,6 +92,17 @@ git pull && docker compose up -d --build   # コードを更新して起動し�
 - **植物の記憶**（会話ログ・性格）は、この PC の `data/futamaru.db` に残ります。コンテナを作り直しても消えません
 - `docker compose down -v` はモデルの保存場所も消します（次の起動で再ダウンロード）。植物の記憶（`data/`）は消えません
 
+## 6.5 デモ用：人の一覧と方言の固定
+
+```bash
+docker compose exec agent python -m scripts.people --plant-id a1
+docker compose exec agent python -m scripts.people --plant-id a1 --person たろう --dialect hakata
+docker compose exec agent python -m scripts.people --plant-id a1 --person タロウ --auto
+```
+
+- 一覧には名前・性格 4 軸・今の方言（固定か自動か）が出ます。名前はひらがな・カタカナの違いを無視して照合します
+- 人を替えるには、植物を一度眠らせる必要があります。デモでは `.env` の `SLEEP_AFTER_SECONDS` を短く（例: `20`）して `docker compose up -d` し直してください
+
 ## 7. 困ったとき
 
 | 症状 | 原因と対処 |

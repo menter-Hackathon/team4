@@ -17,6 +17,8 @@ from dataclasses import dataclass
 TTS_INSTRUCTIONS = "やわらかく、少しゆっくり、のんびりした植物らしい話し方で話す。"
 # WAKE_WORDS が .env に無いときに使うウェイクワード。STT がよく書く表記をまとめている
 DEFAULT_WAKE_WORDS = ("ふたまる", "二丸", "ふた丸", "2丸")
+# FUTAMARU_DB_PATH が .env に無いときの DB ファイルの場所
+DEFAULT_DB_PATH = "./data/futamaru.db"
 
 
 class ConfigError(Exception):
@@ -45,6 +47,16 @@ class Config:
     stt_timeout: float
     tts_timeout: float
     dev_plant_id: str | None  # console モードで使う株の id（開発用）
+
+
+def db_path_from_env(env: Mapping[str, str] = os.environ) -> str:
+    """DB ファイルの場所（FUTAMARU_DB_PATH）だけを読む。未設定・空なら DEFAULT_DB_PATH。
+
+    scripts/people.py のように DB だけを使うコマンド用。load_config() は LLM・STT の
+    URL など DB に関係ない環境変数も必須にするので、それを使わずに済むよう分けている。
+    例: {} → "./data/futamaru.db"、{"FUTAMARU_DB_PATH": "/data/x.db"} → "/data/x.db"
+    """
+    return env.get("FUTAMARU_DB_PATH", "").strip() or DEFAULT_DB_PATH
 
 
 def load_config(env: Mapping[str, str] = os.environ) -> Config:
@@ -95,7 +107,7 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         tts_base_url=tts_base_url,
         tts_api_key=tts_api_key,
         tts_instructions=TTS_INSTRUCTIONS,
-        db_path=get("FUTAMARU_DB_PATH", "./data/futamaru.db"),
+        db_path=db_path_from_env(env),
         wake_words=wake_words,
         sleep_after=float(get("SLEEP_AFTER_SECONDS", "60")),
         llm_timeout=float(get("LLM_TIMEOUT", "15")),

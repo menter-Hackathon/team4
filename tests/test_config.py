@@ -1,6 +1,6 @@
 import pytest
 
-from agent.config import TTS_INSTRUCTIONS, ConfigError, load_config
+from agent.config import TTS_INSTRUCTIONS, ConfigError, db_path_from_env, load_config
 
 BASE = {
     "LLM_BASE_URL": "http://gpu:8000/v1",
@@ -54,3 +54,10 @@ def test_openai_key_required_only_without_tts_base_url():
     with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
         load_config(env)
     assert load_config({**env, "TTS_BASE_URL": "http://gpu:8002/v1"}).tts_api_key == "EMPTY"
+
+
+def test_db_path_from_env_needs_no_other_variables():
+    assert db_path_from_env({}) == "./data/futamaru.db"
+    assert db_path_from_env({"FUTAMARU_DB_PATH": "  "}) == "./data/futamaru.db"
+    assert db_path_from_env({"FUTAMARU_DB_PATH": "/data/x.db"}) == "/data/x.db"
+    assert load_config({**BASE, "FUTAMARU_DB_PATH": "/data/x.db"}).db_path == "/data/x.db"
