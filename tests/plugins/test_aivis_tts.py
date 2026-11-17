@@ -4,7 +4,6 @@ import io
 import json
 import wave
 from argparse import Namespace
-from dataclasses import replace
 
 import aiohttp
 import pytest
@@ -149,8 +148,6 @@ def test_create_aivis_tts_uses_the_settings():
         base_url="http://127.0.0.1:10101", speaker=200, speed=1.0, pitch=0.03, timeout=7.0
     )
     assert tts.sample_rate == 24000 and tts.num_channels == 1
-    with pytest.raises(ValueError):
-        create_aivis_tts(replace(cfg, aivis_speaker=None))
 
 
 # --- 声を選ぶコマンド（scripts/aivis_voices.py） ---

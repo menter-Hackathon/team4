@@ -40,15 +40,18 @@ uv run python -m scripts.aivis_voices --list                          # 声と�
 uv run python -m scripts.aivis_voices --speaker <ID> <ID> --pitch 0.05  # data/voice-samples/<ID>.wav ができる
 ```
 
-3. 決めた声を `.env` に書く
+3. `.env` に書く
 
 ```bash
 TTS_PROVIDER=aivis
-AIVIS_SPEAKER=<決めたスタイル ID>
-AIVIS_PITCH=0.05   # 任意。少し上げると幼く聞こえる
+AIVIS_BASE_URL=http://127.0.0.1:10101   # AivisSpeech の URL（空ならこの値）
 ```
 
-AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。声のモデルにはモデルごとの利用規約があります。発表で使うモデルを決めたら、名前と規約をこの README に書いてください。
+`AIVIS_SPEAKER` を書かなければ、聞き比べて決めた「まお」の「あまあま」（`888753762`）を使います。AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。
+
+使っている外部の技術・素材:
+- [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)（音声合成エンジン、LGPL v3）
+- 音声合成モデル「まお」（制作: オズチャット / Trippy / ねゆたろ、Aivis Common Model License (ACML) 1.0）
 
 ## ESP32 用トークンの発行
 

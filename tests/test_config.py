@@ -80,7 +80,7 @@ def test_db_path_from_env_needs_no_other_variables():
 # --- TTS の種類と AivisSpeech（仕様 §8.3、#56） ---
 def test_tts_provider_defaults_to_openai_with_aivis_defaults():
     c = load_config(BASE)
-    assert c.tts_provider == "openai" and c.aivis_speaker is None
+    assert c.tts_provider == "openai" and c.aivis_speaker == 888753762  # まお / あまあま
     assert (c.aivis_base_url, c.aivis_speed, c.aivis_pitch) == ("http://127.0.0.1:10101", 1.0, 0.0)
 
 
@@ -101,9 +101,8 @@ def test_aivis_reads_its_settings_and_needs_no_openai_key():
     assert (c.aivis_speed, c.aivis_pitch) == (1.1, 0.05)
 
 
-def test_aivis_requires_a_numeric_speaker():
-    with pytest.raises(ConfigError, match="AIVIS_SPEAKER"):
-        load_config({**BASE, "TTS_PROVIDER": "aivis"})
+def test_aivis_speaker_must_be_numeric():
+    assert load_config({**BASE, "TTS_PROVIDER": "aivis"}).aivis_speaker == 888753762
     with pytest.raises(ConfigError, match="AIVIS_SPEAKER"):
         load_config({**BASE, "TTS_PROVIDER": "aivis", "AIVIS_SPEAKER": "anneli"})
 

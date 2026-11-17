@@ -165,9 +165,6 @@ class _AivisChunkedStream(tts.ChunkedStream):
 
 def create_aivis_tts(cfg: Config) -> AivisTTS:
     """設定（.env の AIVIS_*）から AivisSpeech の TTS を作る。"""
-    if cfg.aivis_speaker is None:
-        # load_config が先に確かめているので、ここには来ないはず
-        raise ValueError("AIVIS_SPEAKER が設定されていません")
     return AivisTTS(
         AivisOptions(
             base_url=cfg.aivis_base_url,

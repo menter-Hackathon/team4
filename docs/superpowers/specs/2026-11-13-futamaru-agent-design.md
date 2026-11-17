@@ -415,12 +415,14 @@ OpenAI の声（`coral`）は低く男性っぽく聞こえ、`nova`・`sage` �
 
 | 項目 | 内容 |
 |---|---|
-| 環境変数 | `TTS_PROVIDER=aivis`, `AIVIS_BASE_URL`（既定: `http://127.0.0.1:10101`）, `AIVIS_SPEAKER`（必須。声のスタイル ID）, `AIVIS_SPEED`（話す速さ、既定 1.0）, `AIVIS_PITCH`（声の高さ、既定 0.0）。`OPENAI_API_KEY` は要らない |
+| 環境変数 | `TTS_PROVIDER=aivis`, `AIVIS_BASE_URL`（既定: `http://127.0.0.1:10101`）, `AIVIS_SPEAKER`（声のスタイル ID。既定: `888753762`）, `AIVIS_SPEED`（話す速さ、既定 1.0）, `AIVIS_PITCH`（声の高さ、既定 0.0）。`OPENAI_API_KEY` は要らない |
 | エンドポイント | 1. `POST {AIVIS_BASE_URL}/audio_query?text=…&speaker=…` で読み方（JSON）を作る 2. 速さ・高さ・出力の形式（24kHz・モノラル）を書き換える 3. `POST {AIVIS_BASE_URL}/synthesis?speaker=…` に渡して WAV を受け取る |
 | 出力 | 24kHz 16bit mono（WAV） |
-| 声の選び方 | 声はモデルとスタイルで決まる（OpenAI のような話し方の指示は無い）。`scripts/aivis_voices.py` で入っている声の一覧とスタイル ID を出し、サンプルを作って聞き比べて `AIVIS_SPEAKER` を決める。明るく幼い女の子の声のモデルを選ぶ。高さは `AIVIS_PITCH` で少し上げられる |
+| 声の選び方 | 声はモデルとスタイルで決まる（OpenAI のような話し方の指示は無い）。`scripts/aivis_voices.py` で入っている声の一覧とスタイル ID を出し、サンプルを作って聞き比べて `AIVIS_SPEAKER` を決める。明るく幼い女の子の声のモデルを選ぶ。高さは `AIVIS_PITCH` で少し上げられる。**2026-11-17 に聞き比べて、「まお」の「あまあま」スタイル（`888753762`）に決めた**（候補はラボPCに入っていた「まお」「コハク」の各スタイル） |
+| 声のモデル | 「まお」（制作: オズチャット / Trippy / ねゆたろ、ライセンス: Aivis Common Model License 1.0）。本人・公式と誤解させる使い方や、話者を貶める使い方は禁止されている |
 | 方言 | 話し方の指示が無いので、TTS の方言のイントネーションの指示（§6.5）は使わない。方言は LLM の文面（語尾など）だけで出す |
 | 料金 | かからない（自分の PC の GPU で動く） |
+| 速さ（2026-11-17 実測） | 1 文の合成は 0.2〜0.3 秒（Tailscale 越しでも）。最初の音が出るまで約 0.3 秒 |
 
 - LiveKit のプラグインには AivisSpeech 用が無いので、`agent/plugins/aivis_tts.py` に小さな TTS を作る（文 1 つごとに上の 1〜3 を行う。ストリーミングはしない）。
 - エージェントから `AIVIS_BASE_URL` に届く必要がある。AivisSpeech と同じ PC でエージェントを動かすのが簡単。
