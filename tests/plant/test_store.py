@@ -256,35 +256,33 @@ def test_memories_are_private_per_person(store):
     taro, hanako = _two_people(store)
     _reflect(store, taro.id, [NewMemory("たろうはカレー好き", "preference", 0.6)])
     _reflect(store, hanako.id, [NewMemory("はなこは犬好き", "preference", 0.6)])
-    _reflect(store, None, [NewMemory("共通の話", "event", 0.5)])
-    assert {m.content for m in store.get_memories("a1", taro.id)} == {
-        "たろうはカレー好き",
-        "共通の話",
-    }
-    assert [m.content for m in store.get_memories("a1")] == ["共通の話"]
+    _reflect(store, None, [NewMemory("お客さんの話", "event", 0.5)])
+    # 名乗った人にはその人の記憶だけ。お客さんの記憶も混ぜない（#70）
+    assert [m.content for m in store.get_memories("a1", taro.id)] == ["たろうはカレー好き"]
+    assert [m.content for m in store.get_memories("a1", hanako.id)] == ["はなこは犬好き"]
+    # お客さんにはお客さんの記憶だけ
+    assert [m.content for m in store.get_memories("a1")] == ["お客さんの話"]
 
 
 def test_reflection_cannot_update_another_persons_memory(store):
     taro, hanako = _two_people(store)
     _reflect(store, hanako.id, [NewMemory("はなこは犬好き", "preference", 0.6)])
-    _reflect(store, None, [NewMemory("共通の話", "event", 0.5)])
+    _reflect(store, None, [NewMemory("お客さんの話", "event", 0.5)])
     hanako_mem = store.get_memories("a1", hanako.id)[0]
-    shared_mem = store.get_memories("a1")[0]
+    guest_mem = store.get_memories("a1")[0]
     later = T0 + timedelta(hours=1)
     _reflect(
         store,
         taro.id,
         updates=[
             MemoryUpdate(hanako_mem.id, "乗っ取り", 0.9),
-            MemoryUpdate(shared_mem.id, "共通の話（更新）", 0.7),
+            MemoryUpdate(guest_mem.id, "お客さんの話（更新）", 0.7),
         ],
         at=later,
     )
+    # ほかの人の記憶も、お客さんの記憶も、たろうとの振り返りでは書き換えられない（#70）
     assert store.get_memories("a1", hanako.id)[0].content == "はなこは犬好き"
-    shared = store.get_memories("a1")[0]
-    assert shared.content == "共通の話（更新）"
-    row = store._conn.execute("SELECT person_id FROM memories WHERE id = ?", (shared.id,))
-    assert row.fetchone()[0] is None
+    assert store.get_memories("a1")[0].content == "お客さんの話"
 
 
 def test_latest_summary_is_per_person_and_guest(store):
