@@ -20,6 +20,14 @@
     LLM_BASE_URL=http://localhost:8000/v1 LLM_MODEL=google/gemma-4-E4B-it \
         uv run python -m scripts.check_llm
 
+    # Ollama の Gemma 4（Mac など）は思考モードが既定でオンなので、エージェントと同じく切って測る（#54）
+    LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=gemma4:latest LLM_REASONING_EFFORT=none \
+        uv run python -m scripts.check_llm
+
+LLM_REASONING_EFFORT を指定すると、すべての確認のリクエストに reasoning_effort を付ける
+（エージェントの agent/plugins/llm.py と同じ）。付けないと思考してから返事をするので、
+エージェントで使うときより遅く測れてしまう。
+
 終了コード: 必須の確認（1・2・3b）がすべて通れば 0、1 つでも失敗すれば 1。
 結果はそのまま Issue #1 のコメントに貼れる形で表示する（API キーは表示しない）。
 
@@ -142,6 +150,18 @@ class CheckResult:
     required: bool = True
 
 
+def _with_reasoning(payload: dict, reasoning_effort: str | None) -> dict:
+    """reasoning_effort が指定されていれば、リクエストに足して返す（指定が無ければそのまま）。
+
+    エージェントは LLM_REASONING_EFFORT があるとき、会話にも振り返りにも reasoning_effort を
+    付けて送る（agent/plugins/llm.py）。確認でも同じ形にしないと、速さや返事が本番と変わる。
+    例: ({"model": "m"}, "none") → {"model": "m", "reasoning_effort": "none"}
+    """
+    if reasoning_effort:
+        return {**payload, "reasoning_effort": reasoning_effort}
+    return payload
+
+
 def _headers(api_key: str) -> dict[str, str]:
     """OpenAI 互換 API へのリクエストのヘッダー。キーは自前サーバーでは "EMPTY" でよい。"""
     return {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
@@ -175,6 +195,7 @@ def _stream_chat(
     messages: list[dict],
     timeout: float,
     clock: Callable[[], float] = time.monotonic,
+    reasoning_effort: str | None = None,
 ) -> tuple[str, float | None]:
     """ストリーミングで会話を 1 回送り、(返事の全文, 初回トークンまでの秒数) を返す。
 
@@ -183,7 +204,9 @@ def _stream_chat(
     初回トークンまでの時間は「本文が初めて届いた行」を受け取った時点で測る
     （role だけの最初の行は本文ではないので数えない）。
     """
-    payload = {"model": model, "stream": True, "messages": messages}
+    payload = _with_reasoning(
+        {"model": model, "stream": True, "messages": messages}, reasoning_effort
+    )
     req = urllib.request.Request(
         f"{base_url}/chat/completions",
         data=json.dumps(payload).encode(),
@@ -231,7 +254,7 @@ def leading_expression(text: str) -> str | None:
 
 
 def check_streaming(
-    base_url: str, model: str, api_key: str, timeout: float
+    base_url: str, model: str, api_key: str, timeout: float, reasoning_effort: str | None = None
 ) -> tuple[CheckResult, float | None]:
     """確認 1: 本番のシステムプロンプトで会話が返り、先頭に表情タグが付くこと。
 
@@ -244,7 +267,9 @@ def check_streaming(
     ]
     name = "1. ストリーミングで会話が返り、表情タグが付く"
     try:
-        text, ttft = _stream_chat(base_url, model, api_key, messages, timeout)
+        text, ttft = _stream_chat(
+            base_url, model, api_key, messages, timeout, reasoning_effort=reasoning_effort
+        )
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as e:
         return CheckResult(name, False, f"エラー: {e}"), None
     if not text:
@@ -285,7 +310,9 @@ def _reflection_problem(raw: str) -> str | None:
     return None
 
 
-def check_structured_output(base_url: str, model: str, api_key: str, timeout: float) -> CheckResult:
+def check_structured_output(
+    base_url: str, model: str, api_key: str, timeout: float, reasoning_effort: str | None = None
+) -> CheckResult:
     """確認 2: 振り返りの本物のスキーマで頼み、エージェントの検査を通る JSON が返ること。
 
     summary だけの小さいスキーマだと、new_memories などの入れ子で崩れることに気づけないため、
@@ -303,6 +330,7 @@ def check_structured_output(base_url: str, model: str, api_key: str, timeout: fl
         },
         "temperature": 0.3,  # エージェント側（plugins/llm.py）と同じ指定
     }
+    payload = _with_reasoning(payload, reasoning_effort)
     name = "2. 構造化出力（振り返りのスキーマ）が通る"
     try:
         content = _content_of(_post_json(base_url, api_key, payload, timeout))
@@ -314,7 +342,9 @@ def check_structured_output(base_url: str, model: str, api_key: str, timeout: fl
     return CheckResult(name, True, f"返事: {content}")
 
 
-def check_greetings(base_url: str, model: str, api_key: str, timeout: float) -> list[CheckResult]:
+def check_greetings(
+    base_url: str, model: str, api_key: str, timeout: float, reasoning_effort: str | None = None
+) -> list[CheckResult]:
     """確認 3: 起こされたときの挨拶を、2 つの形で作らせる。
 
     3a. system が 2 つ続く形: Issue #1 で頼まれている形。Gemma のチャットテンプレートが
@@ -342,7 +372,7 @@ def check_greetings(base_url: str, model: str, api_key: str, timeout: float) -> 
     ]
     results: list[CheckResult] = []
     for name, messages, required in forms:
-        payload = {"model": model, "messages": messages}
+        payload = _with_reasoning({"model": model, "messages": messages}, reasoning_effort)
         try:
             content = _content_of(_post_json(base_url, api_key, payload, timeout))
         except (OSError, urllib.error.URLError, json.JSONDecodeError) as e:
@@ -355,7 +385,13 @@ def check_greetings(base_url: str, model: str, api_key: str, timeout: float) -> 
     return results
 
 
-def run(base_url: str, model: str, api_key: str = "EMPTY", timeout: float = DEFAULT_TIMEOUT) -> int:
+def run(
+    base_url: str,
+    model: str,
+    api_key: str = "EMPTY",
+    timeout: float = DEFAULT_TIMEOUT,
+    reasoning_effort: str | None = None,
+) -> int:
     """確認 1〜4 を順に実行して結果を表示する。必須の確認がすべて通れば 0、そうでなければ 1。
 
     引数:
@@ -363,19 +399,22 @@ def run(base_url: str, model: str, api_key: str = "EMPTY", timeout: float = DEFA
         model: モデル名（例: "google/gemma-4-E4B-it"）
         api_key: API キー。自前サーバーでは "EMPTY" でよい（表示はしない）
         timeout: 確認 1 回ごとの待ち時間（秒）
+        reasoning_effort: すべての確認に付ける reasoning_effort（例: "none"）。None なら付けない
     """
     base_url = base_url.rstrip("/")
     # 1. 結果を Issue #1 にそのまま貼れる形で出す（どのサーバーで確かめたかが分かるように）
     print("LLM の確認（Issue #1）")
     print(f"LLM_BASE_URL={base_url}")
     print(f"LLM_MODEL={model}")
+    if reasoning_effort:
+        print(f"LLM_REASONING_EFFORT={reasoning_effort}")
 
     # 2. 確認を実行する。1 つ失敗しても、残りの結果も Issue で必要なので続ける
-    streaming, ttft = check_streaming(base_url, model, api_key, timeout)
+    streaming, ttft = check_streaming(base_url, model, api_key, timeout, reasoning_effort)
     results = [
         streaming,
-        check_structured_output(base_url, model, api_key, timeout),
-        *check_greetings(base_url, model, api_key, timeout),
+        check_structured_output(base_url, model, api_key, timeout, reasoning_effort),
+        *check_greetings(base_url, model, api_key, timeout, reasoning_effort),
     ]
     for result in results:
         mark = "OK" if result.ok else "NG"
@@ -400,17 +439,33 @@ def run(base_url: str, model: str, api_key: str = "EMPTY", timeout: float = DEFA
     return 1
 
 
-def main() -> None:
-    """環境変数（LLM_BASE_URL / LLM_MODEL / LLM_API_KEY）か引数から接続先を読んで確認する。"""
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """引数を読む。引数が無い項目は環境変数（LLM_BASE_URL / LLM_MODEL / LLM_REASONING_EFFORT）を使う。
+
+    LLM_REASONING_EFFORT が空・空白だけなら None（reasoning_effort を送らない）にする。
+    エージェント側（agent/config.py）も、空の値は「設定なし」として扱うため。
+    """
     parser = argparse.ArgumentParser(description="LLM（Gemma 4）の確認（Issue #1）")
     parser.add_argument("--base-url", default=os.environ.get("LLM_BASE_URL", ""))
     parser.add_argument("--model", default=os.environ.get("LLM_MODEL", ""))
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--reasoning-effort",
+        default=os.environ.get("LLM_REASONING_EFFORT", ""),
+        help="すべての確認に付ける reasoning_effort（Ollama の Gemma 4 なら none）",
+    )
+    args = parser.parse_args(argv)
+    args.reasoning_effort = args.reasoning_effort.strip() or None
+    return args
+
+
+def main() -> None:
+    """環境変数（LLM_BASE_URL / LLM_MODEL / LLM_API_KEY / LLM_REASONING_EFFORT）か引数から読んで確認する。"""
+    args = parse_args()
     if not args.base_url or not args.model:
         sys.exit("LLM_BASE_URL と LLM_MODEL を設定してください（.env か環境変数、または引数で）")
     api_key = os.environ.get("LLM_API_KEY", "EMPTY")
-    sys.exit(run(args.base_url, args.model, api_key, args.timeout))
+    sys.exit(run(args.base_url, args.model, api_key, args.timeout, args.reasoning_effort))
 
 
 if __name__ == "__main__":
