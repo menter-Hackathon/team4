@@ -177,14 +177,47 @@ class PlantConversation:
             # TTS の指示に残ったまま挨拶しないようにするため（最終レビュー I1）
             return TurnDecision("greet", instructions=instructions, dialect="standard")
 
-        # 3. 起きているとき: 発話を記録し、無言タイマーをリセットする
-        self._record("user", text)
+        # 3. 起きているとき: 先頭の呼びかけ（「ふたまる、」）を外す（#68）。
+        #    眠っているときに起こす発話（上の match.rest）と同じく、外した文で返事・記録・名前探しをする。
+        #    元の「ふたまる太郎だよ。」のまま会話の LLM に渡すと、名前を「太郎」と登録していても、
+        #    植物が「ふたまる太郎」と呼んでしまうため
+        content = self._without_leading_wake_word(text)
+        # 4. 発話を記録し、無言タイマーをリセットする
+        self._record("user", content if content is not None else text)
         self._controller.on_user_activity(self._clock())
-        # 4. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する
-        decided = await self._identify_turn(text)
+        if content is None:
+            # 「ふたまる」とだけ呼ばれた → 返事はするが、名乗りではないので名前探しはしない
+            # （名前を聞く 3 回にも数えない）
+            return TurnDecision("reply", text)
+        # 5. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する
+        decided = await self._identify_turn(content)
         if decided is not None:
-            return TurnDecision("reply", text, decided[0], decided[1])
-        return TurnDecision("reply", text)
+            return TurnDecision("reply", content, decided[0], decided[1])
+        return TurnDecision("reply", content)
+
+    def _without_leading_wake_word(self, text: str) -> str | None:
+        """起きている間の発話から、先頭の呼びかけ（ウェイクワードと敬称）を外す（#68）。
+
+        起きている間に「ふたまる、たろうだよ」と言うと、STT が読点を落として「ふたまる太郎だよ。」と
+        書くことがある。そのまま名前探しに渡すと、LLM が「ふたまる太郎」を名前だと思って登録してしまう。
+
+        戻り値:
+            先頭に呼びかけが無ければ text のまま。呼びかけの後ろに続きがあれば、その続き。
+            呼びかけだけ（「ふたまる」「ふたまるちゃん」）なら None。
+
+        例: "ふたまる太郎だよ。" → "太郎だよ。"、"フタマルちゃん、はなこです" → "はなこです"、
+            "たろうだよ、ふたまるよろしく" → そのまま（先頭でなければ呼びかけではない）、"ふたまる" → None
+        """
+        # detect_wake は文の途中のウェイクワードでも見つける。途中のものまで外すと、その前に言った
+        # 名前（「たろうだよ、ふたまる…」の「たろう」）が消えてしまうので、先頭にあるときだけ使う
+        joined = normalize(text)
+        words = [w for w in (normalize(word) for word in self._wake_words) if w]
+        if not any(joined.startswith(w) for w in words):
+            return text
+        match = detect_wake(text, self._wake_words)
+        if match is None or not match.rest:
+            return None
+        return match.rest
 
     def on_plant_utterance(self, text: str) -> None:
         """植物が話し終えたときに呼ばれる。起きている間だけ、表情タグを外して会話ログに記録する。"""
@@ -278,7 +311,7 @@ class PlantConversation:
         logger.info(
             "plant %s is talking with person %s (dialect=%s)", self._plant_id, person.id, dialect
         )
-        # 4. その人の性格・記憶（共通 + その人だけ）・その人との前回の要約でプロンプトを作る。
+        # 4. その人の性格・記憶（その人の記憶だけ、#70）・その人との前回の要約でプロンプトを作る。
         #    他の人だけの記憶は get_memories が返さないので、ここには入らない
         prompt = build_system_prompt(
             self._store.get_plant(self._plant_id).name,
@@ -297,16 +330,16 @@ class PlantConversation:
         """お客さんに決める。名前を聞かない・標準語のプロンプトと、方言 "standard" を返す。"""
         self._guest = True
         logger.info("plant %s is talking with a guest", self._plant_id)
-        # 名前を聞く指示を外すだけで、中身（株の性格・共通の記憶・お客さんの要約）は起きたときと同じ
+        # 名前を聞く指示を外すだけで、中身（株の性格・お客さんの記憶・お客さんの要約）は起きたときと同じ
         return self._guest_prompt(ask_name=False), "standard"
 
     def _guest_prompt(self, *, ask_name: bool) -> str:
-        """株の性格・共通の記憶・お客さんとの前回の要約でプロンプトを作る（相手が未確定・お客さん用）。"""
+        """株の性格・お客さんの記憶・お客さんとの前回の要約でプロンプトを作る（相手が未確定・お客さん用）。"""
         plant = self._store.get_plant(self._plant_id)
         return build_system_prompt(
             plant.name,
             plant.traits,
-            self._store.get_memories(self._plant_id),  # person_id なし = 共通の記憶だけ
+            self._store.get_memories(self._plant_id),  # person_id なし = お客さんの記憶だけ
             self._store.latest_summary(self._plant_id),  # person_id なし = お客さんの要約
             self._clock(),
             ask_name=ask_name,
@@ -347,7 +380,7 @@ class PlantConversation:
     def _wake(self) -> str:
         """起きる。新しいセッションを始め、相手が未確定のときのシステムプロンプトを作って返す。
 
-        まだ誰と話しているか分からないので、株の性格・共通の記憶・お客さんの要約を使い、
+        まだ誰と話しているか分からないので、株の性格・お客さんの記憶・お客さんの要約を使い、
         「自然に名前を聞く」指示を足す（ask_name=True）。
         """
         now = self._clock()

@@ -83,7 +83,7 @@ def test_plant_state_has_traits_history_memories_and_summary(db):
     # 初期値 + 振り返り 2 回 = 3 点。人の振り返りは株の成長曲線に入らない
     assert [h["traits"]["talkativeness"] for h in guest["history"]] == [0.5, 0.55, 0.6]
     assert guest["history"][0]["session_id"] is None
-    # お客さんには共通の記憶だけ。人だけの記憶（サッカー部）は見せない
+    # お客さんにはお客さんの記憶だけ。人の記憶（サッカー部）は見せない
     assert [m["content"] for m in guest["memories"]] == ["カレーが好き"]
     assert guest["last_summary"] == "二回目"
     assert guest["dialect"] == "standard"
@@ -97,9 +97,8 @@ def test_person_view_uses_their_traits_memories_and_dialect(db):
     assert taro["label"] == "たろう" and taro["key"] == f"person-{taro['person_id']}"
     assert taro["traits"]["affection"] == 0.55
     assert len(taro["history"]) == 2  # 登録した時点 + 振り返り 1 回
-    by_content = {m["content"]: m for m in taro["memories"]}
-    assert by_content["サッカー部"]["shared"] is False
-    assert by_content["カレーが好き"]["shared"] is True
+    # たろうにはたろうの記憶だけ。お客さんとの記憶（カレーが好き）は混ぜない（#70）
+    assert [m["content"] for m in taro["memories"]] == ["サッカー部"]
     assert taro["last_summary"] == "部活の話"
     assert taro["dialect"] == "kansai"
 

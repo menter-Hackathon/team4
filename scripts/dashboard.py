@@ -84,17 +84,15 @@ def view_state(
         {"recorded_at": h.recorded_at, "session_id": h.session_id, "traits": _traits_json(h.traits)}
         for h in store.trait_history(plant_id, person_id)
     ]
-    # 2. 覚えていること。並べ方は prompt.rank_memories と同じにする（プロンプトに入るものと同じものが見える）
+    # 2. 覚えていること。並べ方は prompt.rank_memories と同じにする（プロンプトに入るものと同じものが見える）。
+    #    get_memories はその人の記憶だけを返す（お客さんならお客さんの記憶だけ、#70）
     top = rank_memories(store.get_memories(plant_id, person_id), now, PROMPT_MEMORY_LIMIT)
-    own = _own_memory_ids(store, plant_id, person_id) if person else set()
     memories = [
         {
             "content": m.content,
             "kind": m.kind,
             "importance": round(m.importance, 2),
             "score": round(m.importance * recency_factor(m.updated_at, now), 3),
-            # 共通の記憶か、この人だけの記憶か（get_memories は両方を返す）
-            "shared": m.id not in own,
         }
         for m in top
     ]
@@ -114,12 +112,6 @@ def view_state(
         "dialect": dialect,
         "type": _type_json(plant_type(traits)),
     }
-
-
-def _own_memory_ids(store: PlantStore, plant_id: str, person_id: int | None) -> set[int]:
-    """その人だけの記憶の id。get_memories(人) から get_memories(お客さん = 共通だけ) を引いて求める。"""
-    shared = {m.id for m in store.get_memories(plant_id, None)}
-    return {m.id for m in store.get_memories(plant_id, person_id)} - shared
 
 
 def plant_state(store: PlantStore, plant_id: str, now: datetime) -> dict:

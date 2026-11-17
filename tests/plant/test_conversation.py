@@ -7,8 +7,9 @@ import pytest
 
 from agent.plant import conversation as conversation_module
 from agent.plant.conversation import PlantConversation
+from agent.plant.personality import Traits
 from agent.plant.prompt import ASK_NAME_INSTRUCTION
-from agent.plant.store import PlantStore
+from agent.plant.store import NewMemory, PlantStore
 from agent.plant.timeutil import JST
 from tests.fakes import FakeClock, FakeCompleter, reflection_json
 
@@ -315,6 +316,26 @@ async def test_named_wake_switches_to_that_persons_prompt(store, clock):
     await c.close()
 
 
+async def test_named_persons_prompt_has_no_guest_memories(store, clock):
+    # お客さんと話して覚えたこと（ピザ）は、あとから名乗った人のプロンプトには入れない（#70）。
+    # 入れると、植物が「ピザのこと考えてるんだって？」と、その人が話していない話題を振ってしまう
+    store.get_or_create_plant("a", T0)
+    sid = store.start_session("a", T0)
+    store.end_session(sid, T0)
+    store.apply_reflection(
+        "a", sid, "ピザの話", [NewMemory("持ち主はピザが好き", "preference", 0.9)], [], Traits(), T0
+    )
+    jiro = store.add_person("a", "次郎", T0)
+    completer = FakeCompleter([identify_json("known", jiro.id), reflection_json()])
+    c = await make_started(store, clock, completer)
+    greet = await c.on_user_turn("ふたまる")
+    assert "ピザが好き" in greet.instructions  # 名乗る前（お客さん）には見せてよい
+    d = await c.on_user_turn("次郎です")
+    assert "今話している相手は 次郎。" in d.instructions
+    assert "ピザ" not in d.instructions  # 記憶にも前回の会話にも入らない
+    await c.close()
+
+
 async def test_new_person_is_registered(store, clock):
     completer = FakeCompleter([identify_json("new", name="はなこ"), reflection_json()])
     c = await make_started(store, clock, completer)
@@ -444,6 +465,63 @@ async def test_new_name_equal_to_the_plant_name_or_a_wake_word_is_ignored(store,
     d = await c.on_user_turn(f"{name}って呼んでいい？")
     assert store.get_people("a") == []  # 植物の名前・ウェイクワードは人として登録しない
     assert (d.instructions, d.dialect) == (None, None)  # まだ名前を聞き続ける
+    await c.close()
+
+
+def identified_utterance(completer, index=0) -> str:
+    """名前探しに渡った「発話: …」の部分を取り出す（LLM へのメッセージの最後の行）。"""
+    return completer.calls[index][0][-1]["content"].rsplit("発話: ", 1)[1]
+
+
+async def test_awake_name_after_the_wake_word_drops_the_wake_word(store, clock):
+    # 起きている間に「ふたまる、たろうだよ」と言うと、STT が「ふたまる太郎だよ。」と書くことがある。
+    # 先頭の「ふたまる」は呼びかけなので、名前探しには外して渡す（#68）
+    completer = FakeCompleter([identify_json("new", name="太郎"), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    d = await c.on_user_turn("ふたまる太郎だよ。")
+    assert identified_utterance(completer) == "太郎だよ。"
+    assert [p.name for p in store.get_people("a")] == ["太郎"]
+    # 返事と会話ログも、呼びかけを外した文にする（眠っているときに起こす発話と同じ）。
+    # 元の文のまま会話の LLM に渡すと、植物が「ふたまる太郎」と呼んでしまうため
+    assert d.text == "太郎だよ。"
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["太郎だよ。"]
+    await c.close()
+
+
+async def test_awake_wake_word_with_honorific_is_also_dropped(store, clock):
+    completer = FakeCompleter([identify_json(), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    await c.on_user_turn("フタマルちゃん、はなこです")
+    assert identified_utterance(completer) == "はなこです"
+    await c.close()
+
+
+async def test_awake_wake_word_in_the_middle_is_kept(store, clock):
+    # 先頭でなければ呼びかけではない。文の途中の「ふたまる」から前を消すと、名前まで消えてしまう
+    completer = FakeCompleter([identify_json(), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    await c.on_user_turn("たろうだよ、ふたまるよろしく")
+    assert identified_utterance(completer) == "たろうだよ、ふたまるよろしく"
+    await c.close()
+
+
+async def test_awake_wake_word_alone_does_not_identify_or_count(store, clock):
+    # 起きている間に「ふたまる」とだけ呼んでも、名乗りではないので名前探しはしない。
+    # 名前を聞く 3 回にも数えない（呼びかけだけで、お客さんにされないように）
+    completer = FakeCompleter([identify_json(), identify_json(), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    for _ in range(3):
+        d = await c.on_user_turn("ふたまる")
+        assert (d.kind, d.text) == ("reply", "ふたまる")  # 返事はする
+    assert completer.calls == []
+    await c.on_user_turn("今日は晴れ")
+    await c.on_user_turn("カレー食べた")
+    assert store.get_session(current_sid(store)).person_id is None
+    assert not c._guest  # 名前を聞けたのはまだ 2 回なので、お客さんにはなっていない
     await c.close()
 
 
