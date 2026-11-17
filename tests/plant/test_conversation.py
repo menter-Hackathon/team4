@@ -447,6 +447,63 @@ async def test_new_name_equal_to_the_plant_name_or_a_wake_word_is_ignored(store,
     await c.close()
 
 
+def identified_utterance(completer, index=0) -> str:
+    """名前探しに渡った「発話: …」の部分を取り出す（LLM へのメッセージの最後の行）。"""
+    return completer.calls[index][0][-1]["content"].rsplit("発話: ", 1)[1]
+
+
+async def test_awake_name_after_the_wake_word_drops_the_wake_word(store, clock):
+    # 起きている間に「ふたまる、たろうだよ」と言うと、STT が「ふたまる太郎だよ。」と書くことがある。
+    # 先頭の「ふたまる」は呼びかけなので、名前探しには外して渡す（#68）
+    completer = FakeCompleter([identify_json("new", name="太郎"), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    d = await c.on_user_turn("ふたまる太郎だよ。")
+    assert identified_utterance(completer) == "太郎だよ。"
+    assert [p.name for p in store.get_people("a")] == ["太郎"]
+    # 返事と会話ログも、呼びかけを外した文にする（眠っているときに起こす発話と同じ）。
+    # 元の文のまま会話の LLM に渡すと、植物が「ふたまる太郎」と呼んでしまうため
+    assert d.text == "太郎だよ。"
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["太郎だよ。"]
+    await c.close()
+
+
+async def test_awake_wake_word_with_honorific_is_also_dropped(store, clock):
+    completer = FakeCompleter([identify_json(), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    await c.on_user_turn("フタマルちゃん、はなこです")
+    assert identified_utterance(completer) == "はなこです"
+    await c.close()
+
+
+async def test_awake_wake_word_in_the_middle_is_kept(store, clock):
+    # 先頭でなければ呼びかけではない。文の途中の「ふたまる」から前を消すと、名前まで消えてしまう
+    completer = FakeCompleter([identify_json(), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    await c.on_user_turn("たろうだよ、ふたまるよろしく")
+    assert identified_utterance(completer) == "たろうだよ、ふたまるよろしく"
+    await c.close()
+
+
+async def test_awake_wake_word_alone_does_not_identify_or_count(store, clock):
+    # 起きている間に「ふたまる」とだけ呼んでも、名乗りではないので名前探しはしない。
+    # 名前を聞く 3 回にも数えない（呼びかけだけで、お客さんにされないように）
+    completer = FakeCompleter([identify_json(), identify_json(), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる")
+    for _ in range(3):
+        d = await c.on_user_turn("ふたまる")
+        assert (d.kind, d.text) == ("reply", "ふたまる")  # 返事はする
+    assert completer.calls == []
+    await c.on_user_turn("今日は晴れ")
+    await c.on_user_turn("カレー食べた")
+    assert store.get_session(current_sid(store)).person_id is None
+    assert not c._guest  # 名前を聞けたのはまだ 2 回なので、お客さんにはなっていない
+    await c.close()
+
+
 async def test_custom_plant_name_is_not_registered_as_a_person(store, clock):
     store.get_or_create_plant("a", T0)
     store._conn.execute("UPDATE plants SET name = 'みどり' WHERE plant_id = 'a'")
