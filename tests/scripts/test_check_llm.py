@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from scripts.check_llm import WAKE_GREETING_INSTRUCTION, leading_expression, run
+from scripts.check_llm import WAKE_GREETING_INSTRUCTION, leading_expression, parse_args, run
 
 MODEL = "google/gemma-4-E4B-it"
 
@@ -165,6 +165,34 @@ def test_requests_match_agent_shapes(llm):
     # 確認 3b: ト書きは user ロールで、丸括弧で囲んで渡す（main.py の direction_ctx と同じ）
     assert [m["role"] for m in greeting["messages"]] == ["system", "user"]
     assert greeting["messages"][1]["content"] == f"（{WAKE_GREETING_INSTRUCTION}）"
+
+
+def test_reasoning_effort_is_not_sent_by_default(llm):
+    # 何も指定しなければ、今までどおり reasoning_effort を送らない（vLLM・OpenAI の gpt-4o-mini 向け）
+    s = llm()
+    assert run(s.url, MODEL, timeout=5) == 0
+    assert all("reasoning_effort" not in payload for payload in s.requests)
+
+
+def test_reasoning_effort_is_sent_in_every_check_when_set(llm, capsys):
+    # Ollama の Gemma 4 は思考モードが既定でオン。エージェントと同じく、すべての確認で切って測る（#54）
+    s = llm()
+    assert run(s.url, MODEL, timeout=5, reasoning_effort="none") == 0
+    assert len(s.requests) == 4
+    assert all(payload["reasoning_effort"] == "none" for payload in s.requests)
+    # どの設定で測ったかが Issue に貼った結果からわかるように、表示にも出す
+    assert "LLM_REASONING_EFFORT=none" in capsys.readouterr().out
+
+
+def test_reasoning_effort_is_read_from_the_environment(monkeypatch):
+    # main() と同じく、引数が無ければ環境変数 LLM_REASONING_EFFORT を使う。空なら送らない
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "none")
+    assert parse_args(["--base-url", "http://x/v1", "--model", MODEL]).reasoning_effort == "none"
+    monkeypatch.setenv("LLM_REASONING_EFFORT", "  ")
+    assert parse_args(["--base-url", "http://x/v1", "--model", MODEL]).reasoning_effort is None
+    monkeypatch.delenv("LLM_REASONING_EFFORT")
+    args = parse_args(["--base-url", "http://x/v1", "--model", MODEL, "--reasoning-effort", "low"])
+    assert args.reasoning_effort == "low"
 
 
 def test_run_fails_when_reply_has_no_expression_tag(llm, capsys):

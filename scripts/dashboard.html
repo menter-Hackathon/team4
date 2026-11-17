@@ -3,7 +3,8 @@
   ふたまるのダッシュボード（仕様 §6.6、#59）。scripts/dashboard.py が返す HTML 1 枚。
   しくみ:
     1. 数秒ごとに /api/state（JSON）を読みに行く
-    2. 株ごとにカードを作り、レーダーチャート（今の性格）・折れ線（成長曲線）・覚えていることを描く
+    2. 株ごとにカードを作り、タイプ（「〇〇ふたまる」、#64）・レーダーチャート（今の性格）・
+       折れ線（成長曲線）・覚えていることを描く
     3. 2 回目からは、グラフを作り直さずに数字だけ入れ替える（ちらつかせないため）
   記憶や要約は LLM が作った文なので、HTML としてではなく必ず textContent で入れる（タグを実行させない）。
 -->
@@ -59,6 +60,18 @@
   ol.mem { margin: 0; padding-left: 22px; font-size: 14px; line-height: 1.55; }
   ol.mem .tag { font-size: 11px; color: var(--sub); margin-left: 6px; white-space: nowrap; }
   .empty { color: var(--sub); font-size: 14px; }
+  /* 性格の 16 タイプ（#64）。イラストが届くまでは絵文字を大きく出す */
+  .ptype {
+    display: flex; align-items: center; gap: 14px; margin: 8px 0 6px;
+    padding: 10px 14px; background: #f3f7ef; border-radius: 12px;
+  }
+  .ptype .pic {
+    flex: none; width: 96px; height: 96px; display: flex; align-items: center;
+    justify-content: center; font-size: 64px; line-height: 1;
+  }
+  .ptype .pic img { width: 96px; height: 96px; object-fit: contain; }
+  .ptype .pname { font-size: 22px; font-weight: bold; }
+  .ptype .pdesc { font-size: 14px; color: var(--sub); margin-top: 4px; }
   .notfound { color: var(--sub); padding: 24px 0; }
   @media (max-width: 720px) {
     main { grid-template-columns: 1fr; padding: 12px 16px; }
@@ -108,6 +121,14 @@ function createCard(plant, index) {
   card.append(title);
   const tabs = el("div", "tabs");
   card.append(tabs);
+  // タイプ（イラスト・名前・ひとこと）。タブで選んでいる人の性格のタイプを出す
+  const ptype = el("div", "ptype");
+  const pic = el("div", "pic");
+  const ptext = el("div");
+  const pname = el("div", "pname"), pdesc = el("div", "pdesc");
+  ptext.append(pname, pdesc);
+  ptype.append(pic, ptext);
+  card.append(ptype);
   const charts = el("div", "charts");
   const radarBox = el("div"), lineBox = el("div");
   const radarCanvas = el("canvas"), lineCanvas = el("canvas");
@@ -158,11 +179,33 @@ function createCard(plant, index) {
                 x: { title: { display: true, text: "会話の回数" } } },
     },
   });
-  return { card, title, tabs, charts, values, mem, meta, notfound, radar, line, selected: "guest" };
+  return { card, title, tabs, ptype, pic, pname, pdesc, charts, values, mem, meta, notfound,
+           radar, line, selected: "guest" };
+}
+
+// タイプを出す。イラストがあれば画像、無ければ絵文字。
+// 3 秒ごとに画像を作り直すとちらつくので、表示する中身が変わったときだけ入れ替える
+function renderType(c, type) {
+  const shown = type.image || type.emoji;
+  if (c.pic.dataset.shown !== shown) {
+    c.pic.dataset.shown = shown;
+    if (type.image) {
+      const img = el("img");
+      img.src = type.image;  // サーバーが返した /types/<英語名>.png だけを使う
+      img.alt = type.name;
+      c.pic.replaceChildren(img);
+    } else {
+      c.pic.textContent = type.emoji;
+    }
+  }
+  c.pname.textContent = type.name;
+  c.pdesc.textContent = type.description;
 }
 
 // 選んでいる人の内容をカードに入れる
 function renderView(c, view) {
+  // 0. タイプ（「〇〇ふたまる」）
+  renderType(c, view.type);
   // 1. レーダーチャート
   c.radar.data.datasets[0].data = TRAITS.map(t => view.traits[t.key]);
   c.radar.update();
@@ -210,11 +253,13 @@ function renderPlant(plant, index) {
     c.title.textContent = plant.plant_id;
     c.notfound.textContent = "この株はまだ DB にありません（一度起こすと作られます）";
     c.charts.style.display = "none";
+    c.ptype.style.display = "none";
     c.values.replaceChildren();
     return;
   }
   c.notfound.textContent = "";
   c.charts.style.display = "";
+  c.ptype.style.display = "";
   c.title.replaceChildren(document.createTextNode(plant.name), el("small", null, plant.plant_id));
   // 選んでいた人がいなくなっていたら（DB を替えたなど）、お客さんに戻す
   const views = plant.views;
