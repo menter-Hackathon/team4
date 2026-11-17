@@ -204,8 +204,19 @@ class PlantStore:
     全部成功したら保存され、途中でエラーになったら全部取り消される（半端な状態が残らない）。
     """
 
-    def __init__(self, path: str) -> None:
-        """DB ファイルを開く（無ければ作る）。path が ":memory:" ならファイルを作らずメモリ上だけで使う（テスト用）。"""
+    def __init__(self, path: str, *, readonly: bool = False) -> None:
+        """DB ファイルを開く（無ければ作る）。path が ":memory:" ならファイルを作らずメモリ上だけで使う（テスト用）。
+
+        readonly=True なら読むだけで開く（ダッシュボード用、仕様 §6.6）。
+        ファイルが無ければ作らずに sqlite3.OperationalError になり、テーブルの作成・列の追加もしない。
+        エージェントが同じ DB に書き込んでいる最中に開いても、邪魔をしないようにするため。
+        """
+        if readonly:
+            # mode=ro: SQLite に「読み取り専用で開く」と伝える URI の書き方。書き込もうとするとエラーになる
+            uri = f"{Path(path).resolve().as_uri()}?mode=ro"
+            self._conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
+            return
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)  # data/ フォルダが無ければ作る
         # check_same_thread=False: LiveKit が別スレッドから呼んでも使えるようにする
