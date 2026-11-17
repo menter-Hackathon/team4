@@ -229,8 +229,7 @@ function renderView(c, view) {
     const ol = el("ol", "mem");
     for (const m of view.memories) {
       const li = el("li", null, m.content);
-      const who = view.person_id === null ? "" : (m.shared ? "・共通" : "・この人だけ");
-      li.append(el("span", "tag", `${KIND[m.kind] || m.kind}・重要度 ${m.importance}${who}`));
+      li.append(el("span", "tag", `${KIND[m.kind] || m.kind}・重要度 ${m.importance}`));
       ol.append(li);
     }
     c.mem.append(ol);

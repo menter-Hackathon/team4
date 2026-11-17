@@ -237,7 +237,7 @@ def _build_messages(
         for u in store.get_utterances(session_id)
     ]
     # 既存の記憶は id 付きで見せる。LLM が「この記憶を更新する」と id で指定できるように
-    # 見せるのは、この人の記憶と全員共通の記憶だけ（ほかの人の記憶は混ぜない）
+    # 見せるのは、この人の記憶だけ（ほかの人の記憶も、お客さんとの記憶も混ぜない、#70）
     memories = rank_memories(store.get_memories(plant_id, person_id), now, REFLECTION_MEMORY_LIMIT)
     memory_lines = [f"[id={m.id}] {m.content} (importance={m.importance:g})" for m in memories]
     user = (

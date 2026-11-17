@@ -311,7 +311,7 @@ class PlantConversation:
         logger.info(
             "plant %s is talking with person %s (dialect=%s)", self._plant_id, person.id, dialect
         )
-        # 4. その人の性格・記憶（共通 + その人だけ）・その人との前回の要約でプロンプトを作る。
+        # 4. その人の性格・記憶（その人の記憶だけ、#70）・その人との前回の要約でプロンプトを作る。
         #    他の人だけの記憶は get_memories が返さないので、ここには入らない
         prompt = build_system_prompt(
             self._store.get_plant(self._plant_id).name,
@@ -330,16 +330,16 @@ class PlantConversation:
         """お客さんに決める。名前を聞かない・標準語のプロンプトと、方言 "standard" を返す。"""
         self._guest = True
         logger.info("plant %s is talking with a guest", self._plant_id)
-        # 名前を聞く指示を外すだけで、中身（株の性格・共通の記憶・お客さんの要約）は起きたときと同じ
+        # 名前を聞く指示を外すだけで、中身（株の性格・お客さんの記憶・お客さんの要約）は起きたときと同じ
         return self._guest_prompt(ask_name=False), "standard"
 
     def _guest_prompt(self, *, ask_name: bool) -> str:
-        """株の性格・共通の記憶・お客さんとの前回の要約でプロンプトを作る（相手が未確定・お客さん用）。"""
+        """株の性格・お客さんの記憶・お客さんとの前回の要約でプロンプトを作る（相手が未確定・お客さん用）。"""
         plant = self._store.get_plant(self._plant_id)
         return build_system_prompt(
             plant.name,
             plant.traits,
-            self._store.get_memories(self._plant_id),  # person_id なし = 共通の記憶だけ
+            self._store.get_memories(self._plant_id),  # person_id なし = お客さんの記憶だけ
             self._store.latest_summary(self._plant_id),  # person_id なし = お客さんの要約
             self._clock(),
             ask_name=ask_name,
@@ -380,7 +380,7 @@ class PlantConversation:
     def _wake(self) -> str:
         """起きる。新しいセッションを始め、相手が未確定のときのシステムプロンプトを作って返す。
 
-        まだ誰と話しているか分からないので、株の性格・共通の記憶・お客さんの要約を使い、
+        まだ誰と話しているか分からないので、株の性格・お客さんの記憶・お客さんの要約を使い、
         「自然に名前を聞く」指示を足す（ask_name=True）。
         """
         now = self._clock()

@@ -7,8 +7,9 @@ import pytest
 
 from agent.plant import conversation as conversation_module
 from agent.plant.conversation import PlantConversation
+from agent.plant.personality import Traits
 from agent.plant.prompt import ASK_NAME_INSTRUCTION
-from agent.plant.store import PlantStore
+from agent.plant.store import NewMemory, PlantStore
 from agent.plant.timeutil import JST
 from tests.fakes import FakeClock, FakeCompleter, reflection_json
 
@@ -312,6 +313,26 @@ async def test_named_wake_switches_to_that_persons_prompt(store, clock):
     assert ASK_NAME_INSTRUCTION not in d.instructions
     assert d.dialect == "kansai"
     assert store.get_session(current_sid(store)).person_id == taro.id
+    await c.close()
+
+
+async def test_named_persons_prompt_has_no_guest_memories(store, clock):
+    # お客さんと話して覚えたこと（ピザ）は、あとから名乗った人のプロンプトには入れない（#70）。
+    # 入れると、植物が「ピザのこと考えてるんだって？」と、その人が話していない話題を振ってしまう
+    store.get_or_create_plant("a", T0)
+    sid = store.start_session("a", T0)
+    store.end_session(sid, T0)
+    store.apply_reflection(
+        "a", sid, "ピザの話", [NewMemory("持ち主はピザが好き", "preference", 0.9)], [], Traits(), T0
+    )
+    jiro = store.add_person("a", "次郎", T0)
+    completer = FakeCompleter([identify_json("known", jiro.id), reflection_json()])
+    c = await make_started(store, clock, completer)
+    greet = await c.on_user_turn("ふたまる")
+    assert "ピザが好き" in greet.instructions  # 名乗る前（お客さん）には見せてよい
+    d = await c.on_user_turn("次郎です")
+    assert "今話している相手は 次郎。" in d.instructions
+    assert "ピザ" not in d.instructions  # 記憶にも前回の会話にも入らない
     await c.close()
 
 

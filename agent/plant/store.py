@@ -5,7 +5,7 @@
 DB は 1 つの SQLite ファイル（既定は data/futamaru.db）。テーブルは 6 つ:
     plants:        株ごとの名前と、お客さん（まだ誰か分からない相手）用の性格（4 軸）
     people:        株が知っている人。人ごとの性格（4 軸）と、手で固定した方言
-    memories:      株が覚えていること。person_id が NULL なら共通、あればその人だけの記憶
+    memories:      株が覚えていること。person_id があればその人の記憶、NULL ならお客さんの記憶（#70）
     sessions:      起きてから眠るまでの 1 回の会話。振り返りの要約・相手の人・判定した方言もここに入る
     utterances:    会話の発話 1 つずつ（持ち主・植物）
     trait_history: 性格の移り変わりの記録（成長グラフ用）。person_id が NULL なら株（お客さん）の分
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS trait_history (
 """
 
 # 古い DB に足す列: {テーブル名: [(列名, 型と制約), ...]}。SCHEMA の新しい列と同じ内容にする。
-# どれも NULL を許す（既存の行は「共通・お客さん・判定なし」になる）
+# どれも NULL を許す（既存の行は「お客さん・判定なし」になる）
 _NEW_COLUMNS = {
     "memories": [("person_id", "INTEGER REFERENCES people(id)")],
     "sessions": [
@@ -466,14 +466,17 @@ class PlantStore:
     # --- memories / reflection ---
 
     def get_memories(self, plant_id: str, person_id: int | None = None) -> list[Memory]:
-        """その株の記憶を返す。共通の記憶（person_id が NULL）と、person_id の人だけの記憶。
+        """その株の記憶のうち、person_id の人の記憶だけを返す（#70）。
 
-        person_id が None（お客さん）なら共通の記憶だけ。他の人の記憶は返さない。
+        person_id が None ならお客さん（名乗らなかった人）の記憶（person_id が NULL）だけ。
+        名乗った人には、ほかの人の記憶もお客さんの記憶も返さない。お客さんと話した内容を
+        混ぜると、植物が「ピザのこと考えてるんだって？」と、その人が話していない話題を振るため。
         並べ替えと絞り込みは prompt.rank_memories で行う。
         """
+        # SQLite の「IS」は、NULL どうしも等しいとみなす（「=」だと NULL = NULL は真にならない）。
+        # これで person_id が None のときも、数字のときも、同じ 1 つの条件で書ける
         rows = self._conn.execute(
-            "SELECT * FROM memories WHERE plant_id = ? AND (person_id IS NULL OR person_id = ?)"
-            " ORDER BY id",
+            "SELECT * FROM memories WHERE plant_id = ? AND person_id IS ? ORDER BY id",
             (plant_id, person_id),
         ).fetchall()
         return [
@@ -499,7 +502,7 @@ class PlantStore:
         """reflection の結果を1トランザクションで反映する（仕様 §6.3 手順5）。
 
         Args:
-            person_id: 話し相手。None ならお客さん（性格は株に、記憶は共通になる）
+            person_id: 話し相手。None ならお客さん（性格は株に、記憶はお客さんの記憶になる）
             owner_dialect: このセッションで判定した相手の方言（判断できなければ "unknown"）
 
         5 つの書き込みを「全部成功するか、全部取り消すか」にまとめる。
@@ -521,7 +524,7 @@ class PlantStore:
                     " WHERE plant_id = ?",
                     (*cols, plant_id),
                 )
-            # 2. 新しい記憶を追加する（person_id 付き。None なら共通の記憶）
+            # 2. 新しい記憶を追加する（person_id 付き。None ならお客さんの記憶）
             for m in new_memories:
                 self._conn.execute(
                     "INSERT INTO memories (plant_id, person_id, content, kind, importance,"
@@ -529,11 +532,11 @@ class PlantStore:
                     (plant_id, person_id, m.content, m.kind, m.importance, ts, ts),
                 )
             # 3. 既存の記憶を書き換える。id が存在しない・別の株や別の人の記憶なら、1 行も変わらず無視される
-            #    （書き換えてよいのは、この人の記憶か共通の記憶だけ）
+            #    （書き換えてよいのは、この人の記憶だけ。お客さんならお客さんの記憶だけ、#70）
             for u in updated_memories:
                 self._conn.execute(
                     "UPDATE memories SET content = ?, importance = ?, updated_at = ?"
-                    " WHERE id = ? AND plant_id = ? AND (person_id IS NULL OR person_id = ?)",
+                    " WHERE id = ? AND plant_id = ? AND person_id IS ?",
                     (u.content, u.importance, ts, u.id, plant_id, person_id),
                 )
             # 4. 性格の移り変わりを記録する
