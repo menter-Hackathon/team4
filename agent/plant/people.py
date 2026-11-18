@@ -59,6 +59,23 @@ _INSTRUCTION = (
     "音声認識は同じ名前をひらがな・カタカナ・漢字のどれでも書くので、表記ではなく意味で照合する。"
 )
 
+# 登録済みの人だけにするとき（.env の ALLOW_NEW_PEOPLE=false、#72）の指示。
+# デモでは話す人（ショーン・ちゃむ）を先に登録しておく。STT が名前を聞き間違えても
+# （「ショーン」→「ション」、「ちゃむ」→「サム」）、新しい人を作らず、読みが似ている登録済みの人に結びつける。
+# 似ている人がいなければ none にして、植物にもう一度名前を聞かせる
+_INSTRUCTION_CLOSED = (
+    "話し手が名前を名乗っているか判定し、JSON で答える。\n"
+    "- 知っている人の一覧にいる人が名乗ったら kind=known と person_id\n"
+    "- 音声認識は名前を聞き間違えることがある。名乗った名前が一覧の人と読みが似ている"
+    "（例:「ション」と「ショーン」、「サム」と「チャム」）なら、その人とみなして kind=known にする\n"
+    "- 一覧の誰とも似ていない名前なら kind=none。新しい人は登録しないので、kind=new は使わない\n"
+    "- 植物が名前を聞いた直後の、名前だけの短い答え（例:「はなこ」「はなこです」）も名乗りとみなす\n"
+    "- それ以外（あいさつ・質問・雑談など）は kind=none\n"
+    "- 「ふたまる」は植物の名前で、発話の先頭にあれば植物への呼びかけ。人の名前には含めない"
+    "（例:「ふたまる太郎だよ」なら名前は「太郎」）\n"
+    "音声認識は同じ名前をひらがな・カタカナ・漢字のどれでも書くので、表記ではなく意味で照合する。"
+)
+
 _NONE = Identification("none")
 
 # 名前の最大の文字数。名前は DB にずっと残り、毎回プロンプトに入るので、長すぎるものは切る
@@ -84,6 +101,7 @@ async def identify(
     known: list[Person],
     *,
     previous_plant: str | None = None,
+    allow_new: bool = True,
 ) -> Identification:
     """発話から話し手を見分ける。例外は外に出さず、不正な結果はすべて none にする。
 
@@ -94,6 +112,8 @@ async def identify(
         previous_plant: 植物が直前に言ったこと（例: "お名前は？"）。無ければ None。
             「お名前は？」→「はなこ」のように、名前だけの答えを名乗りと判断できるように渡す
             （最終レビュー I2）。キーワード指定・既定値 None なので、今までの呼び方もそのまま使える
+        allow_new: False なら、登録済みの人だけから選ぶ（デモ用、#72）。読みが似ている名前は
+            登録済みの人とみなし、似ていなければ none。LLM が new と答えても none にする
     """
     # 1. 知っている人を「id と名前」だけにしてプロンプトに入れる。
     #    植物の直前の発言があれば、発話の前に並べる（会話の順番どおりに読めるように）
@@ -103,7 +123,7 @@ async def identify(
         content += f"\n直前の植物の発言: {previous_plant}"
     content += f"\n発話: {utterance}"
     messages = [
-        {"role": "system", "content": _INSTRUCTION},
+        {"role": "system", "content": _INSTRUCTION if allow_new else _INSTRUCTION_CLOSED},
         {"role": "user", "content": content},
     ]
     # 2. LLM に聞く。失敗（通信エラー等）は none
@@ -121,7 +141,9 @@ async def identify(
         # bool は int の仲間なので除く。一覧に無い id も none
         if isinstance(pid, int) and not isinstance(pid, bool) and pid in {p.id for p in known}:
             return Identification("known", pid)
-    elif kind == "new":
+    elif kind == "new" and allow_new:
+        # 登録済みの人だけにする設定（allow_new=False）なら、new は受け取らない。
+        # 指示で「new は使わない」と書いていても、LLM が守らないことがあるため、ここでも止める
         name = data.get("name")
         cleaned = clean_name(name) if isinstance(name, str) else None
         if cleaned:
