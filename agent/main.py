@@ -366,7 +366,17 @@ async def entrypoint(ctx: JobContext) -> None:
     def _on_agent_state(ev) -> None:
         conv.on_agent_state(ev.new_state)
 
-    # 会話の履歴に 1 つ追加された。植物の発話なら会話ログに記録する
+    # 会話の履歴に 1 つ追加された。植物の発話なら会話ログに記録する。
+    #
+    # TTS（声を作る処理）が失敗した返事について（#12）:
+    #   ここで特別な処理はしなくてよい。LiveKit（1.8.12）が、実際に再生できた文字だけを履歴に入れるため。
+    #   - 1 文字も声にならなかった → 履歴に何も追加されず、この関数は呼ばれない（会話ログに入らない）
+    #   - 途中まで声になって失敗した → 再生できたところまでの文字が、interrupted=True の印付きで届く。
+    #     持ち主には実際に聞こえた部分なので、そのまま記録してよい
+    #   （LiveKit の voice/generation.py の _ForwardOutput.forwarded_text と、
+    #     voice/agent_activity.py で assistant のメッセージを足すところで確認した）
+    #   「TTS エラーの直後の返事を飛ばす」ような処理を足してはいけない。失敗した返事は履歴に来ないので、
+    #   飛ばされるのは次の正常な返事になってしまう
     @session.on("conversation_item_added")
     def _on_item(ev) -> None:
         item = ev.item
