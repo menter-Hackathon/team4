@@ -8,6 +8,7 @@
 ## 前の日までに（1 回だけ）
 
 1. [`deploy.md`](deploy.md) の 1〜4 のとおりに、一度 `docker compose up -d` まで済ませる。**初回はモデルのダウンロードで 30 分ほどかかる**ので、当日にはしない
+   - GPU は 2 枚使う（LLM に RTX 5070、STT に RTX 5060）。`nvidia-smi` の番号を見て、`.env` の `LLM_GPU`・`STT_GPU` を決める（deploy.md の 2）
 2. `.env` に、デモ用の設定を書く（キーは Discord の DM で受け取る）
    ```
    TTS_PROVIDER=aivis
@@ -31,7 +32,7 @@ docker compose up -d
 docker compose ps -a
 ```
 
-`llm` が `healthy`、`stt-init` と `tts-init` が `exited (0)`、ほかが `running` になれば準備完了です。PC を起動した直後は、`llm` が `healthy` になるまで 1〜2 分待ってください。
+`llm-init`・`stt-init`・`tts-init` が `exited (0)`、ほかが `running` になれば準備完了です。`docker compose logs llm-init` に「モデルが全部 GPU に載りました」と出ていれば、返事も速く返ります。
 
 ### 2. 見せたい日の株に入れ替える
 

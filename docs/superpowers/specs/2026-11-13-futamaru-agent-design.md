@@ -453,6 +453,8 @@ URL・モデル名はすべて環境変数で指定する。開発時はロー�
 
 ### 8.1 LLM: Gemma 4 on vLLM（PC）
 
+**更新（2026-11-18、#37）: デモでは Ollama の圧縮版（`gemma4:e4b-it-q4_K_M`）を使う。** デモの PC の GPU が 12GB と 8GB で、下の vLLM（BF16、24GB 以上）が載らないため。Docker の構成は `docs/superpowers/specs/2026-11-16-docker-backend-design.md` の「2026-11-18 の追加」。下の表は検討時の記録として残す。
+
 | 項目 | 内容 |
 |---|---|
 | 環境変数 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_REASONING_EFFORT`（任意。Ollama の Gemma 4 では `none` にして思考モードを切る） |

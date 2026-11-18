@@ -5,63 +5,78 @@
 #   docker compose down        … 停止
 #
 # 手順書: docs/deploy.md
-# 前提: NVIDIA の GPU（24GB 以上）と、ドライバ 580 以上（CUDA 13.0 対応）がある PC。鉢（ESP32）とは LiveKit Cloud 経由でつながる。
+# 前提: NVIDIA の GPU が 2 枚ある PC（LLM 用に 12GB 以上、STT 用に 8GB 以上。例: RTX 5070 と RTX 5060）。
+#       鉢（ESP32）とは LiveKit Cloud 経由でつながる。
 #
 # 中身:
-#   llm      … Gemma 4 E4B を動かす（vLLM、GPU を使う）
-#   stt      … kotoba-whisper で声を文字にする（Speaches、GPU を使う）
+#   llm      … Gemma 4 E4B の圧縮版を動かす（Ollama、GPU を 1 枚使う。.env の LLM_GPU）
+#   llm-init … 起動時に一度だけ動き、llm に Gemma 4 をダウンロード・GPU に読み込みさせて終わる
+#   stt      … kotoba-whisper で声を文字にする（Speaches、もう 1 枚の GPU を使う。.env の STT_GPU）
 #   stt-init … 起動時に一度だけ動き、stt に音声認識のモデルをダウンロード・読み込みさせて終わる
 #   tts      … AivisSpeech Engine で植物の声を作る（CPU を使う。.env で TTS_PROVIDER=aivis のときに使われる）
 #   tts-init … 起動時に一度だけ動き、tts に声のモデル（らせつんなど）を AivisHub から入れて読み込ませて終わる
-#   agent    … ふたまるのエージェント。llm の準備と stt-init・tts-init の完了を待ってから起動する
+#   agent    … ふたまるのエージェント。llm-init・stt-init・tts-init の完了を待ってから起動する
 #   dashboard … 性格・成長・記憶を見せる画面。この PC のブラウザで http://127.0.0.1:8765 を開く
 
-# GPU を使うサービスに共通の設定。NVIDIA の GPU を全部見えるようにする
-x-gpu: &gpu
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu]
+# GPU の分け方（2026-11-18、#37）:
+#   デモの PC（ショーンさんの PC）は RTX 5070（12GB）と RTX 5060（8GB）。1 枚で 24GB 以上の GPU は無い。
+#   そこで、LLM と STT に GPU を 1 枚ずつ割り当てて、メモリを取り合わないようにする。
+#   どの GPU を使うかは、nvidia-smi の左端の番号（0 か 1）で .env の LLM_GPU・STT_GPU に書く。
+#   空なら LLM が 0 番、STT が 1 番。LLM はメモリの大きいほう（RTX 5070）にする
 
 services:
   llm:
-    <<: *gpu
-    # vLLM 公式イメージ。Gemma 4 に対応した 0.19 以上の版を固定する。
-    # この版は CUDA 13.0 で作られているので、NVIDIA ドライバ 580 以上が必要（docs/deploy.md）
-    image: vllm/vllm-openai:v0.33.0
-    # 思考モードは使わない（enable_thinking を渡さない。仕様 §8.1）
-    # --gpu-memory-utilization 0.8: GPU メモリの 8 割まで使う。残りを stt に回す
-    #   （E4B の重みだけで約 16GB あるので、24GB の GPU ではこれより大きく下げられない）
-    # --max-model-len 16384: 一度に扱える文章の長さの上限。メモリ不足のときの調整方法は docs/deploy.md
-    command:
-      - google/gemma-4-E4B-it
-      - --max-model-len
-      - "16384"
-      - --gpu-memory-utilization
-      - "0.8"
+    # Ollama 公式イメージ。版を固定する（2026-11-18 に Mac で Gemma 4 を確かめたのと同じ版）
+    # なぜ vLLM ではなく Ollama か:
+    #   vLLM で圧縮していない Gemma 4 E4B を動かすと、重みだけで約 16GB あり、12GB の GPU に載らない。
+    #   Ollama の圧縮版（q4_K_M、約 6.6GB）なら RTX 5070（12GB）に、会話の作業用メモリごと収まる
+    image: ollama/ollama:0.40.16
     environment:
-      # Hugging Face のトークン（任意）。Gemma 4 E4B は同意不要の公開モデルなので、空でもダウンロードできる。
-      # 書くと Hugging Face の回数制限に当たりにくくなる
-      HF_TOKEN: ${HF_TOKEN:-}
-    # vLLM の推奨設定。プロセス間で共有メモリを使えるようにする
-    ipc: host
+      # 読み込んだモデルを外さない（外すと、次の返事で読み込み直しの待ちが出る）
+      OLLAMA_KEEP_ALIVE: "-1"
+      # 同時に 2 つまで処理する（眠ったあとの振り返りと、次の会話の返事が重なっても待たせないため）
+      OLLAMA_NUM_PARALLEL: "2"
+      # 一度に扱える文章の長さ（トークン）。既定の 4096 だと、記憶が多いプロンプトと長い会話で
+      # 古い部分（システムプロンプトを含む）が切り捨てられることがあるので、8192 にする
+      OLLAMA_CONTEXT_LENGTH: "8192"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${LLM_GPU:-0}"]
+              capabilities: [gpu]
     volumes:
       # ダウンロードしたモデルを残し、2 回目からはダウンロードしない
-      - hf-cache:/root/.cache/huggingface
-    healthcheck:
-      # /health が応答したら準備完了。初回はダウンロードに時間がかかるので、最大 60 分ほど待つ
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 15s
-      timeout: 5s
-      retries: 240
-      start_period: 60s
+      - ollama-models:/root/.ollama
     restart: unless-stopped
 
+  llm-init:
+    # エージェントのイメージの元と同じ python:3.12-slim で scripts/llm_init.py を動かす（標準ライブラリだけで動く）。
+    # 1. llm が起動するまで待つ
+    # 2. Gemma 4 の圧縮版をダウンロードさせる（初回だけ、約 6.6GB）
+    # 3. 一度呼んで GPU に読み込ませ、全部 GPU に載ったかをログに出す
+    # 成功したら終わる。失敗したらエラーで止まり、agent は起動しない
+    image: python:3.12-slim
+    command: ["python", "/llm_init.py"]
+    environment:
+      OLLAMA_URL: http://llm:11434
+      LLM_MODEL: ${DOCKER_LLM_MODEL:-gemma4:e4b-it-q4_K_M}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./scripts/llm_init.py:/llm_init.py:ro
+    depends_on:
+      - llm
+    restart: "no"
+
   stt:
-    <<: *gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${STT_GPU:-1}"]
+              capabilities: [gpu]
     # Speaches 公式イメージ（CUDA 版）
     image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda
     environment:
@@ -136,9 +151,11 @@ services:
     env_file: .env
     # LLM・STT の場所は、.env の値（開発用に OpenAI を向けていても）より、こちらを優先する
     environment:
-      LLM_BASE_URL: http://llm:8000/v1
-      LLM_MODEL: google/gemma-4-E4B-it
-      LLM_API_KEY: EMPTY
+      LLM_BASE_URL: http://llm:11434/v1
+      LLM_MODEL: ${DOCKER_LLM_MODEL:-gemma4:e4b-it-q4_K_M}
+      LLM_API_KEY: ollama
+      # Ollama の Gemma 4 は、何も言わないと思考モードで動いて遅くなるので切る（#54）
+      LLM_REASONING_EFFORT: none
       STT_BASE_URL: http://stt:8000/v1
       STT_MODEL: ${DOCKER_STT_MODEL:-kotoba-tech/kotoba-whisper-v2.0-faster}
       STT_API_KEY: EMPTY
@@ -151,8 +168,8 @@ services:
       # 会話ログ・記憶の DB をホストの ./data に残す（コンテナを作り直しても植物の記憶が消えない）
       - ./data:/app/data
     depends_on:
-      llm:
-        condition: service_healthy
+      llm-init:
+        condition: service_completed_successfully
       stt-init:
         condition: service_completed_successfully
       tts-init:
@@ -185,6 +202,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  hf-cache:
+  ollama-models:
   speaches-cache:
   aivis-data:
