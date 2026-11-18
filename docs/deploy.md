@@ -1,14 +1,15 @@
 # ふたまるの「脳」を Docker で動かす（デプロイ手順）
 
-NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM・STT）をまとめて動かす手順です。
+NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM・STT・声）をまとめて動かす手順です。
 鉢（ESP32）にはマイクとスピーカーだけがあり、LiveKit Cloud を通してこの PC の脳とつながります。
 
 ```
 鉢（ESP32: マイク・スピーカー） ──> LiveKit Cloud <── この PC の Docker
                                                       ├─ agent（エージェント）
                                                       ├─ llm（Gemma 4 E4B）
-                                                      └─ stt（kotoba-whisper）
-                                   声（TTS）は OpenAI を使う
+                                                      ├─ stt（kotoba-whisper）
+                                                      └─ tts（AivisSpeech。TTS_PROVIDER=aivis のとき）
+                                   TTS_PROVIDER=openai（既定）のときは、声に OpenAI を使う
 ```
 
 設計: `docs/superpowers/specs/2026-11-16-docker-backend-design.md`
@@ -22,6 +23,7 @@ NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM�
   - **Windows**: Docker Desktop（WSL2 を使う設定）
   - **Linux**: Docker Engine と NVIDIA Container Toolkit
 - ディスクの空き 40GB 以上（モデルとイメージで十数〜数十 GB）
+- インターネット接続（初回のモデルのダウンロード。声を AivisSpeech にするときは、声のモデルを AivisHub から取る）
 
 **GPU とドライバがコンテナから使えるか**を先に確かめます。
 
@@ -53,10 +55,14 @@ mkdir -p data
 | 項目 | 書くもの |
 |---|---|
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | チームの LiveKit Cloud の値 |
-| `OPENAI_API_KEY` | チームの OpenAI のキー（植物の声に使う） |
+| `OPENAI_API_KEY` | チームの OpenAI のキー（声を OpenAI にするとき） |
 | `HF_TOKEN` | （任意）2 で作った Hugging Face のトークン |
+| `TTS_PROVIDER` | 植物の声。`aivis`（AivisSpeech）か `openai`（空なら openai） |
+| `AIVIS_SPEAKER` | `aivis` のときの声のスタイル ID（空なら「まお / あまあま」）。例: `893625024` =「らせつん / 標準」 |
+| `AIVIS_MODELS` | （任意）AivisHub から入れる声のモデルの UUID（カンマ区切り。空ならせつん） |
+| `JMA_AMEDAS_STATION` / `JMA_FORECAST_AREA` | （任意）天気を取る場所。例: 東京なら `44132` / `130000`（`.env.example` の説明を参照） |
 
-`LLM_BASE_URL`・`LLM_MODEL`・`STT_BASE_URL`・`STT_MODEL` は書かなくて大丈夫です。Docker では `compose.yaml` の設定（コンテナ内の LLM・STT）が使われます。開発用に OpenAI を向けた値が書いてあっても、Docker では無視されます。
+`LLM_BASE_URL`・`LLM_MODEL`・`STT_BASE_URL`・`STT_MODEL`・`AIVIS_BASE_URL` は書かなくて大丈夫です。Docker では `compose.yaml` の設定（コンテナ内の LLM・STT・AivisSpeech）が使われます。開発用に OpenAI や手元の AivisSpeech を向けた値が書いてあっても、Docker では無視されます。
 
 ## 4. 起動する
 
@@ -64,7 +70,7 @@ mkdir -p data
 docker compose up -d
 ```
 
-**初回はモデルのダウンロードで 10〜30 分ほどかかり、その間このコマンドは終わらずに待ち続けます（固まったように見えます）。** `llm` の準備ができて `stt-init` が終わると、最後に `agent` を起動してから終わります。
+**初回はモデルのダウンロードで 10〜30 分ほどかかり、その間このコマンドは終わらずに待ち続けます（固まったように見えます）。** `llm` の準備ができて `stt-init`・`tts-init` が終わると、最後に `agent` を起動してから終わります。
 
 - **途中で Ctrl+C を押したり、ターミナルを閉じたりしないでください。** `agent` が起動しないままになります。もし止めてしまったら、もう一度 `docker compose up -d` を実行すれば続きから進みます
 - 最後に `dependency failed to start` や `unhealthy` と出て終わった場合も、まず `docker compose up -d` をもう一度実行してください（ダウンロードが 60 分を超えたときなど）。それでも同じなら 7 を見てください
@@ -75,12 +81,14 @@ docker compose up -d
 docker compose ps                # 各サービスの状態
 docker compose logs -f llm       # LLM のダウンロード・起動のログ（Ctrl+C で抜ける。止まりはしない）
 docker compose logs stt-init     # STT のモデルのダウンロード・読み込みの結果
+docker compose logs tts-init     # 声のモデルのダウンロード・読み込みの結果（aivis のとき）
 docker compose logs -f agent     # エージェントのログ
 ```
 
 ## 5. 動いたか確かめる
 
-1. `docker compose ps` で `llm` が `healthy`、`stt-init` が `exited (0)`、`agent` が `running` になっている
+1. `docker compose ps -a` で `llm` が `healthy`、`stt-init` と `tts-init` が `exited (0)`、`tts` と `agent` が `running` になっている
+   - `TTS_PROVIDER=aivis` なら、`docker compose logs tts-init` の最後に `準備完了` と出ている（openai なら「準備はしません」と出るだけでよい）
 2. `docker compose logs agent` に `registered worker` などの、LiveKit Cloud へ接続したログが出ている
 3. 鉢（ESP32）の電源を入れる。ESP32 がルーム `plant-<id>` に入ると、エージェントが参加する
 4. 「ふたまる」と呼びかけて、植物から話しかけてくれば成功
@@ -119,6 +127,8 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 | GPU が 24GB 未満 | この構成では動きません（1 を参照）。チームで 24GB 以上の GPU がある PC を探してください |
 | `could not select device driver "nvidia"` | Docker から GPU が見えていない。1 の `nvidia-smi` の確認からやり直す（Windows は Docker Desktop の WSL2 設定、Linux は NVIDIA Container Toolkit） |
 | `stt-init` が `exited (1)` で終わり、`agent` が起動しない | STT のモデルを用意・読み込みできなかった。`docker compose logs stt-init` と `docker compose logs stt` を確認し、`.env` に `DOCKER_STT_MODEL=Systran/faster-whisper-large-v3` を書いて `docker compose up -d` |
+| `tts-init` が `exited (1)` で終わり、`agent` が起動しない | 声のモデルを用意できなかった。`docker compose logs tts-init` を見る。「入れられませんでした」ならインターネット接続か `AIVIS_MODELS` の UUID、「スタイル ID … が見つかりません」なら `AIVIS_SPEAKER` を直す（ログに入っている ID の一覧が出る）。急ぐときは `.env` を `TTS_PROVIDER=openai` にして `docker compose up -d` すれば、OpenAI の声で動く |
+| 植物の声が出ない（aivis のとき） | `docker compose logs tts` にエラーが無いか見る。CPU が足りず遅いときは、ほかのアプリを閉じる |
 | `agent` は `running` なのに、植物が返事をしない | `docker compose logs agent` に `STT` や `LLM` のエラーが無いか、`docker compose logs stt`・`docker compose logs llm` にエラーが無いかを見る。ほかのメンバーが同じ LiveKit のキーで `uv run python -m agent.main dev` を動かしていると、そちらに植物を取られることがあるので止めてもらう |
 | `agent` がすぐ止まる | `docker compose logs agent` を見る。`環境変数 … が設定されていません` なら `.env` の書き漏れ |
 
@@ -128,3 +138,4 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 
 - **console モード（PC のマイクで試す）は Docker では使えません。** コンテナからは PC のマイク・スピーカーに触れないためです。console は今までどおり `uv run python -m agent.main console` で使います（README）
 - GPU の無い PC・Mac では、この構成は動きません
+- AivisSpeech は CPU で動かします（GPU のメモリは LLM と STT で使い切るため）。声のモデルは `aivis-data` ボリュームに残るので、2 回目の起動からはダウンロードしません
