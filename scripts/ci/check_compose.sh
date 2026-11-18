@@ -79,4 +79,23 @@ assert env["AIVIS_SPEAKER"] == "888753762", env
 print("ok: 声の設定が空なら tts-init は既定の値で動く")
 PY
 
+# 5. ダッシュボードは、この PC（127.0.0.1）にだけ公開され、既定で a1,b1 を並べること。
+#    DASHBOARD_PLANTS で株を変えられること
+python3 - <<'PY'
+import json
+d = json.load(open("/tmp/compose.json"))["services"]["dashboard"]
+ports = d["ports"]
+assert len(ports) == 1 and ports[0]["host_ip"] == "127.0.0.1" and str(ports[0]["published"]) == "8765", ports
+assert "a1,b1" in d["command"], d["command"]
+print("ok: ダッシュボードはこの PC からだけ開ける")
+PY
+echo "DASHBOARD_PLANTS=a1" >> .env
+docker compose config --format json > /tmp/compose.json
+python3 - <<'PY'
+import json
+cmd = json.load(open("/tmp/compose.json"))["services"]["dashboard"]["command"]
+assert cmd[cmd.index("--plants") + 1] == "a1", cmd
+print("ok: DASHBOARD_PLANTS で並べる株を変えられる")
+PY
+
 rm -f .env
