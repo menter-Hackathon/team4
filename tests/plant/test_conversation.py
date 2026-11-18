@@ -637,7 +637,7 @@ async def test_wake_fetches_weather_and_puts_it_in_the_prompt(store, clock):
     await c.start()
     d = await c.on_user_turn("ふたまる")
     assert calls == [1]
-    assert "気温 8℃（さむい）、湿度 30%（乾燥している）" in d.instructions
+    assert "気温 8℃、湿度 30%。体の感じ: さむい（葉がちぢこまる）、乾燥している" in d.instructions
     await c.close()
 
 

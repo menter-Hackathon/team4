@@ -6,6 +6,7 @@ from agent.plant.personality import Traits
 from agent.plant.prompt import (
     LENGTH,
     TRAIT_TEXT,
+    WEATHER_FEELING_INSTRUCTION,
     build_system_prompt,
     days_between,
     plant_status_text,
@@ -168,5 +169,6 @@ def test_prompt_includes_plant_status_only_when_given():
 
 def test_status_includes_weather_when_given():
     text = plant_status_text(NOW, None, NOW, weather="今日の天気は晴れ。")
-    assert text.splitlines()[1] == "- 今日の天気は晴れ。"  # 天気を最初に置く
+    assert text.splitlines()[1].startswith("- 今日の天気は晴れ。")  # 天気を最初に置く
+    assert WEATHER_FEELING_INSTRUCTION in text  # 数字ではなく体の感じ方として話させる
     assert "天気" not in plant_status_text(NOW, None, NOW)

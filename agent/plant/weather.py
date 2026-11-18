@@ -52,28 +52,37 @@ def describe_weather(weather: Weather, *, dry_humidity: float) -> str | None:
         weather: 今の天気
         dry_humidity: 湿度がこの値（%）未満なら「乾燥している」と言う
     例:
-        Weather(8.4, 30, "晴れ") → "今日の天気は晴れ。気温 8℃（さむい）、湿度 30%（乾燥している）。"
-        Weather(8.4, None, None) → "気温 8℃（さむい）。"
+        Weather(8.4, 30, "晴れ")
+            → "今日の天気は晴れ。気温 8℃、湿度 30%。体の感じ: さむい（葉がちぢこまる）、乾燥している（葉がかさかさする）。"
+        Weather(20, 50, None) → "気温 20℃、湿度 50%。体の感じ: 過ごしやすい（のびのびしている）。"
     """
     # 1. 空の様子（取れていなければ省く）
     sky = f"今日の天気は{weather.sky}。" if weather.sky else ""
     # 2. 気温・湿度。小数は四捨五入して整数で言う（「8.4℃」は話し言葉にしにくい）
     measures: list[str] = []
+    # 3. 植物の体の感じ方。当てはまったものだけを書く。
+    #    「乾燥していると葉がかさかさする」のような例をまとめて指示に書くと、LLM が当てはまらない日にも
+    #    「じめじめしてる」と言ってしまったため、その日に当てはまる感じ方だけを渡す（#80）
+    feelings: list[str] = []
     if weather.temperature is not None:
-        temp = f"気温 {round(weather.temperature)}℃"
+        measures.append(f"気温 {round(weather.temperature)}℃")
         if weather.temperature < COLD_TEMPERATURE:
-            temp += "（さむい）"
+            feelings.append("さむい（葉がちぢこまる）")
         elif weather.temperature >= HOT_TEMPERATURE:
-            temp += "（あつい）"
-        measures.append(temp)
+            feelings.append("あつい（葉がぐったりする）")
     if weather.humidity is not None:
-        humidity = f"湿度 {round(weather.humidity)}%"
+        measures.append(f"湿度 {round(weather.humidity)}%")
         if weather.humidity < dry_humidity:
-            humidity += "（乾燥している）"
+            feelings.append("乾燥している（葉がかさかさする）")
         elif weather.humidity >= HUMID_HUMIDITY:
-            humidity += "（じめじめしている）"
-        measures.append(humidity)
-    text = sky + ("、".join(measures) + "。" if measures else "")
+            feelings.append("じめじめしている（根がむずむずする）")
+    # さむくもあつくもなく、乾燥もじめじめもしていない日は「過ごしやすい」と伝える（何も言わないより話しやすい）
+    if measures and not feelings:
+        feelings.append("過ごしやすい（のびのびしている）")
+    text = sky
+    if measures:
+        text += "、".join(measures) + "。"
+        text += "体の感じ: " + "、".join(feelings) + "。"
     return text or None
 
 

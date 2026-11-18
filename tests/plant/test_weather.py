@@ -34,14 +34,22 @@ def test_temperature_words_at_boundaries(temp, word):
 
 def test_describe_weather_example():
     text = describe_weather(Weather(8.4, 30, "晴れ"), dry_humidity=40)
-    assert text == "今日の天気は晴れ。気温 8℃（さむい）、湿度 30%（乾燥している）。"
+    assert text == (
+        "今日の天気は晴れ。気温 8℃、湿度 30%。"
+        "体の感じ: さむい（葉がちぢこまる）、乾燥している（葉がかさかさする）。"
+    )
 
 
 @pytest.mark.parametrize(
     "weather,text",
     [
-        (Weather(20.0, 50, None), "気温 20℃、湿度 50%。"),  # 空の様子が取れなかった
-        (Weather(8.4, None, None), "気温 8℃（さむい）。"),  # 湿度を測っていない観測所
+        # 空の様子が取れなかった・どれにも当てはまらない日は「過ごしやすい」
+        (
+            Weather(20.0, 50, None),
+            "気温 20℃、湿度 50%。体の感じ: 過ごしやすい（のびのびしている）。",
+        ),
+        # 湿度を測っていない観測所
+        (Weather(8.4, None, None), "気温 8℃。体の感じ: さむい（葉がちぢこまる）。"),
         (Weather(None, None, "雨"), "今日の天気は雨。"),  # 予報だけ取れた
         (Weather(None, None, None), None),
     ],

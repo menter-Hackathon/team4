@@ -99,6 +99,14 @@ def rank_memories(memories: list[Memory], now: datetime, limit: int) -> list[Mem
     return ranked[:limit]
 
 
+# 天気の行のあとに付ける指示（#80）。付けないと LLM が「31℃のあつい日だね」と天気予報のように数字を読み上げ、
+# 「乾燥」など一部を言い落とすことがあった（2026-11-18、gpt-4o-mini で確認）。体の感じ方（weather.describe_weather が
+# その日に当てはまるものだけを書く）として話させる
+WEATHER_FEELING_INSTRUCTION = (
+    "天気は数字を言わず、「体の感じ」に書いてあることを全部、植物の体で感じたこととして一言で話す。"
+    "書いていない感じ方は言わない。"
+)
+
 # 「今日は○日目の節目」と触れさせる日（#82）。発表の「1日目 → 5日目 → 30日目」にも合わせている
 MILESTONE_DAYS = (5, 7, 30, 50, 100)
 
@@ -135,7 +143,7 @@ def plant_status_text(
     lines: list[str] = []
     # 1. 天気。植物の体にいちばん直接ひびくので最初に置く（#80）
     if weather:
-        lines.append(f"- {weather}")
+        lines.append(f"- {weather}{WEATHER_FEELING_INSTRUCTION}")
     # 2. 育った日数。作った日を 1 日目とする（0 日目は言いにくいため）
     day = days_between(created_at, now) + 1
     grown = f"- 育ち始めて{day}日目。"
