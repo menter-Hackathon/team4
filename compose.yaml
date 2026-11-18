@@ -11,7 +11,9 @@
 #   llm      … Gemma 4 E4B を動かす（vLLM、GPU を使う）
 #   stt      … kotoba-whisper で声を文字にする（Speaches、GPU を使う）
 #   stt-init … 起動時に一度だけ動き、stt に音声認識のモデルをダウンロード・読み込みさせて終わる
-#   agent    … ふたまるのエージェント。llm の準備と stt-init の完了を待ってから起動する
+#   tts      … AivisSpeech Engine で植物の声を作る（CPU を使う。.env で TTS_PROVIDER=aivis のときに使われる）
+#   tts-init … 起動時に一度だけ動き、tts に声のモデル（らせつんなど）を AivisHub から入れて読み込ませて終わる
+#   agent    … ふたまるのエージェント。llm の準備と stt-init・tts-init の完了を待ってから起動する
 
 # GPU を使うサービスに共通の設定。NVIDIA の GPU を全部見えるようにする
 x-gpu: &gpu
@@ -85,6 +87,48 @@ services:
       - stt
     restart: "no"
 
+  tts:
+    # AivisSpeech Engine 公式イメージ（CPU 版）。版を固定する。
+    # CPU にするのは、GPU のメモリを llm（8 割）と stt で使い切るため。短い文なら CPU でも 1 秒前後で声になる
+    # （2026-11-18、M5 の Mac で 11 字 0.7 秒）
+    image: ghcr.io/aivis-project/aivisspeech-engine:cpu-1.2.0
+    # 声のモデルを置くフォルダ（ボリューム）は、最初は root の持ち物として作られる。
+    # AivisSpeech は user というユーザーで動くので、そのままだとモデルを保存できない。
+    # そこで起動の前に、フォルダの持ち主を user に変えてから、公式と同じコマンドで起動する
+    entrypoint:
+      - bash
+      - -c
+      - >-
+        chown -R user /home/user/.local/share/AivisSpeech-Engine-Dev &&
+        exec gosu user .venv/bin/python ./run.py --host 0.0.0.0
+    volumes:
+      # 入れた声のモデルを残し、2 回目からはダウンロードしない
+      - aivis-data:/home/user/.local/share/AivisSpeech-Engine-Dev
+    restart: unless-stopped
+
+  tts-init:
+    # エージェントのイメージの元と同じ python:3.12-slim で scripts/tts_init.py を動かす（標準ライブラリだけで動く）。
+    # 1. .env の TTS_PROVIDER が aivis でなければ、何もせずに終わる（声が OpenAI なら AivisSpeech は要らない）
+    # 2. AIVIS_MODELS のモデルが入っていなければ、AivisHub から入れる
+    # 3. AIVIS_SPEAKER の声が入っているか確かめ、一度読み上げて読み込ませる
+    # 成功したら終わる。失敗したらエラーで止まり、agent は起動しない
+    image: python:3.12-slim
+    command: ["python", "/tts_init.py"]
+    environment:
+      TTS_PROVIDER: ${TTS_PROVIDER:-openai}
+      AIVIS_URL: http://tts:10101
+      # 入れておく声のモデルの UUID（カンマ区切り）。既定はらせつん。
+      # まお・コハクは AivisSpeech に最初から入っているので書かなくてよい
+      AIVIS_MODELS: ${AIVIS_MODELS:-9f36ec0d-8dac-42dc-aff4-149c5f99faad}
+      # 植物の声のスタイル ID。空なら agent と同じ既定（888753762 =「まお / あまあま」、agent/config.py）
+      AIVIS_SPEAKER: ${AIVIS_SPEAKER:-888753762}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./scripts/tts_init.py:/tts_init.py:ro
+    depends_on:
+      - tts
+    restart: "no"
+
   agent:
     build: .
     # キー類（LiveKit・OpenAI）は .env から読む
@@ -97,6 +141,8 @@ services:
       STT_BASE_URL: http://stt:8000/v1
       STT_MODEL: ${DOCKER_STT_MODEL:-kotoba-tech/kotoba-whisper-v2.0-faster}
       STT_API_KEY: EMPTY
+      # 声を AivisSpeech にするとき（.env の TTS_PROVIDER=aivis）は、コンテナの tts を使う
+      AIVIS_BASE_URL: http://tts:10101
       FUTAMARU_DB_PATH: /app/data/futamaru.db
       # console 専用の設定なので、コンテナでは空にする
       DEV_PLANT_ID: ""
@@ -108,8 +154,11 @@ services:
         condition: service_healthy
       stt-init:
         condition: service_completed_successfully
+      tts-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
 volumes:
   hf-cache:
   speaches-cache:
+  aivis-data:

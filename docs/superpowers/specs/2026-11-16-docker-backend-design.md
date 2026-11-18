@@ -2,6 +2,8 @@
 
 2026-11-16 ／ ケーノ・Claude Code
 
+更新 2026-11-18: 声（TTS）に AivisSpeech を使う場合に備えて、AivisSpeech Engine もコンテナに入れた（下の「2026-11-18 の追加」）
+
 ## 目的と理由
 
 ふたまるの「脳」（エージェント・LLM・STT）を Docker にまとめ、**チームの誰かが NVIDIA の GPU がある PC で `docker compose up` するだけで、脳全体が立ち上がる**ようにする。
@@ -58,3 +60,20 @@ docker compose up
 - kotoba-whisper を Speaches に読み込ませる方法（起動時の事前ダウンロードか、API での読み込みか）。公式ドキュメントで確かめて決める
 - ヘルスチェックの具体的な URL と待ち時間
 - エージェントのイメージで、VAD のモデルをビルド時に取り込むかどうか（起動を速くするため）
+
+## 2026-11-18 の追加: 声（AivisSpeech）もコンテナに入れる
+
+最初は「TTS は OpenAI のまま（外部サービス）」としていたが、次の理由で AivisSpeech Engine もコンテナに入れる。
+
+- デモの PC がショーンさんの PC（NVIDIA の GPU、24GB 以上）に決まり、脳を全部その PC で動かすことになった（#37）
+- 植物の声を、日本語が自然でキャラクターらしい AivisSpeech にする案がある（#56）。会場のネットに左右されない利点もある
+- 2026-11-18 に Mac で測ると、短い文なら CPU でも約 0.7 秒で声になり、OpenAI（0.7〜1.5 秒）と変わらなかった
+
+決めたこと:
+
+- **`tts`**: AivisSpeech Engine 公式イメージの CPU 版（`cpu-1.2.0`）。GPU のメモリは LLM（8 割）と STT で使うので、声は CPU で作る
+- **`tts-init`**: `stt-init` と同じ考え方で、起動時に一度だけ動く。`.env` の `AIVIS_MODELS` の声のモデルが入っていなければ AivisHub から入れ、`AIVIS_SPEAKER` の声で一度読み上げて読み込ませる。`TTS_PROVIDER` が `aivis` でなければ何もしない（OpenAI の声のときに、AivisHub につながらないせいで agent が止まらないように）
+- 声のモデルは名前付きボリューム（`aivis-data`）に残す。公式イメージは `user` で動くが、ボリュームは root の持ち物で作られるため、起動前に持ち主を変える
+- どちらの声を使うかは、今までどおり `.env` の `TTS_PROVIDER` で切り替える。会場で AivisSpeech が動かなければ、`TTS_PROVIDER=openai` に戻すだけで OpenAI の声で動く
+- まだ確かめていないこと: GPU の PC で `tts` を `llm`・`stt` と一緒に動かしたときの速さ（CPU を取り合うか）。ショーンさんの PC で初めて確かめる
+

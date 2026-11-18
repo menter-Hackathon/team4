@@ -19,6 +19,9 @@ LLM_MODEL=gpt-4o-mini
 STT_BASE_URL=https://api.openai.com/v1
 STT_MODEL=gpt-4o-mini-transcribe
 DEV_PLANT_ID=dev
+TTS_PROVIDER=aivis
+AIVIS_BASE_URL=http://127.0.0.1:10101
+AIVIS_SPEAKER=893625024
 ENV
 docker compose config --format json > /tmp/compose.json
 python3 - <<'PY'
@@ -30,10 +33,23 @@ want = {
     "STT_BASE_URL": "http://stt:8000/v1",
     "STT_MODEL": "kotoba-tech/kotoba-whisper-v2.0-faster",
     "DEV_PLANT_ID": "",
+    # 開発用に手元の AivisSpeech（127.0.0.1）を向けていても、コンテナの tts が使われる
+    "AIVIS_BASE_URL": "http://tts:10101",
 }
 got = {k: env.get(k) for k in want}
 assert got == want, f"agent の環境変数が想定と違う: {got}"
 print("ok: .env の開発用の設定より compose の設定が優先される")
+PY
+
+# 1b. tts-init が .env の声の設定（TTS_PROVIDER・AIVIS_SPEAKER）を受け取り、コンテナの tts につなぐこと
+python3 - <<'PY'
+import json
+env = json.load(open("/tmp/compose.json"))["services"]["tts-init"]["environment"]
+assert env["TTS_PROVIDER"] == "aivis", env
+assert env["AIVIS_SPEAKER"] == "893625024", env
+assert env["AIVIS_URL"] == "http://tts:10101", env
+assert env["AIVIS_MODELS"], env
+print("ok: tts-init が .env の声の設定を受け取る")
 PY
 
 # 2. DOCKER_STT_MODEL で STT のモデルを切り替えられること（stt-init と agent の両方）
@@ -51,5 +67,16 @@ PY
 cp .env.example .env
 docker compose config -q
 echo "ok: HF_TOKEN が空でも起動できる"
+
+# 4. 声の設定が空（.env.example のまま）なら、tts-init は OpenAI の声として何もしない設定になり、
+#    声のスタイル ID は agent と同じ既定（まお / あまあま）になること
+docker compose config --format json > /tmp/compose.json
+python3 - <<'PY'
+import json
+env = json.load(open("/tmp/compose.json"))["services"]["tts-init"]["environment"]
+assert env["TTS_PROVIDER"] == "openai", env
+assert env["AIVIS_SPEAKER"] == "888753762", env
+print("ok: 声の設定が空なら tts-init は既定の値で動く")
+PY
 
 rm -f .env
