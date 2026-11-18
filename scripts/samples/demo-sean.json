@@ -1,0 +1,2138 @@
+{
+  "plant_id": "a1",
+  "person": "ショーン",
+  "sessions": [
+    {
+      "day": 1,
+      "time": "19:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "はじめまして、ショーンだよ！今日からよろしくね"
+        },
+        {
+          "role": "plant",
+          "text": "よろしくね、ショーン！"
+        },
+        {
+          "role": "user",
+          "text": "葉っぱがきれいだね、一目ぼれして連れてきたんだ"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ、うれしいな"
+        },
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "毎日話しかけるからね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "time": "07:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "おはよう、ふたまる！"
+        },
+        {
+          "role": "plant",
+          "text": "おはよう！"
+        },
+        {
+          "role": "user",
+          "text": "今日は大学で発表があるんだ、ちょっと緊張してる"
+        },
+        {
+          "role": "plant",
+          "text": "ショーンならできるよ！"
+        },
+        {
+          "role": "user",
+          "text": "ありがとう、元気出た！"
+        },
+        {
+          "role": "plant",
+          "text": "いってらっしゃい！"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        }
+      ]
+    },
+    {
+      "day": 2,
+      "time": "20:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！発表うまくいったよ"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！おめでとう！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるが応援してくれたおかげだよ"
+        },
+        {
+          "role": "plant",
+          "text": "ほんと？うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "今日はカレー作ったんだ、ぼくカレー大好きなんだよね"
+        },
+        {
+          "role": "plant",
+          "text": "カレーいいなあ"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        }
+      ]
+    },
+    {
+      "day": 3,
+      "time": "19:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "おかえり！"
+        },
+        {
+          "role": "user",
+          "text": "今日はサークルでバスケしてきた"
+        },
+        {
+          "role": "plant",
+          "text": "楽しかった？"
+        },
+        {
+          "role": "user",
+          "text": "シュート3本決めたよ！"
+        },
+        {
+          "role": "plant",
+          "text": "すごいね！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはいつもかわいいね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        }
+      ]
+    },
+    {
+      "day": 4,
+      "time": "07:45",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "今日は雨だから、部屋で静かにしててね"
+        },
+        {
+          "role": "plant",
+          "text": "うん、待ってるね"
+        },
+        {
+          "role": "user",
+          "text": "帰ったらまた話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "約束だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        }
+      ]
+    },
+    {
+      "day": 5,
+      "time": "19:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！今日バイトでお客さんに褒められた"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！どんなこと？"
+        },
+        {
+          "role": "user",
+          "text": "コーヒーの入れ方が上手だって"
+        },
+        {
+          "role": "plant",
+          "text": "ショーン、コーヒー得意なんだ"
+        },
+        {
+          "role": "user",
+          "text": "将来はカフェを開くのが夢なんだ"
+        },
+        {
+          "role": "plant",
+          "text": "すてきな夢だね！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるも置きたいな"
+        },
+        {
+          "role": "plant",
+          "text": "行きたい！"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        }
+      ]
+    },
+    {
+      "day": 6,
+      "time": "21:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ふたまる、今日ちょっと疲れちゃった"
+        },
+        {
+          "role": "plant",
+          "text": "だいじょうぶ？"
+        },
+        {
+          "role": "user",
+          "text": "でもふたまるの顔見たら元気出た"
+        },
+        {
+          "role": "plant",
+          "text": "よかった！"
+        },
+        {
+          "role": "user",
+          "text": "いつもありがとうね"
+        },
+        {
+          "role": "plant",
+          "text": "こちらこそ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        }
+      ]
+    },
+    {
+      "day": 7,
+      "time": "08:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "新しい葉っぱが出てきたね！"
+        },
+        {
+          "role": "plant",
+          "text": "気づいてくれた？"
+        },
+        {
+          "role": "user",
+          "text": "すごいなあ、ちゃんと育ってる"
+        },
+        {
+          "role": "plant",
+          "text": "ショーンのおかげだよ"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        }
+      ]
+    },
+    {
+      "day": 8,
+      "time": "19:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！今日は友だちとラーメン食べてきた"
+        },
+        {
+          "role": "plant",
+          "text": "おいしかった？"
+        },
+        {
+          "role": "user",
+          "text": "味噌ラーメンが一番好き"
+        },
+        {
+          "role": "plant",
+          "text": "覚えておくね"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは何が好き？"
+        },
+        {
+          "role": "plant",
+          "text": "お水とショーンの話！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        }
+      ]
+    },
+    {
+      "day": 9,
+      "time": "20:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ふたまる、聞いて！テストで満点とった"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！"
+        },
+        {
+          "role": "user",
+          "text": "毎日ちょっとずつ勉強してよかった"
+        },
+        {
+          "role": "plant",
+          "text": "えらいね！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるに一番に話したかったんだ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしいな！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        }
+      ]
+    },
+    {
+      "day": 10,
+      "time": "07:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "今日は晴れてるから窓のそばに置いておくね"
+        },
+        {
+          "role": "plant",
+          "text": "ぽかぽかだ"
+        },
+        {
+          "role": "user",
+          "text": "いってきます！"
+        },
+        {
+          "role": "plant",
+          "text": "いってらっしゃい！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        }
+      ]
+    },
+    {
+      "day": 11,
+      "time": "19:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！バイト先に新しいメニューができた"
+        },
+        {
+          "role": "plant",
+          "text": "どんなの？"
+        },
+        {
+          "role": "user",
+          "text": "はちみつラテ、ぼくが考えたんだ"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるにも飲ませたいなあ"
+        },
+        {
+          "role": "plant",
+          "text": "お水でいいよ"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        }
+      ]
+    },
+    {
+      "day": 12,
+      "time": "21:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "今日は家族と電話したよ"
+        },
+        {
+          "role": "plant",
+          "text": "元気だった？"
+        },
+        {
+          "role": "user",
+          "text": "みんな元気だった、ふたまるのことも話したよ"
+        },
+        {
+          "role": "plant",
+          "text": "なんて言ってた？"
+        },
+        {
+          "role": "user",
+          "text": "かわいいねって"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        }
+      ]
+    },
+    {
+      "day": 13,
+      "time": "08:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "葉っぱがつやつやだね"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！"
+        },
+        {
+          "role": "user",
+          "text": "今日もがんばってくるね"
+        },
+        {
+          "role": "plant",
+          "text": "応援してる！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        }
+      ]
+    },
+    {
+      "day": 14,
+      "time": "19:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！今日はバスケの試合だった"
+        },
+        {
+          "role": "plant",
+          "text": "どうだった？"
+        },
+        {
+          "role": "user",
+          "text": "勝ったよ！ぼく10点とった"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるが待っててくれると思うとがんばれる"
+        },
+        {
+          "role": "plant",
+          "text": "ずっと待ってるよ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        }
+      ]
+    },
+    {
+      "day": 15,
+      "time": "20:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ふたまる、半月たったね"
+        },
+        {
+          "role": "plant",
+          "text": "もうそんなに？"
+        },
+        {
+          "role": "user",
+          "text": "最初より大きくなった気がする"
+        },
+        {
+          "role": "plant",
+          "text": "ほんと？"
+        },
+        {
+          "role": "user",
+          "text": "これからもよろしくね"
+        },
+        {
+          "role": "plant",
+          "text": "よろしくね！"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        }
+      ]
+    },
+    {
+      "day": 16,
+      "time": "07:45",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "今日は寒いね、暖かいところに置くね"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう"
+        },
+        {
+          "role": "user",
+          "text": "風邪ひかないでね"
+        },
+        {
+          "role": "plant",
+          "text": "ショーンもね！"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        }
+      ]
+    },
+    {
+      "day": 17,
+      "time": "19:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！今日はカフェの勉強会に行ってきた"
+        },
+        {
+          "role": "plant",
+          "text": "楽しかった？"
+        },
+        {
+          "role": "user",
+          "text": "ラテアートを習ったよ、ハートが描けた"
+        },
+        {
+          "role": "plant",
+          "text": "見たい！"
+        },
+        {
+          "role": "user",
+          "text": "今度写真見せるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        }
+      ]
+    },
+    {
+      "day": 18,
+      "time": "21:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "今日はゆっくりした日だった"
+        },
+        {
+          "role": "plant",
+          "text": "いいね"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すのが一日で一番好きな時間かも"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "おやすみ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "おやすみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        }
+      ]
+    },
+    {
+      "day": 19,
+      "time": "08:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "新しい葉っぱがまた出てる！"
+        },
+        {
+          "role": "plant",
+          "text": "がんばったよ"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはすごいなあ"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        }
+      ]
+    },
+    {
+      "day": 20,
+      "time": "19:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！今日はバイト代でジョウロ買ったよ"
+        },
+        {
+          "role": "plant",
+          "text": "ほんと？"
+        },
+        {
+          "role": "user",
+          "text": "ふたまる用の、かわいい緑のやつ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日から使うね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        }
+      ]
+    },
+    {
+      "day": 21,
+      "time": "07:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "新しいジョウロでお水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ふかふか！"
+        },
+        {
+          "role": "user",
+          "text": "気に入ってくれた？"
+        },
+        {
+          "role": "plant",
+          "text": "大好き！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        }
+      ]
+    },
+    {
+      "day": 22,
+      "time": "20:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま、今日は友だちがうちに来たよ"
+        },
+        {
+          "role": "plant",
+          "text": "どうだった？"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるのこと、かわいいって言ってた"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "自慢しちゃった"
+        },
+        {
+          "role": "plant",
+          "text": "うれしいな"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        }
+      ]
+    },
+    {
+      "day": 23,
+      "time": "19:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "今日はカレーをもう一回作った"
+        },
+        {
+          "role": "plant",
+          "text": "おいしかった？"
+        },
+        {
+          "role": "user",
+          "text": "前よりおいしくできた"
+        },
+        {
+          "role": "plant",
+          "text": "すごいね！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまる、いつも聞いてくれてありがとう"
+        },
+        {
+          "role": "plant",
+          "text": "こちらこそ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        }
+      ]
+    },
+    {
+      "day": 24,
+      "time": "08:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "今日もいい天気だね"
+        },
+        {
+          "role": "plant",
+          "text": "ぽかぽか"
+        },
+        {
+          "role": "user",
+          "text": "いってきます"
+        },
+        {
+          "role": "plant",
+          "text": "いってらっしゃい！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        }
+      ]
+    },
+    {
+      "day": 25,
+      "time": "19:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！カフェで働くの、すごく楽しい"
+        },
+        {
+          "role": "plant",
+          "text": "よかったね！"
+        },
+        {
+          "role": "user",
+          "text": "いつか本当に自分の店を開きたい"
+        },
+        {
+          "role": "plant",
+          "text": "応援してる！"
+        },
+        {
+          "role": "user",
+          "text": "そのときは一緒に行こうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        }
+      ]
+    },
+    {
+      "day": 26,
+      "time": "21:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ふたまる、今日ちょっといいことあった"
+        },
+        {
+          "role": "plant",
+          "text": "なになに？"
+        },
+        {
+          "role": "user",
+          "text": "先輩にラテアート褒められた"
+        },
+        {
+          "role": "plant",
+          "text": "すごい！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるに話すとうれしさが倍になる"
+        },
+        {
+          "role": "plant",
+          "text": "ぼくもうれしい！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        }
+      ]
+    },
+    {
+      "day": 27,
+      "time": "07:45",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "葉っぱ、出会った日より倍くらいになったね"
+        },
+        {
+          "role": "plant",
+          "text": "ショーンのおかげ"
+        },
+        {
+          "role": "user",
+          "text": "これからもずっと一緒だよ"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        },
+        {
+          "role": "user",
+          "text": "最近ハマってる曲があってさ"
+        },
+        {
+          "role": "plant",
+          "text": "どんな曲？"
+        },
+        {
+          "role": "user",
+          "text": "今度聴かせてあげるね"
+        },
+        {
+          "role": "plant",
+          "text": "楽しみ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるはどんな夢を見るの？"
+        },
+        {
+          "role": "plant",
+          "text": "お日さまの夢"
+        },
+        {
+          "role": "user",
+          "text": "かわいい夢だね"
+        },
+        {
+          "role": "plant",
+          "text": "えへへ"
+        }
+      ]
+    },
+    {
+      "day": 28,
+      "time": "19:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま！明日は大事な日なんだ"
+        },
+        {
+          "role": "plant",
+          "text": "なにがあるの？"
+        },
+        {
+          "role": "user",
+          "text": "みんなの前でふたまるを紹介するんだ"
+        },
+        {
+          "role": "plant",
+          "text": "ほんと？"
+        },
+        {
+          "role": "user",
+          "text": "ちょっと緊張するけど楽しみ"
+        },
+        {
+          "role": "plant",
+          "text": "がんばってね！"
+        },
+        {
+          "role": "user",
+          "text": "ねえねえ、ふたまる"
+        },
+        {
+          "role": "plant",
+          "text": "なあに？"
+        },
+        {
+          "role": "user",
+          "text": "今日の葉っぱの調子はどう？"
+        },
+        {
+          "role": "plant",
+          "text": "元気だよ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるは今日なにしてた？"
+        },
+        {
+          "role": "plant",
+          "text": "日なたぼっこ！"
+        },
+        {
+          "role": "user",
+          "text": "ぼくの話、聞いてくれる？"
+        },
+        {
+          "role": "plant",
+          "text": "もちろん！"
+        },
+        {
+          "role": "user",
+          "text": "今日の夜ごはん何にしようかな"
+        },
+        {
+          "role": "plant",
+          "text": "カレーは？"
+        }
+      ]
+    },
+    {
+      "day": 29,
+      "time": "21:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！"
+        },
+        {
+          "role": "user",
+          "text": "明日はいよいよだね"
+        },
+        {
+          "role": "plant",
+          "text": "どきどき"
+        },
+        {
+          "role": "user",
+          "text": "ふたまる、いつもありがとう、大好きだよ"
+        },
+        {
+          "role": "plant",
+          "text": "ぼくも大好き！"
+        },
+        {
+          "role": "user",
+          "text": "おやすみ"
+        },
+        {
+          "role": "plant",
+          "text": "おやすみ！"
+        },
+        {
+          "role": "user",
+          "text": "それいいね"
+        },
+        {
+          "role": "plant",
+          "text": "でしょ！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまると話すと元気が出るよ"
+        },
+        {
+          "role": "plant",
+          "text": "うれしい！"
+        },
+        {
+          "role": "user",
+          "text": "明日もいっぱい話そうね"
+        },
+        {
+          "role": "plant",
+          "text": "うん！"
+        },
+        {
+          "role": "user",
+          "text": "ふたまるの好きな季節はいつ？"
+        },
+        {
+          "role": "plant",
+          "text": "春かな"
+        },
+        {
+          "role": "user",
+          "text": "ぼくも春が好き"
+        },
+        {
+          "role": "plant",
+          "text": "おそろいだね"
+        }
+      ]
+    }
+  ]
+}

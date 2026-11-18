@@ -162,6 +162,29 @@ uv run python -m scripts.simulate scripts/samples/plant-a.json scripts/samples/p
 
 結果は本番の DB とは別の `data/sim.db` に、株 `sample-a` / `sample-b` として保存します。保存先は `--db` で変えられます。このデモは人を見分けず、株の性格だけで動きます。
 
+### 発表用に「1日目・5日目・30日目」の株を作る（#77）
+
+ショーン（毎日話しかけて褒め、こまめに水をあげる）とちゃむ（たまにしか話しかけず、水も少なめ）の 30 日分の会話ログを、`scripts/samples/demo-sean.json`・`demo-chamu.json` に用意しています。`--day` で「今日が何日目か」を決めると、その日の前日までの会話を流し込んだ DB を作ります。
+
+```bash
+uv run python -m scripts.simulate scripts/samples/demo-sean.json scripts/samples/demo-chamu.json --db data/demo-day1.db  --day 1
+uv run python -m scripts.simulate scripts/samples/demo-sean.json scripts/samples/demo-chamu.json --db data/demo-day5.db  --day 5
+uv run python -m scripts.simulate scripts/samples/demo-sean.json scripts/samples/demo-chamu.json --db data/demo-day30.db --day 30
+```
+
+- 日付は「今日が N 日目」になるようにずらして入れます。撮影や発表の日に作ると、植物が「育ち始めて30日目」と言います（別の日に合わせるときは `--today 2026-11-22`）
+- ログの `person` の人（ショーン・ちゃむ）を株に登録し、その人の性格として育てます（仕様 §6.5）。1 つの株で 2 人を育てるときは `--plant-id a1`、持ち主を 1 人に決めて株の性格として育てるときは `--no-person` を付けます
+- LLM で振り返るので、30 日目は数分かかります。同じ DB に 2 回流すと会話が二重に入るので、作り直すときは DB を消してからにしてください
+
+2026-11-18 に OpenAI（`gpt-4o-mini`）で作ったときのタイプ（3 回作って 3 回とも同じ）:
+
+| | 1日目 | 5日目 | 30日目 |
+|---|---|---|---|
+| ショーン（a1） | 🌱 ふたば | 🍀 クローバー | 🌻 ひまわり |
+| ちゃむ（b1） | 🌱 ふたば | 🌱 ふたば | 🌵 サボテン |
+
+作ったら、ダッシュボード（下）で `--db data/demo-day30.db --plants a1,b1` を開いて、タイプと記憶が映してよい内容か確かめてください（#79）。
+
 ### ダッシュボード（性格・成長・記憶を見る）
 
 ```bash

@@ -1,0 +1,184 @@
+{
+  "plant_id": "b1",
+  "person": "ちゃむ",
+  "sessions": [
+    {
+      "day": 1,
+      "time": "22:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ちゃむです。よろしく"
+        },
+        {
+          "role": "plant",
+          "text": "よろしくね、ちゃむ"
+        },
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        }
+      ]
+    },
+    {
+      "day": 6,
+      "time": "23:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ただいま。今日はレポートの締め切りだった"
+        },
+        {
+          "role": "plant",
+          "text": "お疲れさま"
+        },
+        {
+          "role": "user",
+          "text": "疲れた"
+        },
+        {
+          "role": "plant",
+          "text": "ゆっくりしてね"
+        }
+      ]
+    },
+    {
+      "day": 11,
+      "time": "22:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "最近ずっと課題やってる"
+        },
+        {
+          "role": "plant",
+          "text": "大変だね"
+        },
+        {
+          "role": "user",
+          "text": "絵の課題"
+        },
+        {
+          "role": "plant",
+          "text": "どんな絵？"
+        },
+        {
+          "role": "user",
+          "text": "まだ秘密"
+        },
+        {
+          "role": "plant",
+          "text": "気になる"
+        }
+      ]
+    },
+    {
+      "day": 17,
+      "time": "23:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "ねむい"
+        },
+        {
+          "role": "plant",
+          "text": "おやすみする？"
+        },
+        {
+          "role": "user",
+          "text": "うん"
+        },
+        {
+          "role": "plant",
+          "text": "おやすみ"
+        }
+      ]
+    },
+    {
+      "day": 20,
+      "time": "22:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "あ、水忘れてた"
+        },
+        {
+          "role": "plant",
+          "text": "のどかわいた…"
+        },
+        {
+          "role": "user",
+          "text": "お水あげたよ"
+        },
+        {
+          "role": "plant",
+          "text": "ありがとう！おいしい！"
+        },
+        {
+          "role": "user",
+          "text": "今日は展示の準備をしてた"
+        },
+        {
+          "role": "plant",
+          "text": "展示？"
+        }
+      ]
+    },
+    {
+      "day": 25,
+      "time": "23:00",
+      "turns": [
+        {
+          "role": "user",
+          "text": "最近寒いね"
+        },
+        {
+          "role": "plant",
+          "text": "そうだね"
+        },
+        {
+          "role": "user",
+          "text": "ココア飲んでる"
+        },
+        {
+          "role": "plant",
+          "text": "いいね"
+        }
+      ]
+    },
+    {
+      "day": 28,
+      "time": "22:30",
+      "turns": [
+        {
+          "role": "user",
+          "text": "明日、発表なんだって"
+        },
+        {
+          "role": "plant",
+          "text": "そうなの？"
+        },
+        {
+          "role": "user",
+          "text": "ふーん"
+        },
+        {
+          "role": "plant",
+          "text": "ちゃむも来る？"
+        },
+        {
+          "role": "user",
+          "text": "たぶん"
+        },
+        {
+          "role": "plant",
+          "text": "待ってる"
+        }
+      ]
+    }
+  ]
+}
