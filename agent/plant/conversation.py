@@ -73,6 +73,7 @@ class PlantConversation:
         dry_humidity: 湿度がこの値（%）未満なら「乾燥している」と言う
         water_remind_days: 水をもらってからこの日数たつと「のどが渇いた」と言う（§6.7、#81）
         species: 植物の種類（例: "ポトス"）。育て方のメモと一緒にプロンプトに入る（§6.7、#83）
+        allow_new_people: False なら、登録済みの人だけから相手を選ぶ（デモ用、§6.5、#72）
     """
 
     def __init__(
@@ -88,6 +89,7 @@ class PlantConversation:
         dry_humidity: float = 40.0,
         water_remind_days: int = 3,
         species: str | None = None,
+        allow_new_people: bool = True,
     ) -> None:
         self._store = store
         self._plant_id = plant_id
@@ -99,6 +101,9 @@ class PlantConversation:
         self._dry_humidity = dry_humidity  # 「乾燥している」と言う湿度の境目（%）
         self._water_remind_days = water_remind_days  # 何日水が無いと「のどが渇いた」と言うか（#81）
         self._species = species  # 植物の種類（例: "ポトス"）。None なら種類を伝えない（#83）
+        # False なら、名乗った名前で新しい人を登録しない（デモ用、#72）。
+        # 聞き間違えた名前（「チロ」）で別人が作られ、その会話の間ずっとその人のままになるのを防ぐ
+        self._allow_new_people = allow_new_people
         self._controller = WakeController(
             sleep_after=sleep_after
         )  # 起きている/眠っている状態と無言タイマー
@@ -332,7 +337,13 @@ class PlantConversation:
         session_id = self._session_id  # 待っている間に眠ったかどうかを、後で確かめるため
         try:
             result = await asyncio.wait_for(
-                identify(self._complete_json, text, known, previous_plant=previous_plant),
+                identify(
+                    self._complete_json,
+                    text,
+                    known,
+                    previous_plant=previous_plant,
+                    allow_new=self._allow_new_people,
+                ),
                 IDENTIFY_TIMEOUT,
             )
             timed_out = False

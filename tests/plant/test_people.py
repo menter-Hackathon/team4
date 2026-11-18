@@ -91,3 +91,23 @@ def test_clean_name():
     assert clean_name("山田\n太郎") == "山田 太郎"
     assert clean_name("い" * 21) == "い" * 20
     assert clean_name(" \n ") is None
+
+
+# --- 登録済みの人だけにする（デモ用、#72） ---
+async def test_closed_roster_never_returns_new():
+    # 新しく登録しない設定では、LLM が new と答えても none にする（聞き間違いの「チロ」を作らない）
+    c = FakeCompleter([js(kind="new", name="チロ")])
+    assert await identify(c, "チロだよ", KNOWN, allow_new=False) == Identification("none")
+
+
+async def test_closed_roster_instruction_maps_similar_names_to_known():
+    c = FakeCompleter([js(kind="known", person_id=1)])
+    assert await identify(c, "ションだよ", KNOWN, allow_new=False) == Identification("known", 1)
+    system = c.calls[0][0][0]["content"]
+    assert "読みが似ている" in system and "kind=new は使わない" in system
+
+
+async def test_open_roster_instruction_is_unchanged():
+    c = FakeCompleter([js(kind="none")])
+    await identify(c, "こんにちは", KNOWN)
+    assert "kind=new は使わない" not in c.calls[0][0][0]["content"]

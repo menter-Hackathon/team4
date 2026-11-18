@@ -721,4 +721,50 @@ async def test_wake_prompt_tells_species(store, clock):
     await c.start()
     d = await c.on_user_turn("ふたまる")
     assert "あなたはポトス" in d.instructions
+
+
+# --- 登録済みの人だけにする（デモ用、#72） ---
+def make_closed(store, clock, completer):
+    return PlantConversation(
+        store=store,
+        plant_id="a",
+        complete_json=completer,
+        clock=clock,
+        wake_words=WAKE_WORDS,
+        sleep_after=60.0,
+        allow_new_people=False,
+    )
+
+
+async def test_closed_roster_does_not_register_misheard_name(store, clock):
+    store.get_or_create_plant("a", T0)
+    sean = store.add_person("a", "ショーン", T0)
+    completer = FakeCompleter(
+        [identify_json("new", name="チロ"), identify_json("known", sean.id), reflection_json()]
+    )
+    c = make_closed(store, clock, completer)
+    await c.start()
+    await c.on_user_turn("ふたまる")
+    d1 = await c.on_user_turn("チロだよ")  # 聞き間違い → 登録しない・相手も決めない
+    assert d1.instructions is None
+    assert [p.name for p in store.get_people("a")] == ["ショーン"]
+    d2 = await c.on_user_turn("ショーンだよ")  # 名乗り直し → 登録済みのショーンに決まる
+    assert "今話している相手は ショーン。" in d2.instructions
+    assert store.get_session(current_sid(store)).person_id == sean.id
+    await c.close()
+
+
+async def test_closed_roster_becomes_guest_after_three_unknown_names(store, clock):
+    store.get_or_create_plant("a", T0)
+    store.add_person("a", "ちゃむ", T0)
+    completer = FakeCompleter(
+        [identify_json("new", name=f"x{i}") for i in range(3)] + [reflection_json()]
+    )
+    c = make_closed(store, clock, completer)
+    await c.start()
+    await c.on_user_turn("ふたまる")
+    for text in ("サムだよ", "サブだよ", "ザムだよ"):
+        d = await c.on_user_turn(text)
+    assert ASK_NAME_INSTRUCTION not in d.instructions  # 3 回目でお客さんになる（今までと同じ）
+    assert [p.name for p in store.get_people("a")] == ["ちゃむ"]
     await c.close()

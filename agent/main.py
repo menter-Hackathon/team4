@@ -327,6 +327,7 @@ async def entrypoint(ctx: JobContext) -> None:
         dry_humidity=cfg.weather_dry_humidity,
         water_remind_days=cfg.water_remind_days,
         species=cfg.plant_species,
+        allow_new_people=cfg.allow_new_people,
     )
 
     # --- 3. 声 → 文字 → 返事 → 声 の流れ（AgentSession）を作る ---

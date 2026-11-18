@@ -161,3 +161,16 @@ def test_water_remind_days():
 def test_plant_species():
     assert load_config(BASE).plant_species == "ポトス"
     assert load_config(BASE | {"PLANT_SPECIES": "モンステラ"}).plant_species == "モンステラ"
+
+
+@pytest.mark.parametrize(
+    "value,expected", [(None, True), ("true", True), ("false", False), ("0", False), ("no", False)]
+)
+def test_allow_new_people(value, expected):
+    env = BASE if value is None else BASE | {"ALLOW_NEW_PEOPLE": value}
+    assert load_config(env).allow_new_people is expected
+
+
+def test_allow_new_people_rejects_typos():
+    with pytest.raises(ConfigError):
+        load_config(BASE | {"ALLOW_NEW_PEOPLE": "flase"})
