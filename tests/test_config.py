@@ -120,25 +120,34 @@ def test_aivis_base_url_from_env_needs_no_other_variables():
 # --- 天気を取る場所（仕様 §6.7、#80） ---
 def test_weather_is_off_by_default():
     c = load_config(BASE)
-    assert (c.plant_latitude, c.plant_longitude, c.weather_dry_humidity) == (None, None, 40.0)
+    assert (c.jma_amedas_station, c.jma_forecast_area, c.weather_dry_humidity) == (None, None, 40.0)
 
 
-def test_weather_location_and_dry_humidity():
+def test_weather_station_area_and_dry_humidity():
     c = load_config(
         BASE
-        | {"PLANT_LATITUDE": "35.68", "PLANT_LONGITUDE": "139.76", "WEATHER_DRY_HUMIDITY": "35"}
+        | {
+            "JMA_AMEDAS_STATION": "44132",
+            "JMA_FORECAST_AREA": "130000",
+            "WEATHER_DRY_HUMIDITY": "35",
+        }
     )
-    assert (c.plant_latitude, c.plant_longitude, c.weather_dry_humidity) == (35.68, 139.76, 35.0)
+    assert (c.jma_amedas_station, c.jma_forecast_area, c.weather_dry_humidity) == (
+        "44132",
+        "130000",
+        35.0,
+    )
 
 
 @pytest.mark.parametrize(
     "extra",
     [
-        {"PLANT_LATITUDE": "35.68"},
-        {"PLANT_LONGITUDE": "139.76"},
-        {"PLANT_LATITUDE": "北", "PLANT_LONGITUDE": "139.76"},
+        {"JMA_AMEDAS_STATION": "東京"},
+        {"JMA_AMEDAS_STATION": "4413"},
+        {"JMA_FORECAST_AREA": "13000"},
+        {"JMA_FORECAST_AREA": "tokyo!"},
     ],
 )
-def test_weather_location_needs_both_numbers(extra):
+def test_weather_codes_must_be_digits_of_the_right_length(extra):
     with pytest.raises(ConfigError):
         load_config(BASE | extra)

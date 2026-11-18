@@ -622,7 +622,7 @@ async def test_wake_fetches_weather_and_puts_it_in_the_prompt(store, clock):
 
     async def fetch():
         calls.append(1)
-        return Weather(8.0, 30, 0)
+        return Weather(8.0, 30, "晴れ")
 
     c = PlantConversation(
         store=store,

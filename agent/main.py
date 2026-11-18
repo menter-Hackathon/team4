@@ -51,8 +51,8 @@ from agent.plant.store import PlantStore
 from agent.plant.timeutil import jst_now
 from agent.plant.weather import WeatherCache
 from agent.plugins.aivis_tts import create_aivis_tts
+from agent.plugins.jma_weather import fetch_jma_weather
 from agent.plugins.llm import create_json_completer, create_llm
-from agent.plugins.open_meteo import fetch_current_weather
 from agent.plugins.openai_tts import create_tts
 from agent.plugins.whisper_stt import create_stt
 
@@ -257,14 +257,14 @@ server = AgentServer(setup_fnc=prewarm)
 def create_weather_cache(cfg: Config) -> WeatherCache | None:
     """天気を取って覚えておく WeatherCache を作る（仕様 §6.7、#80）。
 
-    .env に緯度・経度（PLANT_LATITUDE / PLANT_LONGITUDE）が無ければ None（天気を使わない）。
+    .env に観測所（JMA_AMEDAS_STATION）も地域（JMA_FORECAST_AREA）も無ければ None（天気を使わない）。
     """
-    if cfg.plant_latitude is None or cfg.plant_longitude is None:
+    station, area = cfg.jma_amedas_station, cfg.jma_forecast_area
+    if station is None and area is None:
         return None
-    lat, lon = cfg.plant_latitude, cfg.plant_longitude
 
     async def fetch():
-        return await fetch_current_weather(lat, lon)
+        return await fetch_jma_weather(station, area)
 
     return WeatherCache(fetch, jst_now)
 

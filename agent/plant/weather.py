@@ -4,7 +4,7 @@
 植物の代わりに言葉にする（AI を「本物の植物の通訳」にする、仕様 §1）。
 
 このファイルは LiveKit にも HTTP にも依存しない。天気を取ってくる関数（本番は
-agent/plugins/open_meteo.py）は引数で受け取り、テストでは偽物に差し替える。
+agent/plugins/jma_weather.py の気象庁のデータ）は引数で受け取り、テストでは偽物に差し替える。
 """
 
 from __future__ import annotations
@@ -30,38 +30,20 @@ STALE_LIMIT = 3 * 3600
 
 @dataclass(frozen=True)
 class Weather:
-    """今の天気。temperature: 気温（℃）、humidity: 湿度（%）、code: WMO の天気コード（0 = 晴れ など）。"""
+    """今の天気。取れなかった項目は None。
 
-    temperature: float
-    humidity: float
-    code: int
+    temperature: 気温（℃、アメダスの実測値）
+    humidity: 湿度（%、アメダスの実測値。湿度を測っていない観測所では None）
+    sky: 空の様子（「晴れ」「くもり」「雨」「雪」、気象庁の今日の予報から）
+    """
 
-
-# WMO の天気コード → 天気の言葉。(コードの最小, 最大, 言葉) の順に並べ、上から当てはめる。
-# コードの意味: https://open-meteo.com/en/docs の「WMO Weather interpretation codes」
-_WEATHER_LABELS = (
-    (0, 1, "晴れ"),  # 0: 快晴、1: ほぼ晴れ
-    (2, 2, "晴れときどきくもり"),
-    (3, 3, "くもり"),
-    (45, 48, "霧"),
-    (51, 67, "雨"),  # 霧雨・雨・凍る雨
-    (71, 77, "雪"),
-    (80, 82, "にわか雨"),
-    (85, 86, "にわか雪"),
-    (95, 99, "雷雨"),
-)
+    temperature: float | None
+    humidity: float | None
+    sky: str | None
 
 
-def weather_label(code: int) -> str | None:
-    """天気コードを言葉にする。知らないコードなら None。例: 0 → "晴れ"、61 → "雨"。"""
-    for low, high, label in _WEATHER_LABELS:
-        if low <= code <= high:
-            return label
-    return None
-
-
-def describe_weather(weather: Weather, *, dry_humidity: float) -> str:
-    """天気を、プロンプトに入れる 1 文にする（仕様 §6.7）。
+def describe_weather(weather: Weather, *, dry_humidity: float) -> str | None:
+    """天気を、プロンプトに入れる 1 文にする（仕様 §6.7）。何も取れていなければ None。
 
     数字だけを LLM に渡すより、「さむい」「乾燥している」と言葉にして渡したほうが、
     植物の言い方がぶれにくい（小さなモデルは数字から暑い・寒いを判断しにくいため）。
@@ -70,24 +52,29 @@ def describe_weather(weather: Weather, *, dry_humidity: float) -> str:
         weather: 今の天気
         dry_humidity: 湿度がこの値（%）未満なら「乾燥している」と言う
     例:
-        Weather(8.4, 30, 0) → "今日の天気は晴れ。気温 8℃（さむい）、湿度 30%（乾燥している）。"
+        Weather(8.4, 30, "晴れ") → "今日の天気は晴れ。気温 8℃（さむい）、湿度 30%（乾燥している）。"
+        Weather(8.4, None, None) → "気温 8℃（さむい）。"
     """
-    # 1. 空の様子（知らないコードなら省く）
-    label = weather_label(weather.code)
-    sky = f"今日の天気は{label}。" if label else ""
-    # 2. 気温。小数は四捨五入して整数で言う（「8.4℃」は話し言葉にしにくい）
-    temp = f"気温 {round(weather.temperature)}℃"
-    if weather.temperature < COLD_TEMPERATURE:
-        temp += "（さむい）"
-    elif weather.temperature >= HOT_TEMPERATURE:
-        temp += "（あつい）"
-    # 3. 湿度
-    humidity = f"湿度 {round(weather.humidity)}%"
-    if weather.humidity < dry_humidity:
-        humidity += "（乾燥している）"
-    elif weather.humidity >= HUMID_HUMIDITY:
-        humidity += "（じめじめしている）"
-    return f"{sky}{temp}、{humidity}。"
+    # 1. 空の様子（取れていなければ省く）
+    sky = f"今日の天気は{weather.sky}。" if weather.sky else ""
+    # 2. 気温・湿度。小数は四捨五入して整数で言う（「8.4℃」は話し言葉にしにくい）
+    measures: list[str] = []
+    if weather.temperature is not None:
+        temp = f"気温 {round(weather.temperature)}℃"
+        if weather.temperature < COLD_TEMPERATURE:
+            temp += "（さむい）"
+        elif weather.temperature >= HOT_TEMPERATURE:
+            temp += "（あつい）"
+        measures.append(temp)
+    if weather.humidity is not None:
+        humidity = f"湿度 {round(weather.humidity)}%"
+        if weather.humidity < dry_humidity:
+            humidity += "（乾燥している）"
+        elif weather.humidity >= HUMID_HUMIDITY:
+            humidity += "（じめじめしている）"
+        measures.append(humidity)
+    text = sky + ("、".join(measures) + "。" if measures else "")
+    return text or None
 
 
 class WeatherCache:
@@ -97,9 +84,10 @@ class WeatherCache:
     取った天気は ttl 秒（既定 30 分）使い回す。
 
     引数:
-        fetch: 天気を取ってくる関数（本番は open_meteo.fetch_current_weather を包んだもの）
+        fetch: 天気を取ってくる関数（本番は jma_weather.fetch_jma_weather を包んだもの）
         clock: 現在時刻を返す関数（テストでは偽物の時計）
-        ttl: 何秒まで同じ天気を使い回すか
+        ttl: 何秒まで同じ天気を使い回すか（アメダスは 10 分ごとの更新。気象庁の非公式のデータなので、
+            取りに行く回数は控えめにする）
         timeout: 天気 API を何秒まで待つか。待ちすぎると植物の第一声が遅れるので短くする
     """
 
