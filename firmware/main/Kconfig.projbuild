@@ -1,0 +1,42 @@
+menu "Futamaru"
+
+    config FUTAMARU_SERVER_URL
+        string "LiveKit server URL"
+        default ""
+        help
+            サーバー側の .env の LIVEKIT_URL（例: wss://xxxx.livekit.cloud）。
+            sdkconfig.secrets に書く。
+
+    config FUTAMARU_TOKEN
+        string "LiveKit token for this plant"
+        default ""
+        help
+            株ごとのトークン。scripts/issue_token.py で発行する（ルーム plant-<id> に入れる）。
+            秘密情報なので sdkconfig.secrets に書く。
+
+    config FUTAMARU_USE_AEC
+        bool "Use echo cancellation (AEC)"
+        default y
+        help
+            ES8311 がスピーカーに出した音（参照）をマイクの音と一緒に録り、
+            植物自身の声をマイクの音から消す（仕様 §9 の 4）。
+            うまく動かないときは n にして、サーバー側で割り込みを止める
+            （docs/hardware/parts-selection.md）。
+
+    config FUTAMARU_SPEAKER_VOLUME
+        int "Speaker volume (0-100)"
+        default 85
+        range 0 100
+
+    config FUTAMARU_MIC_GAIN_DB
+        int "Microphone gain (dB)"
+        default 30
+        range 0 42
+        help
+            マイクの増幅。声が小さく聞き取られないときは上げ、割れるときは下げる。
+
+    config FUTAMARU_STATUS_LED
+        bool "Show status on the XIAO user LED (GPIO21)"
+        default y
+
+endmenu

@@ -1,0 +1,8 @@
+# 使う部品の版を固定する（LiveKit の ESP32 SDK は Developer Preview で API が変わりうるため。仕様 §9）
+dependencies:
+  idf: ">=5.4"
+  livekit/livekit: "0.3.12"
+  # Wi-Fi への接続（SDK のサンプルと同じもの）
+  livekit/example_utils: "~0.2.0"
+  # 音声チップ ES8311 のドライバ。SDK のサンプル（custom_hardware）と同じ 1.x 系
+  espressif/esp_codec_dev: "~1.5"

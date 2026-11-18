@@ -1,0 +1,5 @@
+# Name,   Type, SubType, Offset,  Size, Flags
+# XIAO ESP32S3 の Flash は 8MB。アプリは 4MB まで入る（LiveKit SDK のサンプルは 3MB）
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 4M,

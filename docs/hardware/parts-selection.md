@@ -66,6 +66,7 @@ AEC は「スピーカーから出した音」と「マイクで拾った音」�
 
 - **マイコンは載っていない**。本来は M5Stack の Atom を上に差して使う「台座」。今回は Atom の代わりに XIAO をジャンパー線でつなぐ
 - 載っているもの: 音声チップ ES8311、マイク MSM381A3729H9BPC（S/N 比 65dB 以上）、D 級アンプ NS4150B、1W・8Ω の箱入りスピーカー（約 20×14mm）
+- **アンプの ON/OFF は IO エキスパンダ PI4IOE5V6408（I2C 0x43）につながっている**（M5Stack の M5Atomic-EchoBase ライブラリで確認）。ESP32 のピンは使わないが、起動時に I2C で ON にする必要がある。ファームウェア（`firmware/main/board.c`）で行っている
 - 大きさ: **24.0 × 24.0 × 14.1 mm、6.5g**（[M5Stack 公式](https://docs.m5stack.com/ja/atom/Atomic%20Echo%20Base)）
 - 音質: 第三者のレビューは見つからなかった。旧製品の Atom Echo は「音量がかなり小さい」というレビューがあった。**音量は控えめかもしれない**。ソフトで上げられる（公式サンプルの `setSpeakerVolume`）
 

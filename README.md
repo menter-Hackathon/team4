@@ -54,6 +54,7 @@
 | 文字起こし | kotoba-whisper v2.0（日本語向けの Whisper） |
 | 声 | AivisSpeech Engine（声のモデル「まお」）。`.env` で OpenAI `gpt-4o-mini-tts` にも切り替えられる |
 | 鉢のハード | Seeed XIAO ESP32S3 ＋ M5Stack Atomic Voice Base（[部品の選び方](docs/hardware/parts-selection.md)） |
+| 鉢のファームウェア | ESP-IDF v5.4.2 ＋ LiveKit ESP32 SDK 0.3.12（[firmware/](firmware/README.md)） |
 
 詳しい設計は [仕様書](docs/superpowers/specs/2026-11-13-futamaru-agent-design.md) にあります。
 
@@ -147,7 +148,7 @@ uv run python -m scripts.issue_token --plant-id a1
 
 identity `device-a1`、ルーム `plant-a1`、有効期限 30 日のトークンを1行で出力します。
 
-- **ESP32 の担当者に渡し、ファームウェアの設定に書き込んでもらいます。** 一緒に渡すのはサーバーの URL（`.env` の `LIVEKIT_URL`）だけです。`LIVEKIT_API_KEY` と `LIVEKIT_API_SECRET` は渡しません。
+- **ESP32 の担当者に渡し、ファームウェアの設定（`firmware/sdkconfig.secrets`）に書き込んでもらいます。** 一緒に渡すのはサーバーの URL（`.env` の `LIVEKIT_URL`）だけです。`LIVEKIT_API_KEY` と `LIVEKIT_API_SECRET` は渡しません。
 - **株ごとに別のトークンを使います。** 2台目には `--plant-id b1` などで発行してください。同じトークンを2台に入れると、同じ株として扱われます。
 - **期限が切れたら、同じコマンドで発行し直して書き込み直します。**
 - **トークンは秘密情報です。** 持っている人は誰でもその株のルームに入れて、マイクの音を聞けます。Issue・PR・チャンネルには貼らず、DM で渡してください。
