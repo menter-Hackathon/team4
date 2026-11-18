@@ -22,7 +22,7 @@ Wi-Fi につないで LiveKit のルーム `plant-<id>` に入り、マイクの
 
 ## 配線
 
-ジャンパー線で 8 本つなぎます。**Voice Base 側の信号名は、買った実物と M5Stack のピン配置図で確かめてください。**
+ジャンパー線で 9 本つなぎます。Voice Base の上面（Atom を差す面）のオスピンに、メスのジャンパー線を挿します。下面の 4 ピンの穴（G・5・SDA・SCL）は使いません。Voice Base の上面のシールには、AtomS3 の GPIO 番号（水色）が書いてあります。対応は SCL = G39、SDA = G38、SCLK = G8、LRCK = G6、DSDIN = G5、ASDOUT = G7 です。
 
 | Voice Base | 役割 | XIAO の印字 | GPIO |
 |---|---|---|---|
@@ -34,6 +34,7 @@ Wi-Fi につないで LiveKit のルーム `plant-<id>` に入り、マイクの
 | ASDOUT | マイクの音（Voice Base → XIAO） | D3 | 4 |
 | 5V | 電源 | 5V | - |
 | GND | GND | GND | - |
+| 3V3 | 3.3V 電源（音声チップ用。Atom から受け取る作り） | 3V3 | - |
 
 - 配線を変えたときは `main/board.c` の先頭の `PIN_...` を直します
 - **XIAO には付属の Wi-Fi アンテナを必ず付けます**（U.FL コネクタ）
