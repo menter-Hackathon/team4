@@ -257,12 +257,16 @@ server = AgentServer(setup_fnc=prewarm)
 def create_weather_cache(cfg: Config) -> WeatherCache | None:
     """天気を取って覚えておく WeatherCache を作る（仕様 §6.7、#80）。
 
-    .env に観測所（JMA_AMEDAS_STATION）も地域（JMA_FORECAST_AREA）も無ければ None（天気を使わない）。
+    .env に観測所（JMA_AMEDAS_STATION）も地域（JMA_FORECAST_AREA）も無ければ None を返す。
+    None のとき、植物は天気の話をしない（PlantConversation に weather=None が渡る）。
     """
     station, area = cfg.jma_amedas_station, cfg.jma_forecast_area
     if station is None and area is None:
         return None
 
+    # WeatherCache は「引数なしで呼ぶと天気が返る関数」を受け取る（weather.py）。
+    # fetch_jma_weather は観測所と地域を引数に取るので、それを決めておいた小さな関数で包んで渡す。
+    # こうしておくと、weather.py は気象庁のことを何も知らずに済む（テストで偽物に替えやすい）
     async def fetch():
         return await fetch_jma_weather(station, area)
 

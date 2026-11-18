@@ -148,7 +148,10 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         else DEFAULT_WAKE_WORDS
     )
 
-    # 天気を取る場所（気象庁のコード、#80）。書き間違いに起動時に気づけるよう、桁数を確かめる
+    # 天気を取る場所（気象庁のコード、#80）。
+    # 観測所は 5 桁（例: 東京 44132）、地域は 6 桁（例: 東京都 130000）の数字。
+    # 桁数を間違えていると、気象庁から何も取れないまま「天気なし」で動き続け、気づきにくい。
+    # そのため、起動するときに確かめて、違っていれば止める（どちらも空なら天気を使わない）
     jma_amedas_station = get("JMA_AMEDAS_STATION")
     if jma_amedas_station is not None and not _is_code(jma_amedas_station, 5):
         raise ConfigError(

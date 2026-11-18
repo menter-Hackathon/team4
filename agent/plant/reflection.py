@@ -234,6 +234,8 @@ def parse_reflection(raw: str) -> ReflectionResult:
         updated_memories,
         data["trait_deltas"],
         owner_dialect,
+        # 「is True」で比べるのは、本物の true だけを水やりと数えるため（#81）。
+        # LLM が "yes" や 1 などを返しても、水やりとは数えない（うっかり記録しないほうが安全）
         data.get("watered") is True,
     )
 
@@ -305,8 +307,12 @@ async def reflect_session(
     )
     base = store.get_person(person_id).traits if person_id else store.get_plant(plant_id).traits
     traits = apply_deltas(base, result.trait_deltas, recent)
-    # 4. 会話中のキーワードで拾えなかった水やりを記録する（#81）。会話中に記録済みなら何もしない。
-    #    時刻は振り返った時刻ではなく、会話が終わった時刻にする（起動時の再処理だと何日も後になるため）
+    # 4. 会話中に見分けられなかった水やりを記録する（#81）。
+    #    会話中は「水」＋「あげた」のような決まった言い方しか見分けられない（watering.py）。
+    #    「ジョウロで湿らせといた」のような言い方は、ここで LLM が watered=true にして拾う。
+    #    会話中にもう記録していれば、add_watering が二重に記録しない。
+    #    時刻は振り返った時刻（now）ではなく、会話が終わった時刻（ended_at）にする。
+    #    エージェントを再起動したときにまとめて振り返ると、now は何日も後の時刻になることがあるため
     if result.watered:
         watered_at = parse_iso(session.ended_at) if session.ended_at else now
         store.add_watering(plant_id, person_id, session_id, watered_at)

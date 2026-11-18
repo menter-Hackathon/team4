@@ -92,9 +92,10 @@ class PlantConversation:
         self._complete_json = complete_json
         self._clock = clock
         self._wake_words = tuple(wake_words)
-        self._weather = weather
-        self._dry_humidity = dry_humidity
-        self._water_remind_days = water_remind_days
+        # --- 植物の状態（天気・水やり、仕様 §6.7）に使う設定 ---
+        self._weather = weather  # 天気を覚えておく WeatherCache。None なら天気を話さない（#80）
+        self._dry_humidity = dry_humidity  # 「乾燥している」と言う湿度の境目（%）
+        self._water_remind_days = water_remind_days  # 何日水が無いと「のどが渇いた」と言うか（#81）
         self._controller = WakeController(
             sleep_after=sleep_after
         )  # 起きている/眠っている状態と無言タイマー
@@ -170,8 +171,9 @@ class PlantConversation:
             match = detect_wake(text, self._wake_words)
             if match is None:
                 return TurnDecision("ignore")  # ウェイクワードが無い → 寝たまま
-            # 起きる前に天気を取り直す（30 分以内に取っていれば何もしない、#80）。
-            # 失敗・2 秒のタイムアウトでも例外は出ず、天気なしで続ける
+            # 起きる前に天気を取り直す（#80）。ここで取っておくと、すぐ後の _wake() で作る
+            # プロンプトに今の天気が入る。30 分以内に取っていれば、取りに行かずにすぐ終わる。
+            # 気象庁につながらない・2 秒以上かかるときも、例外は出ずに天気なしで続ける（weather.py）
             if self._weather is not None:
                 await self._weather.refresh()
             # 起きる。新しいセッションを始め、「名前を聞く」入りのシステムプロンプトを受け取る
@@ -179,15 +181,18 @@ class PlantConversation:
             if match.rest:
                 # 「ふたまる、今日カレー食べた」のように続きがある → その続きに返事する
                 self._record("user", match.rest)
-                # 「ふたまる、お水あげたよ」なら水やりを記録する（#81）。名前探しより先に記録して、
-                # 名乗っていた場合のその人のプロンプトにも「水をもらった」が入るようにする
+                # 「ふたまる、お水あげたよ」なら水やりを記録する（#81）。
+                # 名前探し（_identify_turn）より先に記録するのは、順番に理由がある:
+                # 名前探しで相手が決まると、その人のプロンプトがすぐ作られる。先に記録しておけば、
+                # そのプロンプトにも「この会話で水をもらった」が入る（後だと入らない）
                 watered = self._note_watering(match.rest)
                 # 続きの中で名乗っていれば（例:「ふたまる、たろうだよ」）、
                 # 起きたときのプロンプトではなく、その人のプロンプトを 1 つだけ返す
                 decided = await self._identify_turn(match.rest)
                 if decided is not None:
                     return TurnDecision("reply", match.rest, decided[0], decided[1])
-                # 水をもらったなら、起きたときのプロンプトを「水をもらった」入りで作り直す
+                # 名乗っていないが水をもらった → 上の _wake() で作ったプロンプトは
+                # 水やりを記録する前に作ったので「水をもらった」が入っていない。作り直す
                 if watered:
                     instructions = self._current_prompt()[0]
                 # 名乗っていない → 相手は未確定なので、声は標準語に戻す（下の greet と同じ理由）
@@ -210,14 +215,18 @@ class PlantConversation:
             # 「ふたまる」とだけ呼ばれた → 返事はするが、名乗りではないので名前探しはしない
             # （名前を聞く 3 回にも数えない）
             return TurnDecision("reply", text)
-        # 5. 「お水あげたよ」なら水やりを記録する（#81）。名前探しより先に記録して、
-        #    この発話で相手が決まったときのプロンプトにも「水をもらった」が入るようにする
+        # 5. 「お水あげたよ」なら水やりを記録する（#81）。
+        #    名前探し（6.）より先に記録するのは、この発話で相手が決まったときに作られる
+        #    その人のプロンプトにも「この会話で水をもらった」を入れるため（上の起きるときと同じ理由）
         watered = self._note_watering(content)
         # 6. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する
         decided = await self._identify_turn(content)
         if decided is not None:
             return TurnDecision("reply", content, decided[0], decided[1])
-        # 7. 水をもらったなら、今の相手のプロンプトを「水をもらった」入りで作り直して、お礼を言わせる
+        # 7. 水をもらったのに、プロンプトがまだ作り直されていない（6. で相手が決まらなかった）。
+        #    今のプロンプトには「水をもらった」が入っていないので、今の相手のプロンプトを作り直し、
+        #    この返事でお礼を言わせる。2 回目の「お水あげたよ」は記録しない（watered が False）ので、
+        #    作り直しも起きない
         if watered:
             prompt, dialect = self._current_prompt()
             return TurnDecision("reply", content, prompt, dialect)
@@ -226,11 +235,20 @@ class PlantConversation:
     def _note_watering(self, text: str) -> bool:
         """発話が「水をあげた」なら水やりを記録する（仕様 §6.7、#81）。
 
-        戻り値: この発話で新しく記録したら True。水やりの話でない・この会話で記録済みなら False。
+        引数:
+            text: 持ち主の発話（例: "お水あげたよ"）
+        戻り値:
+            この発話で新しく記録したら True。
+            水やりの話でない・この会話ですでに記録済み（2 回目の「お水あげたよ」）なら False。
+            呼ぶ側は True のときだけ、プロンプトを「水をもらった」入りで作り直す。
         """
+        # 1. 眠っている（会話が無い）か、水やりの話でなければ何もしない。
+        #    見分け方は watering.py（「水」＋「あげた」などの言葉の並び）
         if self._session_id is None or not mentions_watering(text):
             return False
+        # 2. 誰があげたかも記録する。相手が未確定・お客さんなら None
         person_id = self._person.id if self._person is not None else None
+        # 3. DB に記録する。同じ会話で 2 回目なら store が記録せず False を返す
         recorded = self._store.add_watering(
             self._plant_id, person_id, self._session_id, self._clock()
         )
@@ -239,9 +257,16 @@ class PlantConversation:
         return recorded
 
     def _current_prompt(self) -> tuple[str, str | None]:
-        """今の相手（決まった人・お客さん・未確定）のシステムプロンプトと方言を作り直す（#81）。
+        """今の相手のシステムプロンプトと方言を、今の状態で作り直す（#81）。
 
-        方言は、決まった人ならその人の方言、お客さん・未確定なら None（声の方言を変えない）。
+        会話の途中で「植物の状態」が変わったとき（今は水をもらったときだけ）に使う。
+        相手によって作るプロンプトが違う:
+            名乗った人がいる     → その人の性格・記憶・方言のプロンプト（_person_prompt）
+            お客さんに決まった   → 株の性格のプロンプト。名前はもう聞かない
+            まだ誰か分からない   → 株の性格のプロンプト。名前を聞く指示も入れる（起きたときと同じ）
+        戻り値:
+            (プロンプト, 方言)。方言は、名乗った人ならその人の方言（例: "kansai"）。
+            お客さん・未確定なら None（main.py は None のとき声の方言を変えない）
         """
         if self._person is not None:
             return self._person_prompt(self._person)
@@ -408,17 +433,28 @@ class PlantConversation:
         )
 
     def _plant_status(self, person_id: int | None) -> str:
-        """植物の状態の段落（天気・育った日数・前に話してからの日数）を作る（仕様 §6.7、#80・#82）。
+        """植物の状態の段落を作る（仕様 §6.7、#80・#81・#82）。
 
-        person_id が None なら、相手を問わず一番最近の会話からの日数を使う。
-        天気は起きたときに取ったもの（WeatherCache が覚えているもの）を使う。
+        プロンプトを作るたびに呼ばれ、材料を DB と WeatherCache から集めて、
+        prompt.plant_status_text() に渡す。文にするのは prompt.py の仕事。
+
+        引数:
+            person_id: 今話している人の id。None なら相手が未確定かお客さん
+        集める材料:
+            天気           … 起きたときに取った天気（WeatherCache が覚えているもの）
+            育ち始めた時刻 … DB の plants.created_at
+            前に話した時刻 … person_id があればその人との会話だけ、None なら誰とでも一番最近の会話
+            最後の水やり   … 誰があげたかは問わず、その株の一番最近の水やり
+            今の会話で水をもらったか
         """
+        # 1. 天気。天気を使わない設定（.env に気象庁のコードが無い）か、取れていなければ None
         current = self._weather.current() if self._weather is not None else None
         weather = describe_weather(current, dry_humidity=self._dry_humidity) if current else None
-        # 水やり（#81）。今の会話で記録済みなら「水をもらった」、そうでなければ最後の水やりからの日数
+        # 2. 今の会話で「お水あげたよ」と言われ、記録済みか（#81）
         watered_now = self._session_id is not None and self._store.watered_in_session(
             self._session_id
         )
+        # 3. 材料を渡して、段落の文にしてもらう
         return plant_status_text(
             self._store.plant_created_at(self._plant_id),
             self._store.last_talk_at(self._plant_id, person_id),
