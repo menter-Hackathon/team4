@@ -33,6 +33,7 @@ from .reflection import JsonCompleter, reflect_session
 from .store import Person, PlantStore
 from .timeutil import Clock
 from .wake import WakeController, detect_wake, normalize
+from .watering import mentions_watering
 from .weather import WeatherCache, describe_weather
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,7 @@ class PlantConversation:
         sleep_after: 何秒だれも話さなければ眠るか
         weather: 天気を取って覚えておく WeatherCache。None なら天気を使わない（§6.7、#80）
         dry_humidity: 湿度がこの値（%）未満なら「乾燥している」と言う
+        water_remind_days: 水をもらってからこの日数たつと「のどが渇いた」と言う（§6.7、#81）
     """
 
     def __init__(
@@ -83,6 +85,7 @@ class PlantConversation:
         sleep_after: float,
         weather: WeatherCache | None = None,
         dry_humidity: float = 40.0,
+        water_remind_days: int = 3,
     ) -> None:
         self._store = store
         self._plant_id = plant_id
@@ -91,6 +94,7 @@ class PlantConversation:
         self._wake_words = tuple(wake_words)
         self._weather = weather
         self._dry_humidity = dry_humidity
+        self._water_remind_days = water_remind_days
         self._controller = WakeController(
             sleep_after=sleep_after
         )  # 起きている/眠っている状態と無言タイマー
@@ -175,11 +179,17 @@ class PlantConversation:
             if match.rest:
                 # 「ふたまる、今日カレー食べた」のように続きがある → その続きに返事する
                 self._record("user", match.rest)
+                # 「ふたまる、お水あげたよ」なら水やりを記録する（#81）。名前探しより先に記録して、
+                # 名乗っていた場合のその人のプロンプトにも「水をもらった」が入るようにする
+                watered = self._note_watering(match.rest)
                 # 続きの中で名乗っていれば（例:「ふたまる、たろうだよ」）、
                 # 起きたときのプロンプトではなく、その人のプロンプトを 1 つだけ返す
                 decided = await self._identify_turn(match.rest)
                 if decided is not None:
                     return TurnDecision("reply", match.rest, decided[0], decided[1])
+                # 水をもらったなら、起きたときのプロンプトを「水をもらった」入りで作り直す
+                if watered:
+                    instructions = self._current_prompt()[0]
                 # 名乗っていない → 相手は未確定なので、声は標準語に戻す（下の greet と同じ理由）
                 return TurnDecision("reply", match.rest, instructions, "standard")
             # 「ふたまる」だけ → 植物から話しかける（挨拶なのでユーザー発話は記録しない）。
@@ -200,11 +210,43 @@ class PlantConversation:
             # 「ふたまる」とだけ呼ばれた → 返事はするが、名乗りではないので名前探しはしない
             # （名前を聞く 3 回にも数えない）
             return TurnDecision("reply", text)
-        # 5. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する
+        # 5. 「お水あげたよ」なら水やりを記録する（#81）。名前探しより先に記録して、
+        #    この発話で相手が決まったときのプロンプトにも「水をもらった」が入るようにする
+        watered = self._note_watering(content)
+        # 6. 相手が未確定なら名前探しをする。決まったらプロンプトと方言を替えて返事する
         decided = await self._identify_turn(content)
         if decided is not None:
             return TurnDecision("reply", content, decided[0], decided[1])
+        # 7. 水をもらったなら、今の相手のプロンプトを「水をもらった」入りで作り直して、お礼を言わせる
+        if watered:
+            prompt, dialect = self._current_prompt()
+            return TurnDecision("reply", content, prompt, dialect)
         return TurnDecision("reply", content)
+
+    def _note_watering(self, text: str) -> bool:
+        """発話が「水をあげた」なら水やりを記録する（仕様 §6.7、#81）。
+
+        戻り値: この発話で新しく記録したら True。水やりの話でない・この会話で記録済みなら False。
+        """
+        if self._session_id is None or not mentions_watering(text):
+            return False
+        person_id = self._person.id if self._person is not None else None
+        recorded = self._store.add_watering(
+            self._plant_id, person_id, self._session_id, self._clock()
+        )
+        if recorded:
+            logger.info("plant %s was watered (session=%s)", self._plant_id, self._session_id)
+        return recorded
+
+    def _current_prompt(self) -> tuple[str, str | None]:
+        """今の相手（決まった人・お客さん・未確定）のシステムプロンプトと方言を作り直す（#81）。
+
+        方言は、決まった人ならその人の方言、お客さん・未確定なら None（声の方言を変えない）。
+        """
+        if self._person is not None:
+            return self._person_prompt(self._person)
+        # お客さんに決まっていれば名前を聞かない。未確定ならまだ名前を聞く（起きたときと同じ）
+        return self._guest_prompt(ask_name=not self._guest), None
 
     def _without_leading_wake_word(self, text: str) -> str | None:
         """起きている間の発話から、先頭の呼びかけ（ウェイクワードと敬称）を外す（#68）。
@@ -317,12 +359,17 @@ class PlantConversation:
         self._store.set_session_person(self._session_id, person.id)
         # 2. 話題を振る秒数を、その人とのおしゃべり度で決め直す
         self._controller.set_nudge_delay(nudge_delay(person.traits.talkativeness))
-        # 3. 方言: 手で固定した方言があればそれ、無ければその人との直近の判定の多数決
-        dialect = resolve_dialect(person.dialect_override, self._store.recent_dialects(person.id))
+        prompt, dialect = self._person_prompt(person)
         logger.info(
             "plant %s is talking with person %s (dialect=%s)", self._plant_id, person.id, dialect
         )
-        # 4. その人の性格・記憶（その人の記憶だけ、#70）・その人との前回の要約でプロンプトを作る。
+        return prompt, dialect
+
+    def _person_prompt(self, person: Person) -> tuple[str, str]:
+        """person 用のシステムプロンプトと方言を作る。"""
+        # 1. 方言: 手で固定した方言があればそれ、無ければその人との直近の判定の多数決
+        dialect = resolve_dialect(person.dialect_override, self._store.recent_dialects(person.id))
+        # 2. その人の性格・記憶（その人の記憶だけ、#70）・その人との前回の要約でプロンプトを作る。
         #    他の人だけの記憶は get_memories が返さないので、ここには入らない
         prompt = build_system_prompt(
             self._store.get_plant(self._plant_id).name,
@@ -368,11 +415,18 @@ class PlantConversation:
         """
         current = self._weather.current() if self._weather is not None else None
         weather = describe_weather(current, dry_humidity=self._dry_humidity) if current else None
+        # 水やり（#81）。今の会話で記録済みなら「水をもらった」、そうでなければ最後の水やりからの日数
+        watered_now = self._session_id is not None and self._store.watered_in_session(
+            self._session_id
+        )
         return plant_status_text(
             self._store.plant_created_at(self._plant_id),
             self._store.last_talk_at(self._plant_id, person_id),
             self._clock(),
             weather=weather,
+            last_watered_at=self._store.last_watered_at(self._plant_id),
+            watered_now=watered_now,
+            remind_days=self._water_remind_days,
         )
 
     def _forget_person(self) -> None:

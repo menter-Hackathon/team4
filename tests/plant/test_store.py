@@ -343,3 +343,27 @@ def test_last_talk_at_is_per_person_and_skips_unfinished(store):
     assert store.last_talk_at("a1", taro.id) == T0 + timedelta(minutes=5)
     assert store.last_talk_at("a1", hanako.id) is None
     assert store.last_talk_at("a1") == T0 + timedelta(days=2, minutes=1)  # 誰とでも、一番最近
+
+
+# --- 水やり（#81） ---
+def test_watering_is_recorded_once_per_session(store):
+    store.get_or_create_plant("a", T0)
+    sid = store.start_session("a", T0)
+    assert store.last_watered_at("a") is None and not store.watered_in_session(sid)
+    assert store.add_watering("a", None, sid, T0 + timedelta(minutes=1)) is True
+    assert (
+        store.add_watering("a", None, sid, T0 + timedelta(minutes=2)) is False
+    )  # 同じ会話では 1 回
+    assert store.watered_in_session(sid)
+    assert store.last_watered_at("a") == T0 + timedelta(minutes=1)
+
+
+def test_last_watered_at_is_per_plant_and_latest(store):
+    store.get_or_create_plant("a", T0)
+    store.get_or_create_plant("b", T0)
+    s1 = store.start_session("a", T0)
+    store.add_watering("a", None, s1, T0)
+    s2 = store.start_session("a", T0 + timedelta(days=2))
+    store.add_watering("a", None, s2, T0 + timedelta(days=2))
+    assert store.last_watered_at("a") == T0 + timedelta(days=2)
+    assert store.last_watered_at("b") is None

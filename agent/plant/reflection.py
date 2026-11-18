@@ -24,6 +24,7 @@ from .dialect import DIALECTS, UNKNOWN
 from .personality import TRAIT_NAMES, apply_deltas, clamp
 from .prompt import rank_memories
 from .store import MemoryUpdate, NewMemory, PlantStore
+from .timeutil import parse_iso
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +76,17 @@ REFLECTION_SCHEMA: dict = {
         },
         # 持ち主の方言の判定。判断できなければ unknown
         "owner_dialect": {"type": "string", "enum": [*DIALECTS, UNKNOWN]},
+        # 持ち主が水をあげたと言ったか（#81）。会話中のキーワードで取りこぼした言い方を拾う
+        "watered": {"type": "boolean"},
     },
-    "required": ["summary", "new_memories", "updated_memories", "trait_deltas", "owner_dialect"],
+    "required": [
+        "summary",
+        "new_memories",
+        "updated_memories",
+        "trait_deltas",
+        "owner_dialect",
+        "watered",
+    ],
 }
 
 # 振り返りで LLM に渡す指示文。スキーマとは別に、ここにも出力の形を書く（Gemma 4 の公式の推奨）
@@ -86,7 +96,8 @@ SYSTEM_MESSAGE = """あなたは観葉植物「ふたまる」の記憶係。持
   "new_memories": [{"content": "持ち主について覚えておくこと", "kind": "preference | event | habit", "importance": 0.0〜1.0}],
   "updated_memories": [{"id": 既存記憶の id, "content": "更新後の内容", "importance": 0.0〜1.0}],
   "trait_deltas": {"talkativeness": -0.05〜0.05, "affection": -0.05〜0.05, "energy": -0.05〜0.05, "curiosity": -0.05〜0.05},
-  "owner_dialect": "standard | kansai | hakata | hiroshima | unknown"
+  "owner_dialect": "standard | kansai | hakata | hiroshima | unknown",
+  "watered": true または false
 }
 - 既存の記憶と同じ内容は new_memories に入れない。内容が変わった・補強された場合は updated_memories でその id を更新する。
 - trait_deltas は今回の会話で性格がどう変わるかの判定:
@@ -94,7 +105,9 @@ SYSTEM_MESSAGE = """あなたは観葉植物「ふたまる」の記憶係。持
   energy はユーザーの口調・話題の明るさ、curiosity はユーザーが自分の話をする量で判断する。
 - owner_dialect は「持ち主」の発言（ふたまるの発言は見ない）の方言を判定する。
   standard（標準語）/ kansai（関西弁）/ hakata（博多弁）/ hiroshima（広島弁）のどれか。
-  発言が短い・少ない・方言の特徴が読み取れないなど判断できないときは unknown にする。"""
+  発言が短い・少ない・方言の特徴が読み取れないなど判断できないときは unknown にする。
+- watered は、持ち主がこの会話の中で「ふたまるに水をあげた」と言ったときだけ true にする。
+  これからあげる・あげていない・ほかの植物の話なら false にする。"""
 
 
 class ReflectionError(Exception):
@@ -111,6 +124,8 @@ class ReflectionResult:
     trait_deltas: dict[str, object]
     # 持ち主の方言。DIALECTS のどれか、判断できなければ UNKNOWN
     owner_dialect: str = UNKNOWN
+    # 持ち主が水をあげたと言ったか（#81）。true 以外（無い・文字列など）は False
+    watered: bool = False
 
 
 def _importance(value: object) -> float:
@@ -214,7 +229,12 @@ def parse_reflection(raw: str) -> ReflectionResult:
     dialect = data.get("owner_dialect")
     owner_dialect = dialect if isinstance(dialect, str) and dialect in DIALECTS else UNKNOWN
     return ReflectionResult(
-        data["summary"], new_memories, updated_memories, data["trait_deltas"], owner_dialect
+        data["summary"],
+        new_memories,
+        updated_memories,
+        data["trait_deltas"],
+        owner_dialect,
+        data.get("watered") is True,
     )
 
 
@@ -285,7 +305,12 @@ async def reflect_session(
     )
     base = store.get_person(person_id).traits if person_id else store.get_plant(plant_id).traits
     traits = apply_deltas(base, result.trait_deltas, recent)
-    # 4. 要約・記憶・性格を、まとめて 1 回で DB に保存する（途中で失敗しても半端に残らない）
+    # 4. 会話中のキーワードで拾えなかった水やりを記録する（#81）。会話中に記録済みなら何もしない。
+    #    時刻は振り返った時刻ではなく、会話が終わった時刻にする（起動時の再処理だと何日も後になるため）
+    if result.watered:
+        watered_at = parse_iso(session.ended_at) if session.ended_at else now
+        store.add_watering(plant_id, person_id, session_id, watered_at)
+    # 5. 要約・記憶・性格を、まとめて 1 回で DB に保存する（途中で失敗しても半端に残らない）
     store.apply_reflection(
         plant_id,
         session_id,

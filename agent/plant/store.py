@@ -85,6 +85,15 @@ CREATE TABLE IF NOT EXISTS trait_history (
   curiosity      REAL NOT NULL,
   recorded_at    TEXT NOT NULL
 );
+
+-- 声で記録した水やり（仕様 §6.7、#81）。1 回の会話（セッション）で 1 行まで
+CREATE TABLE IF NOT EXISTS waterings (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  plant_id    TEXT NOT NULL REFERENCES plants(plant_id),
+  person_id   INTEGER REFERENCES people(id),
+  session_id  INTEGER REFERENCES sessions(id),
+  watered_at  TEXT NOT NULL
+);
 """
 
 # 古い DB に足す列: {テーブル名: [(列名, 型と制約), ...]}。SCHEMA の新しい列と同じ内容にする。
@@ -489,6 +498,40 @@ class PlantStore:
             (plant_id, person_id),
         ).fetchone()
         return row["summary"] if row else None
+
+    # --- waterings（水やり、#81） ---
+
+    def add_watering(
+        self, plant_id: str, person_id: int | None, session_id: int, now: datetime
+    ) -> bool:
+        """水やりを 1 回記録する。同じ会話（session_id）でもう記録していれば何もしない。
+
+        戻り値: 記録したら True、同じ会話ですでに記録済みなら False。
+        「お水あげたよ」「水やりもしたよ」と 1 回の会話で 2 回言われても、1 回の水やりとして数えるため。
+        """
+        with self._conn:
+            if self.watered_in_session(session_id):
+                return False
+            self._conn.execute(
+                "INSERT INTO waterings (plant_id, person_id, session_id, watered_at)"
+                " VALUES (?, ?, ?, ?)",
+                (plant_id, person_id, session_id, iso(now)),
+            )
+        return True
+
+    def watered_in_session(self, session_id: int) -> bool:
+        """その会話で水やりを記録済みか。"""
+        row = self._conn.execute(
+            "SELECT 1 FROM waterings WHERE session_id = ? LIMIT 1", (session_id,)
+        ).fetchone()
+        return row is not None
+
+    def last_watered_at(self, plant_id: str) -> datetime | None:
+        """その株が最後に水をもらった時刻（誰からでも）。一度ももらっていなければ None。"""
+        row = self._conn.execute(
+            "SELECT MAX(watered_at) AS t FROM waterings WHERE plant_id = ?", (plant_id,)
+        ).fetchone()
+        return parse_iso(row["t"]) if row["t"] else None
 
     # --- memories / reflection ---
 

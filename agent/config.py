@@ -70,6 +70,7 @@ class Config:
     jma_amedas_station: str | None  # 気温・湿度を取るアメダスの観測所のコード（例: "44132" 東京）
     jma_forecast_area: str | None  # 空の様子を取る予報の地域コード（例: "130000" 東京都）
     weather_dry_humidity: float  # 湿度がこの値（%）未満なら「乾燥している」と言う
+    water_remind_days: int  # 水をもらってからこの日数たつと「のどが渇いた」と言う（§6.7、#81）
 
 
 def db_path_from_env(env: Mapping[str, str] = os.environ) -> str:
@@ -191,4 +192,5 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         jma_amedas_station=jma_amedas_station,
         jma_forecast_area=jma_forecast_area,
         weather_dry_humidity=float(get("WEATHER_DRY_HUMIDITY", "40")),
+        water_remind_days=int(get("WATER_REMIND_DAYS", "3")),
     )
