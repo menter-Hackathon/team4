@@ -27,7 +27,15 @@ class Identification:
     name: str | None = None
 
 
-# LLM に返させる JSON の形
+# LLM に返させる JSON の形。
+# 必ず書かせる項目（required）は kind だけにする。person_id と name は、書いてあれば使う。
+# なぜ 3 つとも必須にしないのか:
+#   Ollama の Gemma 4 は、知っている人なら person_id だけ、新しい人なら name だけ書いて
+#   JSON を閉じようとする。3 つとも必須にすると、Ollama が「残りも書け」と縛るため、
+#   Gemma 4 は次の項目へ進めずに空白を出し続け、3 秒の時間切れになっていた
+#   （名乗った回だけ毎回失敗していた。2026-11-18 の console 確認）。
+#   kind だけ必須にすると、24 回試して 24 回とも 0.2〜0.3 秒で正しく返った。
+#   読み取る側（identify）は data.get() で読むので、項目が無くても困らない
 IDENTIFY_SCHEMA = {
     "type": "object",
     "properties": {
@@ -35,7 +43,7 @@ IDENTIFY_SCHEMA = {
         "person_id": {"type": ["integer", "null"]},
         "name": {"type": ["string", "null"]},
     },
-    "required": ["kind", "person_id", "name"],
+    "required": ["kind"],
     "additionalProperties": False,
 }
 

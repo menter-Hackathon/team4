@@ -19,6 +19,20 @@ async def test_identifies_a_known_person():
     assert "たろう" in json.dumps(c.calls[0][0], ensure_ascii=False)
 
 
+async def test_schema_requires_only_kind():
+    # Gemma 4 は使う項目だけ書いて JSON を閉じるので、kind 以外を必須にすると止まる（people.py の説明）
+    c = FakeCompleter([js(kind="known", person_id=1)])
+    await identify(c, "たろうだよ", KNOWN)
+    assert c.calls[0][1]["required"] == ["kind"]
+
+
+async def test_answers_without_the_unused_field_are_accepted():
+    # Gemma 4 が実際に返す形: known なら name なし、new なら person_id なし
+    c = FakeCompleter([js(kind="known", person_id=1), js(kind="new", name="はなこ")])
+    assert await identify(c, "たろうだよ", KNOWN) == Identification("known", 1)
+    assert await identify(c, "はなこです", KNOWN) == Identification("new", None, "はなこ")
+
+
 async def test_new_person_name_is_stripped():
     c = FakeCompleter([js(kind="new", name=" はなこ ")])
     assert await identify(c, "はなこです", KNOWN) == Identification("new", None, "はなこ")
