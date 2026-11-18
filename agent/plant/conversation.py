@@ -28,7 +28,7 @@ from .dialect import resolve_dialect
 from .expression import strip_tags
 from .people import clean_name, identify
 from .personality import nudge_delay
-from .prompt import build_system_prompt
+from .prompt import build_system_prompt, plant_status_text
 from .reflection import JsonCompleter, reflect_session
 from .store import Person, PlantStore
 from .timeutil import Clock
@@ -323,6 +323,8 @@ class PlantConversation:
             # CLI で登録した名前も入るので、改行を消し・長さを切ってからプロンプトに入れる
             person_name=clean_name(person.name),
             ask_name=False,
+            # その人と前に話してから何日か（ほかの人やお客さんとの会話は数えない）
+            plant_status=self._plant_status(person.id),
         )
         return prompt, dialect
 
@@ -343,6 +345,19 @@ class PlantConversation:
             self._store.latest_summary(self._plant_id),  # person_id なし = お客さんの要約
             self._clock(),
             ask_name=ask_name,
+            # 相手がまだ分からないので、誰とでも一番最近の会話から何日かを使う
+            plant_status=self._plant_status(None),
+        )
+
+    def _plant_status(self, person_id: int | None) -> str:
+        """植物の状態の段落（育った日数・前に話してからの日数）を作る（仕様 §6.7、#82）。
+
+        person_id が None なら、相手を問わず一番最近の会話からの日数を使う。
+        """
+        return plant_status_text(
+            self._store.plant_created_at(self._plant_id),
+            self._store.last_talk_at(self._plant_id, person_id),
+            self._clock(),
         )
 
     def _forget_person(self) -> None:

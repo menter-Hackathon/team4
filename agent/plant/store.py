@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .personality import Traits
-from .timeutil import iso
+from .timeutil import iso, parse_iso
 
 # テーブルを作る SQL。IF NOT EXISTS なので、すでにあるテーブルはそのまま使われる（データは消えない）。
 # 注意: すでにあるテーブルには新しい列が足されない。古い DB への列の追加は _migrate() が行う
@@ -263,6 +263,15 @@ class PlantStore:
                 self._insert_history(plant_id, None, t, now)
         return self.get_plant(plant_id)
 
+    def plant_created_at(self, plant_id: str) -> datetime:
+        """株を作った（育ち始めた）時刻。「育ち始めて何日目か」に使う（仕様 §6.7、#82）。無ければ KeyError。"""
+        row = self._conn.execute(
+            "SELECT created_at FROM plants WHERE plant_id = ?", (plant_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(plant_id)
+        return parse_iso(row["created_at"])
+
     def get_plant(self, plant_id: str) -> Plant:
         """株を取り出す。無ければ KeyError。"""
         row = self._conn.execute("SELECT * FROM plants WHERE plant_id = ?", (plant_id,)).fetchone()
@@ -452,6 +461,24 @@ class PlantStore:
         """振り返り済みにする（振り返る必要がないセッション用。普通は apply_reflection が付ける）。"""
         with self._conn:
             self._conn.execute("UPDATE sessions SET reflected = 1 WHERE id = ?", (session_id,))
+
+    def last_talk_at(self, plant_id: str, person_id: int | None = None) -> datetime | None:
+        """前に話した会話が終わった時刻。「何日ぶりか」に使う（仕様 §6.7、#82）。
+
+        引数:
+            person_id: その人との会話だけを見る。None なら相手を問わず（お客さんも含めて）一番最近の会話
+        戻り値:
+            一番最近に終わったセッションの ended_at。まだ一度も話していなければ None
+        今のセッションはまだ終わっていない（ended_at が NULL）ので、ここには入らない。
+        """
+        sql = "SELECT MAX(ended_at) AS t FROM sessions WHERE plant_id = ? AND ended_at IS NOT NULL"
+        args: tuple = (plant_id,)
+        if person_id is not None:
+            sql += " AND person_id = ?"
+            args = (plant_id, person_id)
+        row = self._conn.execute(sql, args).fetchone()
+        # 時刻はすべて +09:00 付きの同じ形の文字列なので、MAX（文字列の大小）で一番新しいものが取れる
+        return parse_iso(row["t"]) if row["t"] else None
 
     def latest_summary(self, plant_id: str, person_id: int | None = None) -> str | None:
         """その人（None ならお客さん）との、一番最近に終わった会話の要約。「前回の会話」に使う。無ければ None。"""

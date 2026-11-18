@@ -323,3 +323,23 @@ def test_dialect_override_can_be_set_and_cleared(store):
     assert store.get_person(taro.id).dialect_override == "hakata"
     store.set_dialect_override(taro.id, None)
     assert store.get_person(taro.id).dialect_override is None
+
+
+# --- 育った日数・前回からの日数（#82） ---
+def test_plant_created_at_is_the_first_creation_time(store):
+    store.get_or_create_plant("a", T0)
+    store.get_or_create_plant("a", T0 + timedelta(days=3))  # 2 回目は作り直さない
+    assert store.plant_created_at("a") == T0
+
+
+def test_last_talk_at_is_per_person_and_skips_unfinished(store):
+    taro, hanako = _two_people(store)
+    s1 = store.start_session("a1", T0)
+    store.set_session_person(s1, taro.id)
+    store.end_session(s1, T0 + timedelta(minutes=5))
+    s2 = store.start_session("a1", T0 + timedelta(days=2))
+    store.end_session(s2, T0 + timedelta(days=2, minutes=1))  # お客さん
+    store.start_session("a1", T0 + timedelta(days=3))  # 今のセッション（まだ終わっていない）
+    assert store.last_talk_at("a1", taro.id) == T0 + timedelta(minutes=5)
+    assert store.last_talk_at("a1", hanako.id) is None
+    assert store.last_talk_at("a1") == T0 + timedelta(days=2, minutes=1)  # 誰とでも、一番最近

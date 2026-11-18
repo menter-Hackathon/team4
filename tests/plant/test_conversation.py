@@ -587,3 +587,29 @@ async def test_shutdown_stops_waiting_and_ignores_new_wake(store, clock, monkeyp
     assert s.ended_at and not s.reflected  # 未処理のまま残り、次の起動で振り返り直す
     # 終了処理に入ったあとは、呼ばれても起きない
     assert (await c.on_user_turn("ふたまる")).kind == "ignore"
+
+
+# --- 育った日数・前回からの日数（#82） ---
+async def test_wake_prompt_tells_days_grown_and_since_last_talk(store, clock):
+    store.get_or_create_plant("a", T0 - timedelta(days=29))  # 今日で 30 日目
+    sid = store.start_session("a", T0 - timedelta(days=3))
+    store.end_session(sid, T0 - timedelta(days=3))
+    c = await make_started(store, clock, FakeCompleter([]))
+    d = await c.on_user_turn("ふたまる")
+    assert "育ち始めて30日目" in d.instructions and "3日ぶり" in d.instructions
+    await c.close()
+
+
+async def test_named_prompt_uses_that_persons_last_talk(store, clock):
+    store.get_or_create_plant("a", T0)
+    taro = store.add_person("a", "たろう", T0)
+    old = store.start_session("a", T0 - timedelta(days=5))
+    store.set_session_person(old, taro.id)
+    store.end_session(old, T0 - timedelta(days=5))
+    guest = store.start_session("a", T0 - timedelta(days=1))  # きのうはお客さんと話した
+    store.end_session(guest, T0 - timedelta(days=1))
+    completer = FakeCompleter([identify_json("known", taro.id), reflection_json()])
+    c = await make_started(store, clock, completer)
+    d = await c.on_user_turn("ふたまる、たろうだよ")
+    assert "5日ぶり" in d.instructions  # たろうとは 5 日ぶり（お客さんのきのうではない）
+    await c.close()

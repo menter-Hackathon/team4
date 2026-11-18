@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -7,6 +7,8 @@ from agent.plant.prompt import (
     LENGTH,
     TRAIT_TEXT,
     build_system_prompt,
+    days_between,
+    plant_status_text,
     rank_memories,
     recency_factor,
 )
@@ -120,3 +122,45 @@ def test_prompt_defaults_add_nothing():
     )
     assert base == same
     assert "今話している相手" not in base
+
+
+# --- 育った日数・前回からの日数（#82、仕様 §6.7） ---
+@pytest.mark.parametrize(
+    "earlier,expected",
+    [
+        (datetime(2026, 11, 15, 9, 0, tzinfo=JST), 0),  # 同じ日
+        (datetime(2026, 11, 14, 23, 59, tzinfo=JST), 1),  # 1 分前でも日付が変われば 1 日
+        (datetime(2026, 11, 12, 11, 0, tzinfo=JST), 3),
+        (datetime(2026, 11, 14, 15, 30, tzinfo=UTC), 0),  # UTC でも JST の日付で数える
+    ],
+)
+def test_days_between_counts_jst_calendar_days(earlier, expected):
+    assert days_between(earlier, NOW) == expected
+
+
+def test_status_first_day():
+    text = plant_status_text(NOW, None, NOW)
+    assert "育ち始めて1日目" in text
+    assert "初めて" in text  # まだ誰とも話していない
+
+
+@pytest.mark.parametrize("since,phrase", [(0, "今日も"), (1, "きのうぶり"), (3, "3日ぶり")])
+def test_status_days_since_last_talk(since, phrase):
+    text = plant_status_text(NOW - timedelta(days=10), NOW - timedelta(days=since), NOW)
+    assert "育ち始めて11日目" in text and phrase in text
+
+
+@pytest.mark.parametrize(
+    "day,milestone", [(1, False), (5, True), (7, True), (30, True), (100, True), (29, False)]
+)
+def test_status_mentions_milestones(day, milestone):
+    text = plant_status_text(NOW - timedelta(days=day - 1), None, NOW)
+    assert (f"今日は{day}日目の節目" in text) is milestone
+
+
+def test_prompt_includes_plant_status_only_when_given():
+    assert "植物の状態" not in build_system_prompt("ふたまる", Traits(), [], None, NOW)
+    p = build_system_prompt(
+        "ふたまる", Traits(), [], None, NOW, plant_status="植物の状態:\n- 育ち始めて5日目。"
+    )
+    assert "育ち始めて5日目" in p
