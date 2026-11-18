@@ -316,3 +316,51 @@ async def test_reflection_does_not_double_count_watering(store_with_session):
     data = json.loads(VALID) | {"watered": True}
     assert await reflect_session(store, "a", sid, FakeCompleter([json.dumps(data)]), NOW)
     assert store.last_watered_at("a") == NOW - timedelta(minutes=4)
+
+
+# --- 世話の間隔（#83） ---
+def _session(store, start, *, watered=False, person_id=None):
+    sid = store.start_session("a", start)
+    if person_id is not None:
+        store.set_session_person(sid, person_id)
+    store.add_utterance(sid, "user", "ただいま", start)
+    if watered:
+        store.add_watering("a", person_id, sid, start)
+    store.end_session(sid, start + timedelta(minutes=5))
+    return sid
+
+
+async def test_reflection_input_has_care_intervals(store):
+    _session(store, NOW - timedelta(days=5), watered=True)
+    sid = _session(store, NOW - timedelta(days=2), watered=True)
+    fake = FakeCompleter([VALID])
+    await reflect_session(store, "a", sid, fake, NOW)
+    user = fake.calls[0][0][-1]["content"]
+    assert "## 世話の様子" in user
+    assert "前にこの相手と話してから3日" in user  # 5 日前 → 2 日前
+    assert "この会話で水をもらった。その前に水をもらってから3日" in user
+
+
+async def test_reflection_input_first_talk_and_no_water(store):
+    sid = _session(store, NOW - timedelta(hours=1))
+    fake = FakeCompleter([VALID])
+    await reflect_session(store, "a", sid, fake, NOW)
+    user = fake.calls[0][0][-1]["content"]
+    assert "この相手と話すのは初めて" in user
+    assert "この会話では水をもらっていない。まだ一度も水をもらったことがない" in user
+
+
+async def test_reflection_talk_interval_is_per_person(store):
+    taro = store.add_person("a", "たろう", NOW - timedelta(days=10))
+    _session(store, NOW - timedelta(days=6), person_id=taro.id)
+    _session(store, NOW - timedelta(days=1))  # お客さんとはきのう話した
+    sid = _session(store, NOW - timedelta(hours=1), person_id=taro.id)
+    fake = FakeCompleter([VALID])
+    await reflect_session(store, "a", sid, fake, NOW)
+    assert "前にこの相手と話してから6日" in fake.calls[0][0][-1]["content"]
+
+
+def test_system_message_explains_care_for_affection_and_energy():
+    from agent.plant.reflection import SYSTEM_MESSAGE
+
+    assert "世話の様子" in SYSTEM_MESSAGE and "affection" in SYSTEM_MESSAGE

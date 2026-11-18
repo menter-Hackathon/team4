@@ -22,7 +22,7 @@ from datetime import datetime, timedelta
 
 from .dialect import DIALECTS, UNKNOWN
 from .personality import TRAIT_NAMES, apply_deltas, clamp
-from .prompt import rank_memories
+from .prompt import days_between, rank_memories
 from .store import MemoryUpdate, NewMemory, PlantStore
 from .timeutil import parse_iso
 
@@ -103,6 +103,11 @@ SYSTEM_MESSAGE = """あなたは観葉植物「ふたまる」の記憶係。持
 - trait_deltas は今回の会話で性格がどう変わるかの判定:
   talkativeness は話しかけ頻度・会話の長さ、affection は褒め言葉・優しい言葉の量、
   energy はユーザーの口調・話題の明るさ、curiosity はユーザーが自分の話をする量で判断する。
+- 「## 世話の様子」も trait_deltas の判断に使う（植物は世話のしかたでも育ち方が変わる）:
+  affection は、前にこの相手と話してから 3 日以上あいていれば少し下げ（さみしくてすねる）、
+  毎日のように話しかけられていれば少し上げる。
+  energy は、この会話で水をもらった・水をこまめにもらっていれば少し上げ、
+  水をもらってから 3 日以上たっていれば少し下げる（のどが渇いて元気がない）。
 - owner_dialect は「持ち主」の発言（ふたまるの発言は見ない）の方言を判定する。
   standard（標準語）/ kansai（関西弁）/ hakata（博多弁）/ hiroshima（広島弁）のどれか。
   発言が短い・少ない・方言の特徴が読み取れないなど判断できないときは unknown にする。
@@ -267,8 +272,58 @@ def _build_messages(
         + "\n".join(lines)
         + "\n\n## 既存の記憶\n"
         + ("\n".join(memory_lines) or "（なし）")
+        + "\n\n## 世話の様子\n"
+        + "\n".join(_care_lines(store, plant_id, session_id, person_id))
     )
     return [{"role": "system", "content": SYSTEM_MESSAGE}, {"role": "user", "content": user}]
+
+
+def _care_lines(
+    store: PlantStore, plant_id: str, session_id: int, person_id: int | None
+) -> list[str]:
+    """振り返りに渡す「世話の様子」の行を作る（仕様 §6.7、#83）。
+
+    植物の性格は、話し方だけでなく世話のしかたでも変わるようにする。
+    放っておかれるとすねる（affection が下がる）、こまめに水をもらうと元気（energy が上がる）。
+    LLM が判断できるよう、話しかけの間隔と水やりの間隔を、会話ログと一緒に渡す。
+
+    日数は「この会話が始まった時刻」から数える。振り返りは会話が終わったあと（ときには
+    エージェントの再起動後に何日も遅れて）行われるので、振り返った時刻から数えるとずれるため。
+
+    戻り値の例:
+        ["- 前にこの相手と話してから3日。",
+         "- この会話で水をもらった。その前に水をもらってから4日。"]
+    """
+    session = store.get_session(session_id)
+    started = parse_iso(session.started_at)
+
+    # 1. 話しかけの間隔。この相手（お客さんなら相手を問わず）との、この会話より前の会話から数える
+    previous_talk = store.last_talk_at(plant_id, person_id, before=started)
+    if previous_talk is None:
+        talk = "- この相手と話すのは初めて。"
+    else:
+        days = days_between(previous_talk, started)
+        talk = (
+            "- 前にこの相手と話したのは同じ日。"
+            if days == 0
+            else f"- 前にこの相手と話してから{days}日。"
+        )
+
+    # 2. 水やり。この会話で水をもらったかと、この会話より前の最後の水やりから何日か
+    previous_water = store.last_watered_at(plant_id, before=started)
+    if store.watered_in_session(session_id):
+        water = "- この会話で水をもらった。" + (
+            f"その前に水をもらってから{days_between(previous_water, started)}日。"
+            if previous_water
+            else "それまで一度も水をもらったことがなかった。"
+        )
+    else:
+        water = "- この会話では水をもらっていない。" + (
+            f"最後に水をもらってから{days_between(previous_water, started)}日。"
+            if previous_water
+            else "まだ一度も水をもらったことがない。"
+        )
+    return [talk, water]
 
 
 async def reflect_session(
