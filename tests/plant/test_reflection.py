@@ -337,8 +337,10 @@ async def test_reflection_input_has_care_intervals(store):
     await reflect_session(store, "a", sid, fake, NOW)
     user = fake.calls[0][0][-1]["content"]
     assert "## 世話の様子" in user
-    assert "前にこの相手と話してから3日" in user  # 5 日前 → 2 日前
-    assert "この会話で水をもらった。その前に水をもらってから3日" in user
+    assert (
+        "前にこの相手と話してから3日（しばらく話しかけてもらえず、さみしかった" in user
+    )  # 5 日前 → 2 日前
+    assert "この会話で水をもらった（energy を少し上げてよい）" in user
 
 
 async def test_reflection_input_first_talk_and_no_water(store):
@@ -347,7 +349,8 @@ async def test_reflection_input_first_talk_and_no_water(store):
     await reflect_session(store, "a", sid, fake, NOW)
     user = fake.calls[0][0][-1]["content"]
     assert "この相手と話すのは初めて" in user
-    assert "この会話では水をもらっていない。まだ一度も水をもらったことがない" in user
+    # 育ち始めて 1 日なので、一度も水をもらっていなくても渇いていない
+    assert "まだ一度も水をもらっていない（水は足りている" in user
 
 
 async def test_reflection_talk_interval_is_per_person(store):
@@ -360,7 +363,27 @@ async def test_reflection_talk_interval_is_per_person(store):
     assert "前にこの相手と話してから6日" in fake.calls[0][0][-1]["content"]
 
 
+async def test_daily_talk_without_water_is_not_judged_as_neglect(store):
+    # 毎日話しかけ、2 日前に水をもらっている → 「水をもらっていない」を放っておかれたと読ませない
+    _session(store, NOW - timedelta(days=2), watered=True)
+    _session(store, NOW - timedelta(days=1))
+    sid = _session(store, NOW - timedelta(hours=1))
+    fake = FakeCompleter([VALID])
+    await reflect_session(store, "a", sid, fake, NOW)
+    user = fake.calls[0][0][-1]["content"]
+    assert "前にこの相手と話してから1日（毎日のように話しかけてもらえている" in user
+    assert "最後に水をもらってから2日（水は足りている。energy を下げる理由にはならない）" in user
+
+
+async def test_no_water_for_three_days_is_thirsty(store):
+    _session(store, NOW - timedelta(days=4), watered=True)
+    sid = _session(store, NOW - timedelta(hours=1))
+    fake = FakeCompleter([VALID])
+    await reflect_session(store, "a", sid, fake, NOW)
+    assert "最後に水をもらってから4日（のどが渇いて元気がない" in fake.calls[0][0][-1]["content"]
+
+
 def test_system_message_explains_care_for_affection_and_energy():
     from agent.plant.reflection import SYSTEM_MESSAGE
 
-    assert "世話の様子" in SYSTEM_MESSAGE and "affection" in SYSTEM_MESSAGE
+    assert "世話の様子" in SYSTEM_MESSAGE and "（）に書いた判断に従う" in SYSTEM_MESSAGE

@@ -103,11 +103,9 @@ SYSTEM_MESSAGE = """あなたは観葉植物「ふたまる」の記憶係。持
 - trait_deltas は今回の会話で性格がどう変わるかの判定:
   talkativeness は話しかけ頻度・会話の長さ、affection は褒め言葉・優しい言葉の量、
   energy はユーザーの口調・話題の明るさ、curiosity はユーザーが自分の話をする量で判断する。
-- 「## 世話の様子」も trait_deltas の判断に使う（植物は世話のしかたでも育ち方が変わる）:
-  affection は、前にこの相手と話してから 3 日以上あいていれば少し下げ（さみしくてすねる）、
-  毎日のように話しかけられていれば少し上げる。
-  energy は、この会話で水をもらった・水をこまめにもらっていれば少し上げ、
-  水をもらってから 3 日以上たっていれば少し下げる（のどが渇いて元気がない）。
+- 「## 世話の様子」も trait_deltas の判断に使う（植物は世話のしかたでも育ち方が変わる）。
+  各行の（）に書いた判断に従う。（）に「下げる」と書いていない限り、世話の様子を理由に
+  affection や energy を下げない（水をあげない日があるのはふつうのこと）。
 - owner_dialect は「持ち主」の発言（ふたまるの発言は見ない）の方言を判定する。
   standard（標準語）/ kansai（関西弁）/ hakata（博多弁）/ hiroshima（広島弁）のどれか。
   発言が短い・少ない・方言の特徴が読み取れないなど判断できないときは unknown にする。
@@ -278,6 +276,12 @@ def _build_messages(
     return [{"role": "system", "content": SYSTEM_MESSAGE}, {"role": "user", "content": user}]
 
 
+# 「世話の様子」で、何日あいたら「さみしい」「のどが渇いた」とみなすか（#83）。
+# のどの渇きは、植物が「のど渇いた」と言い出す日数（.env の WATER_REMIND_DAYS の既定）と同じにしている
+CARE_LONELY_DAYS = 3
+CARE_THIRSTY_DAYS = 3
+
+
 def _care_lines(
     store: PlantStore, plant_id: str, session_id: int, person_id: int | None
 ) -> list[str]:
@@ -285,14 +289,19 @@ def _care_lines(
 
     植物の性格は、話し方だけでなく世話のしかたでも変わるようにする。
     放っておかれるとすねる（affection が下がる）、こまめに水をもらうと元気（energy が上がる）。
-    LLM が判断できるよう、話しかけの間隔と水やりの間隔を、会話ログと一緒に渡す。
+
+    なぜ日数だけでなく、判断まで書くのか:
+        最初は「前にこの相手と話してから1日」「この会話では水をもらっていない」と事実だけを渡していた。
+        すると LLM は「水をもらっていない」を「放っておかれた」と受け取り、毎日話しかけて
+        2 日前に水をもらっている株でも、毎回 affection と energy を下げてしまった（gpt-4o-mini で 3 回中 3 回）。
+        天気（weather.describe_weather）と同じく、コードで判断した言葉を（）で添えて、読み違えを防ぐ。
 
     日数は「この会話が始まった時刻」から数える。振り返りは会話が終わったあと（ときには
     エージェントの再起動後に何日も遅れて）行われるので、振り返った時刻から数えるとずれるため。
 
     戻り値の例:
-        ["- 前にこの相手と話してから3日。",
-         "- この会話で水をもらった。その前に水をもらってから4日。"]
+        ["- 前にこの相手と話してから1日（毎日のように話しかけてもらえている。affection を少し上げてよい）。",
+         "- この会話では水をもらっていない。最後に水をもらってから2日（水は足りている。energy を下げる理由にはならない）。"]
     """
     session = store.get_session(session_id)
     started = parse_iso(session.started_at)
@@ -300,29 +309,33 @@ def _care_lines(
     # 1. 話しかけの間隔。この相手（お客さんなら相手を問わず）との、この会話より前の会話から数える
     previous_talk = store.last_talk_at(plant_id, person_id, before=started)
     if previous_talk is None:
-        talk = "- この相手と話すのは初めて。"
+        talk = "- この相手と話すのは初めて（間隔では affection を動かさない）。"
     else:
         days = days_between(previous_talk, started)
-        talk = (
-            "- 前にこの相手と話したのは同じ日。"
-            if days == 0
-            else f"- 前にこの相手と話してから{days}日。"
-        )
+        when = "同じ日" if days == 0 else f"{days}日"
+        if days <= 1:
+            judge = "毎日のように話しかけてもらえている。affection を少し上げてよい"
+        elif days < CARE_LONELY_DAYS:
+            judge = "ふつうの間隔。間隔では affection を動かさない"
+        else:
+            judge = "しばらく話しかけてもらえず、さみしかった。affection を少し下げる"
+        talk = f"- 前にこの相手と話してから{when}（{judge}）。"
 
-    # 2. 水やり。この会話で水をもらったかと、この会話より前の最後の水やりから何日か
-    previous_water = store.last_watered_at(plant_id, before=started)
+    # 2. 水やり。この会話で水をもらったか、もらっていなければ前の水やりから何日か。
+    #    一度ももらっていなければ、育ち始めた日から数える（育ち始めたばかりなら渇いていない）
     if store.watered_in_session(session_id):
-        water = "- この会話で水をもらった。" + (
-            f"その前に水をもらってから{days_between(previous_water, started)}日。"
-            if previous_water
-            else "それまで一度も水をもらったことがなかった。"
-        )
+        water = "- この会話で水をもらった（energy を少し上げてよい）。"
     else:
-        water = "- この会話では水をもらっていない。" + (
-            f"最後に水をもらってから{days_between(previous_water, started)}日。"
-            if previous_water
-            else "まだ一度も水をもらったことがない。"
+        previous_water = store.last_watered_at(plant_id, before=started)
+        since = days_between(previous_water or store.plant_created_at(plant_id), started)
+        fact = (
+            f"最後に水をもらってから{since}日" if previous_water else "まだ一度も水をもらっていない"
         )
+        if since >= CARE_THIRSTY_DAYS:
+            judge = "のどが渇いて元気がない。energy を少し下げる"
+        else:
+            judge = "水は足りている。energy を下げる理由にはならない"
+        water = f"- この会話では水をもらっていない。{fact}（{judge}）。"
     return [talk, water]
 
 
