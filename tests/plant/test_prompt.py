@@ -164,3 +164,9 @@ def test_prompt_includes_plant_status_only_when_given():
         "ふたまる", Traits(), [], None, NOW, plant_status="植物の状態:\n- 育ち始めて5日目。"
     )
     assert "育ち始めて5日目" in p
+
+
+def test_status_includes_weather_when_given():
+    text = plant_status_text(NOW, None, NOW, weather="今日の天気は晴れ。")
+    assert text.splitlines()[1] == "- 今日の天気は晴れ。"  # 天気を最初に置く
+    assert "天気" not in plant_status_text(NOW, None, NOW)

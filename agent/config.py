@@ -66,6 +66,10 @@ class Config:
     # --- 話し終わりの判定（#39）。短くするほど返事が早いが、言葉の途中の間で割り込みやすくなる ---
     vad_min_silence: float  # 声が途切れてから「話し終わった」とみなすまでの無音の秒数（VAD）
     endpointing_delay: float  # VAD が話し終わりと判定してから、返事を作り始めるまでの待ちの秒数
+    # --- 天気（仕様 §6.7、#80）。緯度・経度が無ければ天気を使わない ---
+    plant_latitude: float | None  # 天気を取る場所の緯度（例: 35.68）
+    plant_longitude: float | None  # 天気を取る場所の経度（例: 139.76）
+    weather_dry_humidity: float  # 湿度がこの値（%）未満なら「乾燥している」と言う
 
 
 def db_path_from_env(env: Mapping[str, str] = os.environ) -> str:
@@ -138,6 +142,18 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         else DEFAULT_WAKE_WORDS
     )
 
+    # 天気を取る場所。緯度・経度はそろって初めて使えるので、片方だけなら書き忘れとして止める（#80）
+    lat_raw, lon_raw = get("PLANT_LATITUDE"), get("PLANT_LONGITUDE")
+    if (lat_raw is None) != (lon_raw is None):
+        raise ConfigError("PLANT_LATITUDE と PLANT_LONGITUDE は両方書くか、両方空にしてください")
+    try:
+        plant_latitude = float(lat_raw) if lat_raw is not None else None
+        plant_longitude = float(lon_raw) if lon_raw is not None else None
+    except ValueError as e:
+        raise ConfigError(
+            f"PLANT_LATITUDE・PLANT_LONGITUDE は数字にしてください: {lat_raw}, {lon_raw}"
+        ) from e
+
     # get(名前, 既定値): .env に無ければ既定値を使う。required(名前): .env に無ければ起動しない
     return Config(
         llm_base_url=required("LLM_BASE_URL"),
@@ -167,4 +183,7 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         # 既定の値は LiveKit の既定と同じ（Silero VAD 0.55 秒、endpointing 0.5 秒）。#39 で測って決める
         vad_min_silence=float(get("VAD_MIN_SILENCE_SECONDS", "0.55")),
         endpointing_delay=float(get("ENDPOINTING_DELAY_SECONDS", "0.5")),
+        plant_latitude=plant_latitude,
+        plant_longitude=plant_longitude,
+        weather_dry_humidity=float(get("WEATHER_DRY_HUMIDITY", "40")),
     )

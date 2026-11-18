@@ -17,7 +17,8 @@ from .timeutil import JST, parse_iso
 # 「ふたまる」とだけ呼ばれて起きたとき、植物から話しかけさせるための指示（main.py の direction_ctx で使う）
 # 植物の状態（育った日数など、§6.7）を先に一言伝えさせ、そのあと記憶や前回の会話に触れさせる（#82）
 WAKE_GREETING_INSTRUCTION = (
-    "持ち主に呼ばれて起きた。まず自分の状態（育った日数や、前に話してからの日数）を一言伝え、"
+    "持ち主に呼ばれて起きた。まず自分の状態（天気で感じていること、育った日数、"
+    "前に話してからの日数）を一言伝え、"
     "記憶や前回の会話も踏まえて短く話しかける。"
 )
 # 持ち主がしばらく黙っているとき、植物から話題を振らせるための指示（仕様 §7.2）
@@ -111,24 +112,37 @@ def days_between(earlier: datetime, now: datetime) -> int:
     return (now.astimezone(JST).date() - earlier.astimezone(JST).date()).days
 
 
-def plant_status_text(created_at: datetime, last_talk_at: datetime | None, now: datetime) -> str:
-    """育った日数と、前に話してからの日数を、プロンプトの 1 段落にする（仕様 §6.7、#82）。
+def plant_status_text(
+    created_at: datetime,
+    last_talk_at: datetime | None,
+    now: datetime,
+    *,
+    weather: str | None = None,
+) -> str:
+    """天気・育った日数・前に話してからの日数を、プロンプトの 1 段落にする（仕様 §6.7、#80・#82）。
 
     引数:
         created_at: 株を作った（育ち始めた）時刻
         last_talk_at: 前の会話が終わった時刻。まだ誰とも話していなければ None
         now: 現在時刻
+        weather: 天気の 1 文（weather.describe_weather で作る、#80）。取れていなければ None
     戻り値の例:
         植物の状態:
+        - 今日の天気は晴れ。気温 8℃（さむい）、湿度 30%（乾燥している）。
         - 育ち始めて30日目。今日は30日目の節目なので、そのことに触れて喜ぶ。
         - 前に話しかけてもらってから3日ぶり。
     """
-    # 1. 育った日数。作った日を 1 日目とする（0 日目は言いにくいため）
+    lines: list[str] = []
+    # 1. 天気。植物の体にいちばん直接ひびくので最初に置く（#80）
+    if weather:
+        lines.append(f"- {weather}")
+    # 2. 育った日数。作った日を 1 日目とする（0 日目は言いにくいため）
     day = days_between(created_at, now) + 1
-    lines = [f"- 育ち始めて{day}日目。"]
+    grown = f"- 育ち始めて{day}日目。"
     if day in MILESTONE_DAYS:
-        lines[0] += f"今日は{day}日目の節目なので、そのことに触れて喜ぶ。"
-    # 2. 前に話してからの日数。日数をどう受け取るか（さみしい・うれしい）は性格の指示に任せる
+        grown += f"今日は{day}日目の節目なので、そのことに触れて喜ぶ。"
+    lines.append(grown)
+    # 3. 前に話してからの日数。日数をどう受け取るか（さみしい・うれしい）は性格の指示に任せる
     if last_talk_at is None:
         lines.append("- 話しかけてもらうのは今日が初めて。")
     else:

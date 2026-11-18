@@ -49,8 +49,10 @@ from agent.plant.expression import ExpressionParser
 from agent.plant.prompt import FALLBACK_REPLY, NUDGE_INSTRUCTION, WAKE_GREETING_INSTRUCTION
 from agent.plant.store import PlantStore
 from agent.plant.timeutil import jst_now
+from agent.plant.weather import WeatherCache
 from agent.plugins.aivis_tts import create_aivis_tts
 from agent.plugins.llm import create_json_completer, create_llm
+from agent.plugins.open_meteo import fetch_current_weather
 from agent.plugins.openai_tts import create_tts
 from agent.plugins.whisper_stt import create_stt
 
@@ -252,6 +254,21 @@ def prewarm(proc: JobProcess) -> None:
 server = AgentServer(setup_fnc=prewarm)
 
 
+def create_weather_cache(cfg: Config) -> WeatherCache | None:
+    """天気を取って覚えておく WeatherCache を作る（仕様 §6.7、#80）。
+
+    .env に緯度・経度（PLANT_LATITUDE / PLANT_LONGITUDE）が無ければ None（天気を使わない）。
+    """
+    if cfg.plant_latitude is None or cfg.plant_longitude is None:
+        return None
+    lat, lon = cfg.plant_latitude, cfg.plant_longitude
+
+    async def fetch():
+        return await fetch_current_weather(lat, lon)
+
+    return WeatherCache(fetch, jst_now)
+
+
 def resolve_plant_id(room_name: str, cfg: Config) -> str | None:
     """ルーム名から、どの株（plant_id）として会話するかを決める。None なら参加せず退出する。
 
@@ -302,6 +319,8 @@ async def entrypoint(ctx: JobContext) -> None:
         clock=jst_now,
         wake_words=cfg.wake_words,
         sleep_after=cfg.sleep_after,
+        weather=create_weather_cache(cfg),
+        dry_humidity=cfg.weather_dry_humidity,
     )
 
     # --- 3. 声 → 文字 → 返事 → 声 の流れ（AgentSession）を作る ---

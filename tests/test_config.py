@@ -115,3 +115,30 @@ def test_unknown_tts_provider_is_rejected():
 def test_aivis_base_url_from_env_needs_no_other_variables():
     assert aivis_base_url_from_env({}) == "http://127.0.0.1:10101"
     assert aivis_base_url_from_env({"AIVIS_BASE_URL": "http://gpu:10101"}) == "http://gpu:10101"
+
+
+# --- 天気を取る場所（仕様 §6.7、#80） ---
+def test_weather_is_off_by_default():
+    c = load_config(BASE)
+    assert (c.plant_latitude, c.plant_longitude, c.weather_dry_humidity) == (None, None, 40.0)
+
+
+def test_weather_location_and_dry_humidity():
+    c = load_config(
+        BASE
+        | {"PLANT_LATITUDE": "35.68", "PLANT_LONGITUDE": "139.76", "WEATHER_DRY_HUMIDITY": "35"}
+    )
+    assert (c.plant_latitude, c.plant_longitude, c.weather_dry_humidity) == (35.68, 139.76, 35.0)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"PLANT_LATITUDE": "35.68"},
+        {"PLANT_LONGITUDE": "139.76"},
+        {"PLANT_LATITUDE": "北", "PLANT_LONGITUDE": "139.76"},
+    ],
+)
+def test_weather_location_needs_both_numbers(extra):
+    with pytest.raises(ConfigError):
+        load_config(BASE | extra)
