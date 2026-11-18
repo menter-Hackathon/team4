@@ -86,13 +86,15 @@ CREATE TABLE IF NOT EXISTS trait_history (
   recorded_at    TEXT NOT NULL
 );
 
--- 声で記録した水やり（仕様 §6.7、#81）。1 回の会話（セッション）で 1 行まで
+-- 声で記録した水やり（仕様 §6.7、#81）。「お水あげたよ」と言われるたびに 1 行足す。
+-- 1 回の会話（セッション）で 1 行まで（add_watering が確かめる）。
+-- 新しいテーブルなので、古い DB でも起動時の CREATE TABLE IF NOT EXISTS で作られる（列の追加は要らない）
 CREATE TABLE IF NOT EXISTS waterings (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  plant_id    TEXT NOT NULL REFERENCES plants(plant_id),
-  person_id   INTEGER REFERENCES people(id),
-  session_id  INTEGER REFERENCES sessions(id),
-  watered_at  TEXT NOT NULL
+  plant_id    TEXT NOT NULL REFERENCES plants(plant_id),  -- どの株に
+  person_id   INTEGER REFERENCES people(id),              -- 誰が（NULL = お客さん・名乗る前）
+  session_id  INTEGER REFERENCES sessions(id),            -- どの会話で
+  watered_at  TEXT NOT NULL                               -- いつ（JST の ISO 8601 文字列）
 );
 """
 
@@ -273,7 +275,12 @@ class PlantStore:
         return self.get_plant(plant_id)
 
     def plant_created_at(self, plant_id: str) -> datetime:
-        """株を作った（育ち始めた）時刻。「育ち始めて何日目か」に使う（仕様 §6.7、#82）。無ければ KeyError。"""
+        """株を作った（育ち始めた）時刻。「育ち始めて何日目か」に使う（仕様 §6.7、#82）。
+
+        株は、エージェントが初めてその株のルームに入ったときに作られる（get_or_create_plant）。
+        デモで「30 日目」と言わせたいときは、この created_at を 30 日前の時刻に書き換えておく。
+        株が無ければ KeyError。
+        """
         row = self._conn.execute(
             "SELECT created_at FROM plants WHERE plant_id = ?", (plant_id,)
         ).fetchone()
@@ -475,13 +482,17 @@ class PlantStore:
         """前に話した会話が終わった時刻。「何日ぶりか」に使う（仕様 §6.7、#82）。
 
         引数:
-            person_id: その人との会話だけを見る。None なら相手を問わず（お客さんも含めて）一番最近の会話
+            person_id: その人との会話だけを見る。None なら相手を問わず（お客さんも含めて）一番最近の会話。
+                起きた直後はまだ相手が分からないので None で呼ばれ、名乗ったあとはその人の id で呼ばれる
         戻り値:
             一番最近に終わったセッションの ended_at。まだ一度も話していなければ None
         今のセッションはまだ終わっていない（ended_at が NULL）ので、ここには入らない。
+        つまり「今の会話」ではなく「前の会話」の時刻が返る。
         """
+        # 1. まず「この株の、終わった会話」を全部対象にする SQL を作る
         sql = "SELECT MAX(ended_at) AS t FROM sessions WHERE plant_id = ? AND ended_at IS NOT NULL"
         args: tuple = (plant_id,)
+        # 2. 人が決まっていれば、その人との会話だけに絞る条件を足す
         if person_id is not None:
             sql += " AND person_id = ?"
             args = (plant_id, person_id)
@@ -506,9 +517,17 @@ class PlantStore:
     ) -> bool:
         """水やりを 1 回記録する。同じ会話（session_id）でもう記録していれば何もしない。
 
+        引数:
+            plant_id: どの株に
+            person_id: 誰が（相手が未確定・お客さんなら None）
+            session_id: どの会話で
+            now: 水をあげた時刻
         戻り値: 記録したら True、同じ会話ですでに記録済みなら False。
         「お水あげたよ」「水やりもしたよ」と 1 回の会話で 2 回言われても、1 回の水やりとして数えるため。
+        会話中（conversation.py）と、眠ったあとの振り返り（reflection.py）の両方から呼ばれるが、
+        このしくみのおかげで、両方が同じ水やりを見つけても二重に数えない。
         """
+        # with self._conn: の中は 1 つのまとまり（トランザクション）として書き込まれる
         with self._conn:
             if self.watered_in_session(session_id):
                 return False
@@ -520,14 +539,23 @@ class PlantStore:
         return True
 
     def watered_in_session(self, session_id: int) -> bool:
-        """その会話で水やりを記録済みか。"""
+        """その会話（session_id）で水やりを記録済みなら True。
+
+        プロンプトに「この会話で水をもらった」を入れるかどうか、と
+        add_watering が 2 回目を記録しないための確認に使う。
+        """
         row = self._conn.execute(
             "SELECT 1 FROM waterings WHERE session_id = ? LIMIT 1", (session_id,)
         ).fetchone()
         return row is not None
 
     def last_watered_at(self, plant_id: str) -> datetime | None:
-        """その株が最後に水をもらった時刻（誰からでも）。一度ももらっていなければ None。"""
+        """その株が最後に水をもらった時刻。一度ももらっていなければ None。
+
+        誰があげたかは問わない（植物ののどの渇きは、誰があげても同じなので）。
+        「のどが渇いた」と言うかどうかを決めるのに使う（prompt.py の _watering_line）。
+        時刻は同じ形の文字列で保存しているので、MAX（文字列の一番大きいもの）が一番新しい時刻になる。
+        """
         row = self._conn.execute(
             "SELECT MAX(watered_at) AS t FROM waterings WHERE plant_id = ?", (plant_id,)
         ).fetchone()
