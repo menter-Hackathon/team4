@@ -43,6 +43,7 @@ from livekit.agents import (
 from livekit.plugins import silero
 
 from agent.config import Config, load_config
+from agent.filler import FillerAudio, with_filler
 from agent.plant.conversation import PlantConversation
 from agent.plant.dialect import dialect_tts
 from agent.plant.expression import ExpressionParser
@@ -76,16 +77,26 @@ class FutamaruAgent(Agent):
     途中のいくつかの場所（〜_node や on_user_turn_completed）を上書きして、ふたまるの動きを足している:
         on_user_turn_completed: 返事する前に、返事すべきか（起きているか）を PlantConversation に聞く
         llm_node:               LLM が落ちても、代わりの返事を返す
-        tts_node:               読み上げる前に表情タグを外す
+        tts_node:               読み上げる前に表情タグを外す。返事が遅ければ先に「んー…」を流す（#39）
         transcription_node:     画面・ログに出す文字からも表情タグを外す
     """
 
-    def __init__(self, conv: PlantConversation, tts_instructions: str = "") -> None:
+    def __init__(
+        self,
+        conv: PlantConversation,
+        tts_instructions: str = "",
+        *,
+        filler: FillerAudio | None = None,
+        filler_delay: float = 0.0,
+    ) -> None:
         # システムプロンプト（instructions）は起きるたびに作るので、最初は空にしておく
         super().__init__(instructions="")
         self._conv = conv
         # TTS（声）の基本の話し方の指示。方言が決まったら、これの後ろに方言の指示を足す
         self._tts_instructions = tts_instructions
+        # 考え中のつなぎ（agent/filler.py、#39）。filler が None か filler_delay が 0 なら使わない
+        self._filler = filler
+        self._filler_delay = filler_delay
 
     def _apply_dialect(self, dialect: str) -> None:
         """話し相手の方言に合わせて、TTS の話し方の指示を差し替える。
@@ -186,8 +197,14 @@ class FutamaruAgent(Agent):
             if tail.text:
                 yield tail.text
 
-        # LiveKit 標準の TTS 処理に、タグを外した文字を渡す。できた音声（frame）をそのまま流す
-        async for frame in Agent.default.tts_node(self, cleaned(), model_settings):
+        # LiveKit 標準の TTS 処理に、タグを外した文字を渡す。できた音声（frame）を流す
+        audio = Agent.default.tts_node(self, cleaned(), model_settings)
+        if self._filler is None:
+            async for frame in audio:
+                yield frame
+            return
+        # 返事の最初の音が filler_delay 秒たっても来なければ、先に「んー…」を流す（#39）
+        async for frame in with_filler(audio, self._filler.pick, delay=self._filler_delay):
             yield frame
 
     async def transcription_node(
@@ -334,11 +351,13 @@ async def entrypoint(ctx: JobContext) -> None:
     # VAD は prewarm で読み込み済みなので、ここで設定だけ変える
     vad = ctx.proc.userdata["vad"]
     vad.update_options(min_silence_duration=cfg.vad_min_silence)
+    # TTS は .env の TTS_PROVIDER で選ぶ。aivis ならローカルの AivisSpeech（仕様 §8.3、#56）。
+    # 考え中のつなぎを前もって声にするのにも使うので、変数に入れておく
+    tts = create_aivis_tts(cfg) if cfg.tts_provider == "aivis" else create_tts(cfg)
     session = AgentSession(
         stt=create_stt(cfg),
         llm=create_llm(cfg),
-        # TTS は .env の TTS_PROVIDER で選ぶ。aivis ならローカルの AivisSpeech（仕様 §8.3、#56）
-        tts=create_aivis_tts(cfg) if cfg.tts_provider == "aivis" else create_tts(cfg),
+        tts=tts,
         vad=vad,  # prewarm で読み込んでおいた VAD
         turn_handling=turn_handling(cfg),  # 話し終わりの判定（turn_handling の説明を参照）
         user_away_timeout=None,  # 黙っているときの扱いは、こちらの無言タイマーで行うので LiveKit 側は切る
@@ -352,7 +371,14 @@ async def entrypoint(ctx: JobContext) -> None:
             max_unrecoverable_errors=1_000_000,
         ),
     )
-    agent = FutamaruAgent(conv, cfg.tts_instructions)
+    # 考え中のつなぎ（#39）。返事と同じ声で「んー…」などを前もって声にしておく。
+    # 声にするのに数秒かかるので、待たずに裏で進める（できあがるまでの返事には、つなぎが付かない）
+    filler: FillerAudio | None = None
+    if cfg.filler_delay > 0:
+        filler = FillerAudio()
+        filler_task = asyncio.create_task(filler.prepare(tts))
+        ctx.add_shutdown_callback(lambda: _cancel(filler_task))
+    agent = FutamaruAgent(conv, cfg.tts_instructions, filler=filler, filler_delay=cfg.filler_delay)
 
     # --- 4. LiveKit の出来事を、植物のロジックにつなぐ ---
     # @session.on("名前") / @ctx.room.on("名前") を付けた関数は、その出来事が起きるたびに LiveKit から呼ばれる

@@ -161,3 +161,8 @@ def test_water_remind_days():
 def test_plant_species():
     assert load_config(BASE).plant_species == "ポトス"
     assert load_config(BASE | {"PLANT_SPECIES": "モンステラ"}).plant_species == "モンステラ"
+
+
+def test_filler_delay():
+    assert load_config(BASE).filler_delay == 1.5
+    assert load_config(BASE | {"FILLER_DELAY_SECONDS": "0"}).filler_delay == 0.0

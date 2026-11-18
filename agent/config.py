@@ -66,6 +66,8 @@ class Config:
     # --- 話し終わりの判定（#39）。短くするほど返事が早いが、言葉の途中の間で割り込みやすくなる ---
     vad_min_silence: float  # 声が途切れてから「話し終わった」とみなすまでの無音の秒数（VAD）
     endpointing_delay: float  # VAD が話し終わりと判定してから、返事を作り始めるまでの待ちの秒数
+    # 返事の最初の音がこの秒数たっても来なければ、先に「んー…」を流す（agent/filler.py、#39）。0 なら使わない
+    filler_delay: float
     # --- 天気（気象庁のデータ、仕様 §6.7、#80）。両方 None なら天気を使わない ---
     jma_amedas_station: str | None  # 気温・湿度を取るアメダスの観測所のコード（例: "44132" 東京）
     jma_forecast_area: str | None  # 空の様子を取る予報の地域コード（例: "130000" 東京都）
@@ -193,6 +195,7 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         # 既定の値は LiveKit の既定と同じ（Silero VAD 0.55 秒、endpointing 0.5 秒）。#39 で測って決める
         vad_min_silence=float(get("VAD_MIN_SILENCE_SECONDS", "0.55")),
         endpointing_delay=float(get("ENDPOINTING_DELAY_SECONDS", "0.5")),
+        filler_delay=float(get("FILLER_DELAY_SECONDS", "1.5")),
         jma_amedas_station=jma_amedas_station,
         jma_forecast_area=jma_forecast_area,
         weather_dry_humidity=float(get("WEATHER_DRY_HUMIDITY", "40")),

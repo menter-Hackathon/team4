@@ -210,3 +210,25 @@ def test_weather_cache_only_when_location_is_set():
     assert main.create_weather_cache(load_config(CFG)) is None
     assert main.create_weather_cache(load_config({**CFG, "JMA_AMEDAS_STATION": "44132"}))
     assert main.create_weather_cache(load_config({**CFG, "JMA_FORECAST_AREA": "130000"}))
+
+
+async def test_tts_node_plays_filler_when_reply_is_slow(monkeypatch):
+    # 返事の音が遅いときは、先につなぎ（「んー…」）の音を流す（#39）
+    import asyncio
+
+    from agent.filler import FillerAudio
+
+    async def slow_tts(self, text, model_settings):
+        async for _ in text:
+            pass
+        await asyncio.sleep(0.05)
+        yield "reply"
+
+    async def stream():
+        yield "[happy]こんにちは"
+
+    monkeypatch.setattr(Agent.default, "tts_node", slow_tts)
+    filler = FillerAudio()
+    filler._clips = [["filler"]]  # 前もって声にしたつなぎの代わり
+    agent = main.FutamaruAgent(FakeConv(), filler=filler, filler_delay=0.01)
+    assert [f async for f in agent.tts_node(stream(), None)] == ["filler", "reply"]
