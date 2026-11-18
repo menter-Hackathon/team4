@@ -72,6 +72,8 @@ class Config:
     weather_dry_humidity: float  # 湿度がこの値（%）未満なら「乾燥している」と言う
     water_remind_days: int  # 水をもらってからこの日数たつと「のどが渇いた」と言う（§6.7、#81）
     plant_species: str  # 植物の種類（例: ポトス）。育て方のメモをプロンプトに入れる（§6.7、#83）
+    # 名乗った名前で新しい人を登録するか（§6.5、#72）。デモでは false にして、登録済みの人だけにする
+    allow_new_people: bool
 
 
 def db_path_from_env(env: Mapping[str, str] = os.environ) -> str:
@@ -164,6 +166,16 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
             f"JMA_FORECAST_AREA は 6 桁の数字（例: 130000）にしてください: {jma_forecast_area}"
         )
 
+    # 新しい人を登録するか（#72）。true / false で書く。書き間違い（"flase" など）は、
+    # 黙って既定に戻すとデモで別人が登録されてしまうので、起動時に止める
+    allow_raw = get("ALLOW_NEW_PEOPLE", "true").lower()
+    if allow_raw in ("true", "1", "yes"):
+        allow_new_people = True
+    elif allow_raw in ("false", "0", "no"):
+        allow_new_people = False
+    else:
+        raise ConfigError(f"ALLOW_NEW_PEOPLE は true か false にしてください: {allow_raw}")
+
     # get(名前, 既定値): .env に無ければ既定値を使う。required(名前): .env に無ければ起動しない
     return Config(
         llm_base_url=required("LLM_BASE_URL"),
@@ -198,4 +210,5 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         weather_dry_humidity=float(get("WEATHER_DRY_HUMIDITY", "40")),
         water_remind_days=int(get("WATER_REMIND_DAYS", "3")),
         plant_species=get("PLANT_SPECIES", "ポトス"),
+        allow_new_people=allow_new_people,
     )
