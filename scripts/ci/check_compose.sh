@@ -13,7 +13,6 @@ fi
 #    コンテナ内の LLM・STT が使われること
 cp .env.example .env
 cat >> .env <<'ENV'
-HF_TOKEN=dummy
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 STT_BASE_URL=https://api.openai.com/v1
@@ -28,8 +27,9 @@ python3 - <<'PY'
 import json
 env = json.load(open("/tmp/compose.json"))["services"]["agent"]["environment"]
 want = {
-    "LLM_BASE_URL": "http://llm:8000/v1",
-    "LLM_MODEL": "google/gemma-4-E4B-it",
+    "LLM_BASE_URL": "http://llm:11434/v1",
+    "LLM_MODEL": "gemma4:e4b-it-q4_K_M",
+    "LLM_REASONING_EFFORT": "none",
     "STT_BASE_URL": "http://stt:8000/v1",
     "STT_MODEL": "kotoba-tech/kotoba-whisper-v2.0-faster",
     "DEV_PLANT_ID": "",
@@ -63,14 +63,37 @@ assert s["stt-init"]["environment"]["STT_MODEL"] == "Systran/faster-whisper-larg
 print("ok: DOCKER_STT_MODEL で STT のモデルを切り替えられる")
 PY
 
-# 3. HF_TOKEN は任意（Gemma 4 E4B は同意不要の公開モデル）。空でも compose の設定が組み立てられること
+# 2b. GPU の割り当てを .env の LLM_GPU・STT_GPU で変えられること、llm-init と agent が同じモデルを使うこと
+cat >> .env <<'ENV'
+LLM_GPU=1
+STT_GPU=0
+DOCKER_LLM_MODEL=gemma4:e4b-it-q8_0
+ENV
+docker compose config --format json > /tmp/compose.json
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))["services"]
+gpu = lambda name: s[name]["deploy"]["resources"]["reservations"]["devices"][0]["device_ids"]
+assert gpu("llm") == ["1"] and gpu("stt") == ["0"], (gpu("llm"), gpu("stt"))
+assert s["llm-init"]["environment"]["LLM_MODEL"] == "gemma4:e4b-it-q8_0", s["llm-init"]["environment"]
+assert s["agent"]["environment"]["LLM_MODEL"] == "gemma4:e4b-it-q8_0", s["agent"]["environment"]
+print("ok: LLM_GPU・STT_GPU・DOCKER_LLM_MODEL で切り替えられる")
+PY
+
+# 3. .env.example のままでも compose の設定が組み立てられ、LLM は 0 番・STT は 1 番の GPU を使うこと
 cp .env.example .env
 docker compose config -q
-echo "ok: HF_TOKEN が空でも起動できる"
+docker compose config --format json > /tmp/compose.json
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))["services"]
+gpu = lambda name: s[name]["deploy"]["resources"]["reservations"]["devices"][0]["device_ids"]
+assert gpu("llm") == ["0"] and gpu("stt") == ["1"], (gpu("llm"), gpu("stt"))
+print("ok: 既定では LLM が 0 番、STT が 1 番の GPU を使う")
+PY
 
 # 4. 声の設定が空（.env.example のまま）なら、tts-init は OpenAI の声として何もしない設定になり、
 #    声のスタイル ID は agent と同じ既定（まお / あまあま）になること
-docker compose config --format json > /tmp/compose.json
 python3 - <<'PY'
 import json
 env = json.load(open("/tmp/compose.json"))["services"]["tts-init"]["environment"]

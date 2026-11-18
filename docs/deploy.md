@@ -1,14 +1,14 @@
 # ふたまるの「脳」を Docker で動かす（デプロイ手順）
 
-NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM・STT・声）と、性格を見せるダッシュボードをまとめて動かす手順です。
+NVIDIA の GPU が 2 枚ある PC で、ふたまるの脳（エージェント・LLM・STT・声）と、性格を見せるダッシュボードをまとめて動かす手順です。
 準備ができたあとの、発表の日の手順は [`demo-day.md`](demo-day.md) にまとめています。
 鉢（ESP32）にはマイクとスピーカーだけがあり、LiveKit Cloud を通してこの PC の脳とつながります。
 
 ```
 鉢（ESP32: マイク・スピーカー） ──> LiveKit Cloud <── この PC の Docker
                                                       ├─ agent（エージェント）
-                                                      ├─ llm（Gemma 4 E4B）
-                                                      ├─ stt（kotoba-whisper）
+                                                      ├─ llm（Gemma 4 E4B の圧縮版、Ollama。GPU 1 枚目）
+                                                      ├─ stt（kotoba-whisper。GPU 2 枚目）
                                                       ├─ tts（AivisSpeech。TTS_PROVIDER=aivis のとき）
                                                       └─ dashboard（http://127.0.0.1:8765）
                                    TTS_PROVIDER=openai（既定）のときは、声に OpenAI を使う
@@ -18,9 +18,11 @@ NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM�
 
 ## 1. 必要なもの
 
-- **NVIDIA の GPU（メモリ 24GB 以上）がある PC**（x86_64）。LLM と STT を同じ GPU に載せます
-  - **24GB 未満の GPU では動きません。** LLM（Gemma 4 E4B）の重みだけで約 16GB あり、設定の調整では収まりません
-- **NVIDIA ドライバ 580 以上**（CUDA 13.0 対応）。LLM のイメージが CUDA 13.0 で作られているためです
+- **NVIDIA の GPU が 2 枚ある PC**（x86_64）。LLM と STT に 1 枚ずつ使います（デモの PC: RTX 5070 と RTX 5060）
+  - **LLM 用に 12GB 以上**の GPU。Gemma 4 E4B の圧縮版（`gemma4:e4b-it-q4_K_M`、約 6.6GB）と、会話の作業用メモリを載せます
+  - **STT 用に 8GB 以上**の GPU。kotoba-whisper を載せます
+  - 画面（モニター）は、STT 用の GPU につないでおくと安心です。画面の表示にも GPU のメモリを使うため、LLM 用の GPU の余裕が減ります
+- **NVIDIA ドライバ 570 以上**（RTX 50 シリーズに必要）
 - Docker
   - **Windows**: Docker Desktop（WSL2 を使う設定）
   - **Linux**: Docker Engine と NVIDIA Container Toolkit
@@ -30,14 +32,25 @@ NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM�
 **GPU とドライバがコンテナから使えるか**を先に確かめます。
 
 ```bash
-docker run --rm --gpus all nvidia/cuda:13.0.1-base-ubuntu24.04 nvidia-smi
+docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi
 ```
 
-表示された表の右上の **`CUDA Version` が 13.0 以上**で、GPU のメモリ（`MiB` の右側）が 24GB（約 24000MiB）以上なら OK です。CUDA Version が 12.x なら、NVIDIA のサイトからドライバを更新してください。
+表示された表で、次の 3 つを確かめます。
 
-## 2. （任意）Hugging Face のトークンを用意する
+- 右上の **`CUDA Version` が 12.8 以上**（足りなければ、NVIDIA のサイトからドライバを更新する）
+- GPU が **2 枚**並んでいる
+- 各 GPU の**左端の番号（0 か 1）**と、メモリ（`MiB` の右側）。メモリの大きいほう（12GB ≒ 12000MiB）が LLM 用です
 
-Gemma 4 E4B（[google/gemma-4-E4B-it](https://huggingface.co/google/gemma-4-E4B-it)）は同意不要の公開モデル（Apache 2.0）なので、**トークンが無くてもダウンロードできます。** ダウンロードが回数制限で失敗するときだけ、https://huggingface.co の Settings → Access Tokens で **Read** のトークン（`hf_...`）を作って `.env` の `HF_TOKEN` に書いてください。
+## 2. どの GPU を何に使うか決める
+
+1 で見た番号を、3 で作る `.env` に書きます。**LLM にはメモリの大きい GPU** を使います。
+
+```
+LLM_GPU=0
+STT_GPU=1
+```
+
+書かなければ、LLM が 0 番、STT が 1 番を使います。1 の表で 0 番がメモリの小さい GPU（8GB）なら、`LLM_GPU=1`・`STT_GPU=0` と書いてください。
 
 ## 3. リポジトリと `.env` を用意する
 
@@ -58,13 +71,13 @@ mkdir -p data
 |---|---|
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | チームの LiveKit Cloud の値 |
 | `OPENAI_API_KEY` | チームの OpenAI のキー（声を OpenAI にするとき） |
-| `HF_TOKEN` | （任意）2 で作った Hugging Face のトークン |
+| `LLM_GPU` / `STT_GPU` | 2 で決めた GPU の番号（空なら LLM が 0、STT が 1） |
 | `TTS_PROVIDER` | 植物の声。`aivis`（AivisSpeech）か `openai`（空なら openai） |
 | `AIVIS_SPEAKER` | `aivis` のときの声のスタイル ID（空なら「まお / あまあま」）。例: `893625024` =「らせつん / 標準」 |
 | `AIVIS_MODELS` | （任意）AivisHub から入れる声のモデルの UUID（カンマ区切り。空ならせつん） |
 | `JMA_AMEDAS_STATION` / `JMA_FORECAST_AREA` | （任意）天気を取る場所。例: 東京なら `44132` / `130000`（`.env.example` の説明を参照） |
 
-`LLM_BASE_URL`・`LLM_MODEL`・`STT_BASE_URL`・`STT_MODEL`・`AIVIS_BASE_URL` は書かなくて大丈夫です。Docker では `compose.yaml` の設定（コンテナ内の LLM・STT・AivisSpeech）が使われます。開発用に OpenAI や手元の AivisSpeech を向けた値が書いてあっても、Docker では無視されます。
+`LLM_BASE_URL`・`LLM_MODEL`・`LLM_REASONING_EFFORT`・`STT_BASE_URL`・`STT_MODEL`・`AIVIS_BASE_URL` は書かなくて大丈夫です。Docker では `compose.yaml` の設定（コンテナ内の LLM・STT・AivisSpeech）が使われます。開発用に OpenAI や手元の AivisSpeech を向けた値が書いてあっても、Docker では無視されます。
 
 ## 4. 起動する
 
@@ -72,16 +85,16 @@ mkdir -p data
 docker compose up -d
 ```
 
-**初回はモデルのダウンロードで 10〜30 分ほどかかり、その間このコマンドは終わらずに待ち続けます（固まったように見えます）。** `llm` の準備ができて `stt-init`・`tts-init` が終わると、最後に `agent` を起動してから終わります。
+**初回はモデルのダウンロードで 10〜30 分ほどかかり、その間このコマンドは終わらずに待ち続けます（固まったように見えます）。** `llm-init`（Gemma 4 のダウンロード・読み込み）と `stt-init`・`tts-init` が終わると、最後に `agent` を起動してから終わります。
 
 - **途中で Ctrl+C を押したり、ターミナルを閉じたりしないでください。** `agent` が起動しないままになります。もし止めてしまったら、もう一度 `docker compose up -d` を実行すれば続きから進みます
-- 最後に `dependency failed to start` や `unhealthy` と出て終わった場合も、まず `docker compose up -d` をもう一度実行してください（ダウンロードが 60 分を超えたときなど）。それでも同じなら 7 を見てください
+- 最後に `dependency failed to start` と出て終わった場合も、まず `docker compose up -d` をもう一度実行してください（ダウンロードが途中で止まったときなど）。それでも同じなら 7 を見てください
 
 進み具合は、**別のターミナルを開いて**ログで見られます。
 
 ```bash
 docker compose ps                # 各サービスの状態
-docker compose logs -f llm       # LLM のダウンロード・起動のログ（Ctrl+C で抜ける。止まりはしない）
+docker compose logs -f llm-init  # Gemma 4 のダウンロード・GPU への読み込みの結果（Ctrl+C で抜ける。止まりはしない）
 docker compose logs stt-init     # STT のモデルのダウンロード・読み込みの結果
 docker compose logs tts-init     # 声のモデルのダウンロード・読み込みの結果（aivis のとき）
 docker compose logs -f agent     # エージェントのログ
@@ -89,7 +102,8 @@ docker compose logs -f agent     # エージェントのログ
 
 ## 5. 動いたか確かめる
 
-1. `docker compose ps -a` で `llm` が `healthy`、`stt-init` と `tts-init` が `exited (0)`、`tts` と `agent` が `running` になっている
+1. `docker compose ps -a` で `llm-init`・`stt-init`・`tts-init` が `exited (0)`、ほかが `running` になっている
+   - `docker compose logs llm-init` に「モデルが全部 GPU に載りました」と出ている。「注意: モデルの …% しか GPU に載っていません」と出たら、`.env` の `LLM_GPU` がメモリの大きい GPU の番号か確かめる（2 を参照）
    - `TTS_PROVIDER=aivis` なら、`docker compose logs tts-init` の最後に `準備完了` と出ている（openai なら「準備はしません」と出るだけでよい）
 2. `docker compose logs agent` に `registered worker` などの、LiveKit Cloud へ接続したログが出ている
 3. 鉢（ESP32）の電源を入れる。ESP32 がルーム `plant-<id>` に入ると、エージェントが参加する
@@ -105,7 +119,7 @@ git pull && docker compose up -d --build   # コードを更新して起動し�
 
 - **植物の記憶**（会話ログ・性格）は、この PC の `data/futamaru.db` に残ります。コンテナを作り直しても消えません
 - `docker compose down -v` はモデルの保存場所も消します（次の起動で再ダウンロード）。植物の記憶（`data/`）は消えません
-- **PC を再起動したとき**は、コンテナは自動で起動し直します（`restart: unless-stopped`）。ただし、このときは起動の順番が守られず、`agent` が `llm` より先に動き出します。`docker compose ps` で `llm` が `healthy` になるまで（モデルはダウンロード済みなので 1〜2 分）待ってから話しかけてください。それまでに話しかけると、植物は「ん…ちょっとぼーっとしてた」と返します（#40）
+- **PC を再起動したとき**は、コンテナは自動で起動し直します（`restart: unless-stopped`）。ただし、`llm-init` は動かないので、Gemma 4 は最初の返事のときに GPU へ読み込まれます。モデルはダウンロード済みなので、最初の返事が数秒〜十数秒遅れるだけです。気になるときは `docker compose up -d` をもう一度実行すると、`llm-init` が先に読み込ませます
 - DB を読み書きするコマンド（`scripts/` の下のもの）は、コンテナの中で `docker compose exec agent python -m scripts.<名前>` として動かします。Linux では DB のファイルが `root` の持ち物になるので、PC 側から直接書き換えないでください
 
 ## 6.4 デモ用：育てた株の DB に入れ替える
@@ -136,11 +150,10 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 
 | 症状 | 原因と対処 |
 |---|---|
-| `llm` のログに `401` / `403` | `.env` の `HF_TOKEN` が間違っているか期限切れ。正しいトークンに直すか、空にする（このモデルはトークン無しでも取れる） |
-| `llm` のログに `CUDA driver version is insufficient` | ドライバが古い（CUDA 13.0 に未対応）。1 の確認をして、ドライバを 580 以上に更新する |
-| `llm` のログに `less than desired GPU memory utilization` | ほかのプログラム（ゲーム・ブラウザ・`stt` など）が GPU メモリを使っている。ほかのアプリを閉じ、だめなら `compose.yaml` の `--gpu-memory-utilization` を `0.75` に**下げて** `docker compose up -d` |
-| `llm` のログに `No available memory for the cache blocks` か `larger than the available KV cache memory` | LLM の作業用メモリが足りない。`compose.yaml` の `--max-model-len` を `8192`（だめなら `4096`）に**下げる**。ほかのアプリを閉じられるなら `--gpu-memory-utilization` を `0.85` に**上げる**のも効く |
-| GPU が 24GB 未満 | この構成では動きません（1 を参照）。チームで 24GB 以上の GPU がある PC を探してください |
+| `llm-init` が `exited (1)` で終わり、`agent` が起動しない | `docker compose logs llm-init` を見る。「ダウンロードできません」ならインターネット接続か `.env` の `DOCKER_LLM_MODEL`、「読み込めません」なら `docker compose logs llm` で GPU のエラーを見る |
+| `llm` のログに `CUDA driver version is insufficient` | ドライバが古い。1 の確認をして、ドライバを更新する（570 以上） |
+| 返事がとても遅い（10 秒以上） | `docker compose logs llm-init` で、モデルが全部 GPU に載ったか見る。一部しか載っていなければ、`LLM_GPU` を 12GB の GPU にする。ゲームやブラウザなど、GPU を使うアプリを閉じる |
+| GPU が 1 枚しかない | LLM と STT を同じ GPU に載せる必要がある。`.env` に `LLM_GPU=0`・`STT_GPU=0` と書くと試せるが、12GB の GPU 1 枚では足りないことがある。Discord で相談してください |
 | `could not select device driver "nvidia"` | Docker から GPU が見えていない。1 の `nvidia-smi` の確認からやり直す（Windows は Docker Desktop の WSL2 設定、Linux は NVIDIA Container Toolkit） |
 | `stt-init` が `exited (1)` で終わり、`agent` が起動しない | STT のモデルを用意・読み込みできなかった。`docker compose logs stt-init` と `docker compose logs stt` を確認し、`.env` に `DOCKER_STT_MODEL=Systran/faster-whisper-large-v3` を書いて `docker compose up -d` |
 | `tts-init` が `exited (1)` で終わり、`agent` が起動しない | 声のモデルを用意できなかった。`docker compose logs tts-init` を見る。「入れられませんでした」ならインターネット接続か `AIVIS_MODELS` の UUID、「スタイル ID … が見つかりません」なら `AIVIS_SPEAKER` を直す（ログに入っている ID の一覧が出る）。急ぐときは `.env` を `TTS_PROVIDER=openai` にして `docker compose up -d` すれば、OpenAI の声で動く |

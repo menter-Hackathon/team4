@@ -1,5 +1,5 @@
 # ふたまるのエージェント（脳のうち、会話を進める部分）のイメージ。
-# LLM（vLLM）と STT（Speaches）は別のコンテナで動かし、compose.yaml でまとめて起動する。
+# LLM（Ollama）と STT（Speaches）は別のコンテナで動かし、compose.yaml でまとめて起動する。
 # 手順書: docs/deploy.md
 
 FROM python:3.12-slim

@@ -2,7 +2,7 @@
 
 2026-11-16 ／ ケーノ・Claude Code
 
-更新 2026-11-18: 声（TTS）に AivisSpeech を使う場合に備えて、AivisSpeech Engine もコンテナに入れた。ダッシュボードもコンテナに入れた（下の「2026-11-18 の追加」）
+更新 2026-11-18: 声（TTS）に AivisSpeech を使う場合に備えて、AivisSpeech Engine もコンテナに入れた。ダッシュボードもコンテナに入れた。LLM を vLLM から Ollama の圧縮版に替え、GPU を 2 枚に分けた（下の「2026-11-18 の追加」）
 
 ## 目的と理由
 
@@ -83,4 +83,15 @@ docker compose up
 - ダッシュボードは会話の記憶が見えるので、もともと 127.0.0.1 でしか待ち受けない（仕様 §6.6）。コンテナの中の 127.0.0.1 には PC のブラウザから届かないので、コンテナの中だけ `--host 0.0.0.0` にし、PC 側の公開を `127.0.0.1:8765` に絞る（ほかの PC からは開けないまま）
 - 発表用に育てた株（1・5・30 日目の DB）は、`scripts/use_db.py` で `data/futamaru.db` に入れ替える。ファイルを上書きすると、SQLite の `-wal` が残って DB が壊れることがあるため、今の DB を `data/backup/` に残してから、SQLite の backup 機能で書き出す
 - 当日の手順は `docs/demo-day.md` に 1 枚でまとめる（動かすのはショーンさん）
+
+### LLM を Ollama の圧縮版にし、GPU を 2 枚に分ける
+
+- デモの PC（ショーンさんの PC）の GPU は RTX 5070（12GB）と RTX 5060（8GB）で、24GB 以上の 1 枚は無い。上の「制約」の 24GB 前提は満たせない
+- vLLM で圧縮していない Gemma 4 E4B（重み約 16GB）は 12GB に載らないので、**LLM を Ollama の圧縮版（`gemma4:e4b-it-q4_K_M`、約 6.6GB）に替える**。2026-11-18 に Mac の Ollama で、見分け・振り返り・天気・水やりが動くことを確かめた構成と同じ種類
+- **LLM と STT に GPU を 1 枚ずつ割り当てる**（`.env` の `LLM_GPU`・`STT_GPU`、既定は 0 と 1）。メモリを取り合わないようにするため。LLM はメモリの大きい RTX 5070 にする
+- Ollama の設定: モデルを外さない（`OLLAMA_KEEP_ALIVE=-1`）、同時に 2 つまで（`OLLAMA_NUM_PARALLEL=2`、振り返りと次の返事が重なっても待たせない）、文の長さ 8192（既定の 4096 だとプロンプトの頭が切れることがある）
+- モデルの用意は `llm-init`（`scripts/llm_init.py`）が行う。`stt-init` と同じく、ダウンロード→GPU への読み込み→どれだけ GPU に載ったかをログに出す。全部載らなくても止めない（遅いが動く）
+- Hugging Face のトークン（`HF_TOKEN`）は不要になった（Ollama のモデルは Ollama のサイトから取る）
+- 思考モードは compose で `LLM_REASONING_EFFORT=none` にして切る（Ollama の Gemma 4 は既定で思考し、遅くなるため。#54）
+- まだ確かめていないこと: NVIDIA の GPU で、この圧縮版が 12GB に全部載るか、話し方の質が Mac の版（MLX）と変わらないか。ショーンさんの PC でのリハーサルで確かめる
 
