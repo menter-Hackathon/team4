@@ -72,6 +72,7 @@ class PlantConversation:
         weather: 天気を取って覚えておく WeatherCache。None なら天気を使わない（§6.7、#80）
         dry_humidity: 湿度がこの値（%）未満なら「乾燥している」と言う
         water_remind_days: 水をもらってからこの日数たつと「のどが渇いた」と言う（§6.7、#81）
+        species: 植物の種類（例: "ポトス"）。育て方のメモと一緒にプロンプトに入る（§6.7、#83）
     """
 
     def __init__(
@@ -86,6 +87,7 @@ class PlantConversation:
         weather: WeatherCache | None = None,
         dry_humidity: float = 40.0,
         water_remind_days: int = 3,
+        species: str | None = None,
     ) -> None:
         self._store = store
         self._plant_id = plant_id
@@ -96,6 +98,7 @@ class PlantConversation:
         self._weather = weather  # 天気を覚えておく WeatherCache。None なら天気を話さない（#80）
         self._dry_humidity = dry_humidity  # 「乾燥している」と言う湿度の境目（%）
         self._water_remind_days = water_remind_days  # 何日水が無いと「のどが渇いた」と言うか（#81）
+        self._species = species  # 植物の種類（例: "ポトス"）。None なら種類を伝えない（#83）
         self._controller = WakeController(
             sleep_after=sleep_after
         )  # 起きている/眠っている状態と無言タイマー
@@ -463,6 +466,7 @@ class PlantConversation:
             last_watered_at=self._store.last_watered_at(self._plant_id),
             watered_now=watered_now,
             remind_days=self._water_remind_days,
+            species=self._species,
         )
 
     def _forget_person(self) -> None:

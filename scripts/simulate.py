@@ -23,6 +23,7 @@ from agent.plant.prompt import build_system_prompt
 from agent.plant.reflection import JsonCompleter, reflect_session
 from agent.plant.store import PlantStore, TraitSnapshot
 from agent.plant.timeutil import parse_iso
+from agent.plant.watering import mentions_watering
 from agent.plugins.llm import create_json_completer
 
 TURN_INTERVAL = timedelta(seconds=10)
@@ -42,6 +43,11 @@ async def simulate(
         for i, turn in enumerate(s["turns"]):
             now = start + TURN_INTERVAL * i
             store.add_utterance(sid, turn["role"], turn["text"], now)
+            # 本物の会話と同じく、「お水あげたよ」を水やりとして記録する（#83）。
+            # これで、水やりの間隔が違う株どうしで、性格の育ち方の違いを早送りで見られる。
+            # 同じ会話の 2 回目は store が記録しない
+            if turn["role"] == "user" and mentions_watering(turn["text"]):
+                store.add_watering(plant_id, None, sid, now)
         store.end_session(sid, now)
         ok = await reflect_session(store, plant_id, sid, complete_json, now)
         if not ok:

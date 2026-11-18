@@ -705,3 +705,20 @@ async def test_watering_after_name_uses_that_persons_prompt(store, clock):
     )
     assert d.dialect == "kansai"
     await c.close()
+
+
+# --- 植物の種類（#83） ---
+async def test_wake_prompt_tells_species(store, clock):
+    c = PlantConversation(
+        store=store,
+        plant_id="a",
+        complete_json=FakeCompleter([]),
+        clock=clock,
+        wake_words=WAKE_WORDS,
+        sleep_after=60.0,
+        species="ポトス",
+    )
+    await c.start()
+    d = await c.on_user_turn("ふたまる")
+    assert "あなたはポトス" in d.instructions
+    await c.close()

@@ -367,3 +367,18 @@ def test_last_watered_at_is_per_plant_and_latest(store):
     store.add_watering("a", None, s2, T0 + timedelta(days=2))
     assert store.last_watered_at("a") == T0 + timedelta(days=2)
     assert store.last_watered_at("b") is None
+
+
+# --- 世話の間隔（#83）。振り返りでは「この会話より前」の時刻を見る ---
+def test_last_talk_and_watering_before_a_time(store):
+    store.get_or_create_plant("a", T0)
+    s1 = store.start_session("a", T0)
+    store.add_watering("a", None, s1, T0)
+    store.end_session(s1, T0 + timedelta(minutes=5))
+    s2 = store.start_session("a", T0 + timedelta(days=3))
+    store.add_watering("a", None, s2, T0 + timedelta(days=3))
+    store.end_session(s2, T0 + timedelta(days=3, minutes=5))
+    before = T0 + timedelta(days=3)  # 2 回目の会話が始まった時刻
+    assert store.last_talk_at("a", before=before) == T0 + timedelta(minutes=5)
+    assert store.last_watered_at("a", before=before) == T0
+    assert store.last_talk_at("a", before=T0) is None

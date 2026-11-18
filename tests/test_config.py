@@ -156,3 +156,8 @@ def test_weather_codes_must_be_digits_of_the_right_length(extra):
 def test_water_remind_days():
     assert load_config(BASE).water_remind_days == 3
     assert load_config(BASE | {"WATER_REMIND_DAYS": "5"}).water_remind_days == 5
+
+
+def test_plant_species():
+    assert load_config(BASE).plant_species == "ポトス"
+    assert load_config(BASE | {"PLANT_SPECIES": "モンステラ"}).plant_species == "モンステラ"

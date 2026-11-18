@@ -478,24 +478,33 @@ class PlantStore:
         with self._conn:
             self._conn.execute("UPDATE sessions SET reflected = 1 WHERE id = ?", (session_id,))
 
-    def last_talk_at(self, plant_id: str, person_id: int | None = None) -> datetime | None:
-        """前に話した会話が終わった時刻。「何日ぶりか」に使う（仕様 §6.7、#82）。
+    def last_talk_at(
+        self, plant_id: str, person_id: int | None = None, *, before: datetime | None = None
+    ) -> datetime | None:
+        """前に話した会話が終わった時刻。「何日ぶりか」に使う（仕様 §6.7、#82・#83）。
 
         引数:
             person_id: その人との会話だけを見る。None なら相手を問わず（お客さんも含めて）一番最近の会話。
                 起きた直後はまだ相手が分からないので None で呼ばれ、名乗ったあとはその人の id で呼ばれる
+            before: この時刻より前に終わった会話だけを見る。None なら全部。
+                振り返り（reflection.py）で「この会話の前の会話」を探すときに、この会話が始まった時刻を渡す。
+                振り返るときにはこの会話ももう終わっているので、付けないとこの会話自身が返ってしまう（#83）
         戻り値:
-            一番最近に終わったセッションの ended_at。まだ一度も話していなければ None
+            一番最近に終わったセッションの ended_at。当てはまる会話が無ければ None
         今のセッションはまだ終わっていない（ended_at が NULL）ので、ここには入らない。
-        つまり「今の会話」ではなく「前の会話」の時刻が返る。
+        つまり会話の途中で呼ぶと、「今の会話」ではなく「前の会話」の時刻が返る。
         """
         # 1. まず「この株の、終わった会話」を全部対象にする SQL を作る
         sql = "SELECT MAX(ended_at) AS t FROM sessions WHERE plant_id = ? AND ended_at IS NOT NULL"
-        args: tuple = (plant_id,)
+        args: list = [plant_id]
         # 2. 人が決まっていれば、その人との会話だけに絞る条件を足す
         if person_id is not None:
             sql += " AND person_id = ?"
-            args = (plant_id, person_id)
+            args.append(person_id)
+        # 3. before があれば、その時刻より前に終わった会話だけに絞る
+        if before is not None:
+            sql += " AND ended_at < ?"
+            args.append(iso(before))
         row = self._conn.execute(sql, args).fetchone()
         # 時刻はすべて +09:00 付きの同じ形の文字列なので、MAX（文字列の大小）で一番新しいものが取れる
         return parse_iso(row["t"]) if row["t"] else None
@@ -549,16 +558,24 @@ class PlantStore:
         ).fetchone()
         return row is not None
 
-    def last_watered_at(self, plant_id: str) -> datetime | None:
+    def last_watered_at(self, plant_id: str, *, before: datetime | None = None) -> datetime | None:
         """その株が最後に水をもらった時刻。一度ももらっていなければ None。
 
         誰があげたかは問わない（植物ののどの渇きは、誰があげても同じなので）。
         「のどが渇いた」と言うかどうかを決めるのに使う（prompt.py の _watering_line）。
+
+        引数:
+            before: この時刻より前の水やりだけを見る。None なら全部。
+                振り返り（reflection.py）で「この会話の前に、最後に水をもらったのはいつか」を
+                調べるときに、この会話が始まった時刻を渡す（#83）
         時刻は同じ形の文字列で保存しているので、MAX（文字列の一番大きいもの）が一番新しい時刻になる。
         """
-        row = self._conn.execute(
-            "SELECT MAX(watered_at) AS t FROM waterings WHERE plant_id = ?", (plant_id,)
-        ).fetchone()
+        sql = "SELECT MAX(watered_at) AS t FROM waterings WHERE plant_id = ?"
+        args: list = [plant_id]
+        if before is not None:
+            sql += " AND watered_at < ?"
+            args.append(iso(before))
+        row = self._conn.execute(sql, args).fetchone()
         return parse_iso(row["t"]) if row["t"] else None
 
     # --- memories / reflection ---

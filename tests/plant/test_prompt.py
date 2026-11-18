@@ -209,3 +209,18 @@ def test_status_never_watered_is_thirsty_only_after_remind_days():
     assert "水" not in young  # 育ち始めたばかりなら、まだ何も言わない
     old = plant_status_text(NOW - timedelta(days=3), None, NOW, remind_days=3)
     assert "まだ一度も水をもらっていなくて、のどが渇いている" in old
+
+
+# --- 植物の種類（#83） ---
+def test_status_tells_species_care():
+    text = plant_status_text(NOW, None, NOW, species="ポトス")
+    assert "あなたはポトス" in text and "寒さ" in text
+
+
+def test_status_unknown_species_only_name():
+    text = plant_status_text(NOW, None, NOW, species="ふしぎな草")
+    assert "あなたはふしぎな草。" in text
+
+
+def test_status_without_species_has_no_species_line():
+    assert "あなたは" not in plant_status_text(NOW, None, NOW)
