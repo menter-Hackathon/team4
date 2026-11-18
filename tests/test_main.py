@@ -203,3 +203,10 @@ async def test_no_dialect_leaves_tts_untouched(monkeypatch):
 async def test_missing_tts_is_skipped_silently(monkeypatch):
     await run_turn(monkeypatch, "hakata", None)
     await run_turn(monkeypatch, "hakata", object())
+
+
+def test_weather_cache_only_when_location_is_set():
+    # 緯度・経度が無ければ天気を使わない（#80）
+    assert main.create_weather_cache(load_config(CFG)) is None
+    assert main.create_weather_cache(load_config({**CFG, "JMA_AMEDAS_STATION": "44132"}))
+    assert main.create_weather_cache(load_config({**CFG, "JMA_FORECAST_AREA": "130000"}))

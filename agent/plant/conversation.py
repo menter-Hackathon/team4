@@ -33,6 +33,7 @@ from .reflection import JsonCompleter, reflect_session
 from .store import Person, PlantStore
 from .timeutil import Clock
 from .wake import WakeController, detect_wake, normalize
+from .weather import WeatherCache, describe_weather
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,8 @@ class PlantConversation:
         clock: 現在時刻を返す関数（テストでは偽物の時計）
         wake_words: ウェイクワードの一覧（例: ("ふたまる", "二丸")）
         sleep_after: 何秒だれも話さなければ眠るか
+        weather: 天気を取って覚えておく WeatherCache。None なら天気を使わない（§6.7、#80）
+        dry_humidity: 湿度がこの値（%）未満なら「乾燥している」と言う
     """
 
     def __init__(
@@ -78,12 +81,16 @@ class PlantConversation:
         clock: Clock,
         wake_words: Sequence[str],
         sleep_after: float,
+        weather: WeatherCache | None = None,
+        dry_humidity: float = 40.0,
     ) -> None:
         self._store = store
         self._plant_id = plant_id
         self._complete_json = complete_json
         self._clock = clock
         self._wake_words = tuple(wake_words)
+        self._weather = weather
+        self._dry_humidity = dry_humidity
         self._controller = WakeController(
             sleep_after=sleep_after
         )  # 起きている/眠っている状態と無言タイマー
@@ -159,6 +166,10 @@ class PlantConversation:
             match = detect_wake(text, self._wake_words)
             if match is None:
                 return TurnDecision("ignore")  # ウェイクワードが無い → 寝たまま
+            # 起きる前に天気を取り直す（30 分以内に取っていれば何もしない、#80）。
+            # 失敗・2 秒のタイムアウトでも例外は出ず、天気なしで続ける
+            if self._weather is not None:
+                await self._weather.refresh()
             # 起きる。新しいセッションを始め、「名前を聞く」入りのシステムプロンプトを受け取る
             instructions = self._wake()
             if match.rest:
@@ -350,14 +361,18 @@ class PlantConversation:
         )
 
     def _plant_status(self, person_id: int | None) -> str:
-        """植物の状態の段落（育った日数・前に話してからの日数）を作る（仕様 §6.7、#82）。
+        """植物の状態の段落（天気・育った日数・前に話してからの日数）を作る（仕様 §6.7、#80・#82）。
 
         person_id が None なら、相手を問わず一番最近の会話からの日数を使う。
+        天気は起きたときに取ったもの（WeatherCache が覚えているもの）を使う。
         """
+        current = self._weather.current() if self._weather is not None else None
+        weather = describe_weather(current, dry_humidity=self._dry_humidity) if current else None
         return plant_status_text(
             self._store.plant_created_at(self._plant_id),
             self._store.last_talk_at(self._plant_id, person_id),
             self._clock(),
+            weather=weather,
         )
 
     def _forget_person(self) -> None:

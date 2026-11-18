@@ -11,6 +11,7 @@ from agent.plant.personality import Traits
 from agent.plant.prompt import ASK_NAME_INSTRUCTION
 from agent.plant.store import NewMemory, PlantStore
 from agent.plant.timeutil import JST
+from agent.plant.weather import Weather, WeatherCache
 from tests.fakes import FakeClock, FakeCompleter, reflection_json
 
 T0 = datetime(2026, 11, 15, 19, 0, tzinfo=JST)
@@ -612,4 +613,36 @@ async def test_named_prompt_uses_that_persons_last_talk(store, clock):
     c = await make_started(store, clock, completer)
     d = await c.on_user_turn("ふたまる、たろうだよ")
     assert "5日ぶり" in d.instructions  # たろうとは 5 日ぶり（お客さんのきのうではない）
+    await c.close()
+
+
+# --- 天気（#80） ---
+async def test_wake_fetches_weather_and_puts_it_in_the_prompt(store, clock):
+    calls = []
+
+    async def fetch():
+        calls.append(1)
+        return Weather(8.0, 30, "晴れ")
+
+    c = PlantConversation(
+        store=store,
+        plant_id="a",
+        complete_json=FakeCompleter([]),
+        clock=clock,
+        wake_words=WAKE_WORDS,
+        sleep_after=60.0,
+        weather=WeatherCache(fetch, clock, ttl=1800, timeout=2),
+        dry_humidity=40,
+    )
+    await c.start()
+    d = await c.on_user_turn("ふたまる")
+    assert calls == [1]
+    assert "気温 8℃、湿度 30%。体の感じ: さむい（葉がちぢこまる）、乾燥している" in d.instructions
+    await c.close()
+
+
+async def test_wake_without_weather_has_no_weather_line(store, clock):
+    c = await make_started(store, clock, FakeCompleter([]))
+    d = await c.on_user_turn("ふたまる")
+    assert "天気" not in d.instructions and "湿度" not in d.instructions
     await c.close()

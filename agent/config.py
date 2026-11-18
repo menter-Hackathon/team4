@@ -66,6 +66,10 @@ class Config:
     # --- 話し終わりの判定（#39）。短くするほど返事が早いが、言葉の途中の間で割り込みやすくなる ---
     vad_min_silence: float  # 声が途切れてから「話し終わった」とみなすまでの無音の秒数（VAD）
     endpointing_delay: float  # VAD が話し終わりと判定してから、返事を作り始めるまでの待ちの秒数
+    # --- 天気（気象庁のデータ、仕様 §6.7、#80）。両方 None なら天気を使わない ---
+    jma_amedas_station: str | None  # 気温・湿度を取るアメダスの観測所のコード（例: "44132" 東京）
+    jma_forecast_area: str | None  # 空の様子を取る予報の地域コード（例: "130000" 東京都）
+    weather_dry_humidity: float  # 湿度がこの値（%）未満なら「乾燥している」と言う
 
 
 def db_path_from_env(env: Mapping[str, str] = os.environ) -> str:
@@ -85,6 +89,11 @@ def aivis_base_url_from_env(env: Mapping[str, str] = os.environ) -> str:
     LLM・STT の設定が無くても使えるように load_config() と分けている。
     """
     return env.get("AIVIS_BASE_URL", "").strip() or DEFAULT_AIVIS_BASE_URL
+
+
+def _is_code(value: str, digits: int) -> bool:
+    """value が digits 桁の数字だけでできているか。例: ("44132", 5) → True、("東京", 5) → False"""
+    return len(value) == digits and value.isascii() and value.isdigit()
 
 
 def load_config(env: Mapping[str, str] = os.environ) -> Config:
@@ -138,6 +147,18 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         else DEFAULT_WAKE_WORDS
     )
 
+    # 天気を取る場所（気象庁のコード、#80）。書き間違いに起動時に気づけるよう、桁数を確かめる
+    jma_amedas_station = get("JMA_AMEDAS_STATION")
+    if jma_amedas_station is not None and not _is_code(jma_amedas_station, 5):
+        raise ConfigError(
+            f"JMA_AMEDAS_STATION は 5 桁の数字（例: 44132）にしてください: {jma_amedas_station}"
+        )
+    jma_forecast_area = get("JMA_FORECAST_AREA")
+    if jma_forecast_area is not None and not _is_code(jma_forecast_area, 6):
+        raise ConfigError(
+            f"JMA_FORECAST_AREA は 6 桁の数字（例: 130000）にしてください: {jma_forecast_area}"
+        )
+
     # get(名前, 既定値): .env に無ければ既定値を使う。required(名前): .env に無ければ起動しない
     return Config(
         llm_base_url=required("LLM_BASE_URL"),
@@ -167,4 +188,7 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         # 既定の値は LiveKit の既定と同じ（Silero VAD 0.55 秒、endpointing 0.5 秒）。#39 で測って決める
         vad_min_silence=float(get("VAD_MIN_SILENCE_SECONDS", "0.55")),
         endpointing_delay=float(get("ENDPOINTING_DELAY_SECONDS", "0.5")),
+        jma_amedas_station=jma_amedas_station,
+        jma_forecast_area=jma_forecast_area,
+        weather_dry_humidity=float(get("WEATHER_DRY_HUMIDITY", "40")),
     )

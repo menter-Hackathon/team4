@@ -115,3 +115,39 @@ def test_unknown_tts_provider_is_rejected():
 def test_aivis_base_url_from_env_needs_no_other_variables():
     assert aivis_base_url_from_env({}) == "http://127.0.0.1:10101"
     assert aivis_base_url_from_env({"AIVIS_BASE_URL": "http://gpu:10101"}) == "http://gpu:10101"
+
+
+# --- 天気を取る場所（仕様 §6.7、#80） ---
+def test_weather_is_off_by_default():
+    c = load_config(BASE)
+    assert (c.jma_amedas_station, c.jma_forecast_area, c.weather_dry_humidity) == (None, None, 40.0)
+
+
+def test_weather_station_area_and_dry_humidity():
+    c = load_config(
+        BASE
+        | {
+            "JMA_AMEDAS_STATION": "44132",
+            "JMA_FORECAST_AREA": "130000",
+            "WEATHER_DRY_HUMIDITY": "35",
+        }
+    )
+    assert (c.jma_amedas_station, c.jma_forecast_area, c.weather_dry_humidity) == (
+        "44132",
+        "130000",
+        35.0,
+    )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"JMA_AMEDAS_STATION": "東京"},
+        {"JMA_AMEDAS_STATION": "4413"},
+        {"JMA_FORECAST_AREA": "13000"},
+        {"JMA_FORECAST_AREA": "tokyo!"},
+    ],
+)
+def test_weather_codes_must_be_digits_of_the_right_length(extra):
+    with pytest.raises(ConfigError):
+        load_config(BASE | extra)
