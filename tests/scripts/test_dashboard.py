@@ -156,6 +156,15 @@ def test_server_listens_on_localhost_and_serves_html_and_json(db):
         server.server_close()
 
 
+def test_server_host_can_be_changed_for_docker(db):
+    # Docker のコンテナの中では 0.0.0.0 で待ち受ける（PC 側の公開は compose.yaml で 127.0.0.1 に絞る）
+    server = make_server(db, ["a1"], 0, host="0.0.0.0")
+    try:
+        assert server.server_address[0] == "0.0.0.0"
+    finally:
+        server.server_close()
+
+
 def test_views_include_the_plant_type(db, monkeypatch, tmp_path):
     # イラストがまだ無いフォルダを指す（絵文字で出す状態）
     monkeypatch.setattr(dashboard, "TYPE_IMAGE_DIR", tmp_path / "types")

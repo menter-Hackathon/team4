@@ -14,6 +14,7 @@
 #   tts      … AivisSpeech Engine で植物の声を作る（CPU を使う。.env で TTS_PROVIDER=aivis のときに使われる）
 #   tts-init … 起動時に一度だけ動き、tts に声のモデル（らせつんなど）を AivisHub から入れて読み込ませて終わる
 #   agent    … ふたまるのエージェント。llm の準備と stt-init・tts-init の完了を待ってから起動する
+#   dashboard … 性格・成長・記憶を見せる画面。この PC のブラウザで http://127.0.0.1:8765 を開く
 
 # GPU を使うサービスに共通の設定。NVIDIA の GPU を全部見えるようにする
 x-gpu: &gpu
@@ -156,6 +157,31 @@ services:
         condition: service_completed_successfully
       tts-init:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  dashboard:
+    # エージェントと同じイメージ（同じ Dockerfile から作る。2 回目のビルドはキャッシュで一瞬で終わる）
+    build: .
+    # DB は読むだけ。エージェントが動いている最中でも開ける（scripts/dashboard.py）
+    # --host 0.0.0.0: コンテナの中では、外（PC 側）からの接続を受け付ける。
+    #   コンテナの中の 127.0.0.1 には PC のブラウザから届かないため。
+    #   その代わり、下の ports で PC 側の公開を 127.0.0.1 に絞り、ほかの PC からは開けないようにする
+    #   （会話の記憶が見えるため、仕様 §6.6）
+    # DASHBOARD_PLANTS: 並べる株（カンマ区切り、.env で変えられる。空なら a1,b1）
+    command:
+      - python
+      - -m
+      - scripts.dashboard
+      - --db
+      - /app/data/futamaru.db
+      - --plants
+      - ${DASHBOARD_PLANTS:-a1,b1}
+      - --host
+      - 0.0.0.0
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped
 
 volumes:

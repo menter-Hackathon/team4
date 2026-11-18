@@ -12,6 +12,8 @@ uv run python -m scripts.dashboard --db data/futamaru.db --plants a1,b1
 
 DB には書き込まない。エージェントが動いている最中に開いても大丈夫なようにするため。
 会話の記憶が見えるので、この PC からだけ開けるよう 127.0.0.1 で待ち受ける（0.0.0.0 にはしない）。
+Docker で動かすときだけ、コンテナの中では --host 0.0.0.0 で待ち受け、PC 側の公開を 127.0.0.1 に絞る
+（compose.yaml の dashboard。コンテナの中の 127.0.0.1 には、PC のブラウザから届かないため）。
 """
 
 from __future__ import annotations
@@ -198,9 +200,15 @@ def make_handler(db_path: str, plant_ids: list[str]) -> type[BaseHTTPRequestHand
     return Handler
 
 
-def make_server(db_path: str, plant_ids: list[str], port: int) -> ThreadingHTTPServer:
-    """127.0.0.1 の port で待ち受けるサーバーを作る（port=0 なら空いている番号。テスト用）。"""
-    return ThreadingHTTPServer((HOST, port), make_handler(db_path, plant_ids))
+def make_server(
+    db_path: str, plant_ids: list[str], port: int, host: str = HOST
+) -> ThreadingHTTPServer:
+    """host の port で待ち受けるサーバーを作る（port=0 なら空いている番号。テスト用）。
+
+    host は既定の 127.0.0.1（この PC からだけ開ける）のままにする。
+    0.0.0.0 にするのは Docker のコンテナの中だけ（PC 側の公開は compose.yaml で 127.0.0.1 に絞る）。
+    """
+    return ThreadingHTTPServer((host, port), make_handler(db_path, plant_ids))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -216,6 +224,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT, help=f"待ち受けるポート（既定: {DEFAULT_PORT}）"
     )
+    parser.add_argument(
+        "--host",
+        default=HOST,
+        help=f"待ち受けるアドレス（既定: {HOST}。Docker のコンテナの中でだけ 0.0.0.0 にする）",
+    )
     args = parser.parse_args(argv)
     plant_ids = [p.strip() for p in args.plants.split(",") if p.strip()]
     # DB がまだ無くても起動はする（エージェントが後から作ることがあるため）。ただし理由がわかるように知らせる
@@ -223,7 +236,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"注意: DB がまだありません: {args.db}")
         print("  早送りデモなら先に scripts.simulate を実行してください（LLM が必要）。")
         print("  本番の DB なら、エージェントを起動して一度起こすと作られます。")
-    server = make_server(args.db, plant_ids, args.port)
+    server = make_server(args.db, plant_ids, args.port, args.host)
+    # ブラウザで開く URL は、どちらの待ち受けでも 127.0.0.1（Docker でも PC 側は 127.0.0.1 に公開する）
     print(f"ダッシュボード: http://{HOST}:{server.server_address[1]}  （Ctrl+C で終了）")
     try:
         server.serve_forever()

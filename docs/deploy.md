@@ -1,6 +1,7 @@
 # ふたまるの「脳」を Docker で動かす（デプロイ手順）
 
-NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM・STT・声）をまとめて動かす手順です。
+NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM・STT・声）と、性格を見せるダッシュボードをまとめて動かす手順です。
+準備ができたあとの、発表の日の手順は [`demo-day.md`](demo-day.md) にまとめています。
 鉢（ESP32）にはマイクとスピーカーだけがあり、LiveKit Cloud を通してこの PC の脳とつながります。
 
 ```
@@ -8,7 +9,8 @@ NVIDIA の GPU がある PC で、ふたまるの脳（エージェント・LLM�
                                                       ├─ agent（エージェント）
                                                       ├─ llm（Gemma 4 E4B）
                                                       ├─ stt（kotoba-whisper）
-                                                      └─ tts（AivisSpeech。TTS_PROVIDER=aivis のとき）
+                                                      ├─ tts（AivisSpeech。TTS_PROVIDER=aivis のとき）
+                                                      └─ dashboard（http://127.0.0.1:8765）
                                    TTS_PROVIDER=openai（既定）のときは、声に OpenAI を使う
 ```
 
@@ -92,6 +94,7 @@ docker compose logs -f agent     # エージェントのログ
 2. `docker compose logs agent` に `registered worker` などの、LiveKit Cloud へ接続したログが出ている
 3. 鉢（ESP32）の電源を入れる。ESP32 がルーム `plant-<id>` に入ると、エージェントが参加する
 4. 「ふたまる」と呼びかけて、植物から話しかけてくれば成功
+5. この PC のブラウザで http://127.0.0.1:8765 を開くと、ダッシュボードが映る（並べる株は `.env` の `DASHBOARD_PLANTS`、既定 `a1,b1`）
 
 ## 6. 止める・作り直す
 
@@ -104,6 +107,19 @@ git pull && docker compose up -d --build   # コードを更新して起動し�
 - `docker compose down -v` はモデルの保存場所も消します（次の起動で再ダウンロード）。植物の記憶（`data/`）は消えません
 - **PC を再起動したとき**は、コンテナは自動で起動し直します（`restart: unless-stopped`）。ただし、このときは起動の順番が守られず、`agent` が `llm` より先に動き出します。`docker compose ps` で `llm` が `healthy` になるまで（モデルはダウンロード済みなので 1〜2 分）待ってから話しかけてください。それまでに話しかけると、植物は「ん…ちょっとぼーっとしてた」と返します（#40）
 - DB を読み書きするコマンド（`scripts/` の下のもの）は、コンテナの中で `docker compose exec agent python -m scripts.<名前>` として動かします。Linux では DB のファイルが `root` の持ち物になるので、PC 側から直接書き換えないでください
+
+## 6.4 デモ用：育てた株の DB に入れ替える
+
+発表用に育てた DB（`scripts.simulate` で作ったもの、README「発表用に…」）を `data/` に置き、エージェントとダッシュボードを止めてから入れ替えます。
+
+```bash
+docker compose stop agent dashboard
+docker compose run --rm --no-deps agent python -m scripts.use_db data/demo-day30.db
+docker compose up -d
+```
+
+- `data/futamaru.db` を、指定した DB の中身に入れ替えます。入れ替える前の DB は `data/backup/` に日時付きで残ります
+- ファイルを直接コピーして上書きしないでください。SQLite の `-wal` ファイルが残っていると、DB が壊れることがあります（`scripts/use_db.py` はそれを避けて入れ替えます）
 
 ## 6.5 デモ用：人の一覧と方言の固定
 
