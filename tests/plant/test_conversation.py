@@ -646,3 +646,62 @@ async def test_wake_without_weather_has_no_weather_line(store, clock):
     d = await c.on_user_turn("ふたまる")
     assert "天気" not in d.instructions and "湿度" not in d.instructions
     await c.close()
+
+
+# --- 水やり（#81） ---
+async def test_watering_while_awake_is_recorded_and_thanked(store, clock):
+    c = await make_started(store, clock, FakeCompleter([identify_json(), reflection_json()]))
+    await c.on_user_turn("ふたまる")
+    d = await c.on_user_turn("お水あげたよ")
+    assert store.last_watered_at("a") == T0
+    assert d.kind == "reply" and "この会話で水をもらった" in d.instructions
+    assert d.dialect is None  # 相手が未確定なので、声の方言は変えない
+    await c.close()
+
+
+async def test_wake_with_watering_records_it(store, clock):
+    c = await make_started(store, clock, FakeCompleter([identify_json(), reflection_json()]))
+    d = await c.on_user_turn("ふたまる、お水あげたよ")
+    assert store.last_watered_at("a") == T0
+    assert "この会話で水をもらった" in d.instructions
+    await c.close()
+
+
+async def test_second_watering_in_session_does_not_change_prompt(store, clock):
+    c = await make_started(
+        store, clock, FakeCompleter([identify_json(), identify_json(), reflection_json()])
+    )
+    await c.on_user_turn("ふたまる")
+    await c.on_user_turn("お水あげたよ")
+    clock.advance(10)
+    d = await c.on_user_turn("水やりしたよ")
+    assert d.instructions is None  # 2 回目は記録もプロンプトの差し替えもしない
+    assert store.last_watered_at("a") == T0
+    await c.close()
+
+
+async def test_thirsty_plant_says_so_on_wake(store, clock):
+    store.get_or_create_plant("a", T0 - timedelta(days=10))
+    sid = store.start_session("a", T0 - timedelta(days=4))
+    store.add_watering("a", None, sid, T0 - timedelta(days=4))
+    store.end_session(sid, T0 - timedelta(days=4))
+    c = await make_started(store, clock, FakeCompleter([]))
+    d = await c.on_user_turn("ふたまる")
+    assert "水をもらってから4日たって、のどが渇いている" in d.instructions
+    await c.close()
+
+
+async def test_watering_after_name_uses_that_persons_prompt(store, clock):
+    store.get_or_create_plant("a", T0)
+    taro = store.add_person("a", "たろう", T0)
+    store.set_dialect_override(taro.id, "kansai")
+    completer = FakeCompleter([identify_json("known", taro.id), reflection_json()])
+    c = await make_started(store, clock, completer)
+    await c.on_user_turn("ふたまる、たろうだよ")
+    d = await c.on_user_turn("お水あげたで")
+    assert (
+        "今話している相手は たろう。" in d.instructions
+        and "この会話で水をもらった" in d.instructions
+    )
+    assert d.dialect == "kansai"
+    await c.close()

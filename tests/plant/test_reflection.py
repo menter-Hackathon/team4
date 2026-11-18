@@ -284,3 +284,35 @@ async def test_guest_session_updates_plant_traits(store):
     sid = _person_session(store, None, "こんにちは")
     await reflect_session(store, "a", sid, FakeCompleter([VALID]), NOW)
     assert store.get_plant("a").traits.affection == pytest.approx(0.53)
+
+
+# --- 水やり（#81） ---
+@pytest.mark.parametrize(
+    "value,expected", [(True, True), (False, False), (None, False), ("yes", False)]
+)
+def test_watered_is_parsed(value, expected):
+    data = json.loads(VALID)
+    if value is not None:
+        data["watered"] = value
+    assert parse_reflection(json.dumps(data)).watered is expected
+
+
+def test_schema_asks_for_watered():
+    assert REFLECTION_SCHEMA["properties"]["watered"] == {"type": "boolean"}
+    assert "watered" in REFLECTION_SCHEMA["required"]
+
+
+async def test_reflection_records_missed_watering_at_session_end(store_with_session):
+    store, sid = store_with_session
+    data = json.loads(VALID) | {"watered": True}
+    assert await reflect_session(store, "a", sid, FakeCompleter([json.dumps(data)]), NOW)
+    # 振り返った時刻（NOW）ではなく、会話が終わった時刻で記録する
+    assert store.last_watered_at("a") == NOW - timedelta(minutes=3)
+
+
+async def test_reflection_does_not_double_count_watering(store_with_session):
+    store, sid = store_with_session
+    store.add_watering("a", None, sid, NOW - timedelta(minutes=4))  # 会話中にもう記録した
+    data = json.loads(VALID) | {"watered": True}
+    assert await reflect_session(store, "a", sid, FakeCompleter([json.dumps(data)]), NOW)
+    assert store.last_watered_at("a") == NOW - timedelta(minutes=4)

@@ -151,3 +151,8 @@ def test_weather_station_area_and_dry_humidity():
 def test_weather_codes_must_be_digits_of_the_right_length(extra):
     with pytest.raises(ConfigError):
         load_config(BASE | extra)
+
+
+def test_water_remind_days():
+    assert load_config(BASE).water_remind_days == 3
+    assert load_config(BASE | {"WATER_REMIND_DAYS": "5"}).water_remind_days == 5

@@ -172,3 +172,40 @@ def test_status_includes_weather_when_given():
     assert text.splitlines()[1].startswith("- 今日の天気は晴れ。")  # 天気を最初に置く
     assert WEATHER_FEELING_INSTRUCTION in text  # 数字ではなく体の感じ方として話させる
     assert "天気" not in plant_status_text(NOW, None, NOW)
+
+
+# --- 水やり（#81） ---
+def test_status_thanks_when_watered_in_this_session():
+    text = plant_status_text(
+        NOW - timedelta(days=9), None, NOW, last_watered_at=NOW, watered_now=True
+    )
+    assert "この会話で水をもらった" in text and "のどが渇いて" not in text
+
+
+@pytest.mark.parametrize(
+    "days_ago,line",
+    [
+        (0, "最後に水をもらったのは今日"),
+        (1, "最後に水をもらったのはきのう"),
+        (2, "最後に水をもらったのは2日前"),
+    ],
+)
+def test_status_last_watering(days_ago, line):
+    text = plant_status_text(
+        NOW - timedelta(days=9), None, NOW, last_watered_at=NOW - timedelta(days=days_ago)
+    )
+    assert line in text and "のどが渇いて" not in text
+
+
+def test_status_thirsty_after_remind_days():
+    text = plant_status_text(
+        NOW - timedelta(days=9), None, NOW, last_watered_at=NOW - timedelta(days=3), remind_days=3
+    )
+    assert "水をもらってから3日たって、のどが渇いている" in text
+
+
+def test_status_never_watered_is_thirsty_only_after_remind_days():
+    young = plant_status_text(NOW - timedelta(days=1), None, NOW, remind_days=3)
+    assert "水" not in young  # 育ち始めたばかりなら、まだ何も言わない
+    old = plant_status_text(NOW - timedelta(days=3), None, NOW, remind_days=3)
+    assert "まだ一度も水をもらっていなくて、のどが渇いている" in old

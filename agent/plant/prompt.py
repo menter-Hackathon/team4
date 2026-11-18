@@ -17,8 +17,8 @@ from .timeutil import JST, parse_iso
 # 「ふたまる」とだけ呼ばれて起きたとき、植物から話しかけさせるための指示（main.py の direction_ctx で使う）
 # 植物の状態（育った日数など、§6.7）を先に一言伝えさせ、そのあと記憶や前回の会話に触れさせる（#82）
 WAKE_GREETING_INSTRUCTION = (
-    "持ち主に呼ばれて起きた。まず自分の状態（天気で感じていること、育った日数、"
-    "前に話してからの日数）を一言伝え、"
+    "持ち主に呼ばれて起きた。まず自分の状態（のどが渇いていればそれを最初に、天気で感じていること、"
+    "育った日数、前に話してからの日数）を一言伝え、"
     "記憶や前回の会話も踏まえて短く話しかける。"
 )
 # 持ち主がしばらく黙っているとき、植物から話題を振らせるための指示（仕様 §7.2）
@@ -126,6 +126,9 @@ def plant_status_text(
     now: datetime,
     *,
     weather: str | None = None,
+    last_watered_at: datetime | None = None,
+    watered_now: bool = False,
+    remind_days: int = 3,
 ) -> str:
     """天気・育った日数・前に話してからの日数を、プロンプトの 1 段落にする（仕様 §6.7、#80・#82）。
 
@@ -134,6 +137,9 @@ def plant_status_text(
         last_talk_at: 前の会話が終わった時刻。まだ誰とも話していなければ None
         now: 現在時刻
         weather: 天気の 1 文（weather.describe_weather で作る、#80）。取れていなければ None
+        last_watered_at: 最後に水をもらった時刻（#81）。一度ももらっていなければ None
+        watered_now: 今の会話の中で水をもらったか
+        remind_days: 水をもらってから（一度ももらっていなければ育ち始めてから）この日数たつと、のどが渇く
     戻り値の例:
         植物の状態:
         - 今日の天気は晴れ。気温 8℃（さむい）、湿度 30%（乾燥している）。
@@ -150,7 +156,11 @@ def plant_status_text(
     if day in MILESTONE_DAYS:
         grown += f"今日は{day}日目の節目なので、そのことに触れて喜ぶ。"
     lines.append(grown)
-    # 3. 前に話してからの日数。日数をどう受け取るか（さみしい・うれしい）は性格の指示に任せる
+    # 3. 水やり（#81）
+    watering = _watering_line(created_at, last_watered_at, now, watered_now, remind_days)
+    if watering:
+        lines.append(watering)
+    # 4. 前に話してからの日数。日数をどう受け取るか（さみしい・うれしい）は性格の指示に任せる
     if last_talk_at is None:
         lines.append("- 話しかけてもらうのは今日が初めて。")
     else:
@@ -162,6 +172,37 @@ def plant_status_text(
         else:
             lines.append(f"- 前に話しかけてもらってから{since}日ぶり。")
     return "植物の状態:\n" + "\n".join(lines)
+
+
+def _watering_line(
+    created_at: datetime,
+    last_watered_at: datetime | None,
+    now: datetime,
+    watered_now: bool,
+    remind_days: int,
+) -> str | None:
+    """水やりの 1 行を作る（仕様 §6.7、#81）。言うことが無ければ None。
+
+    例:
+        今の会話で水をもらった → "- この会話で水をもらった。まだお礼を言っていなければ、お礼を言う。"
+        4 日前にもらった（remind_days=3） → "- 水をもらってから4日たって、のどが渇いている。…"
+        2 日前にもらった → "- 最後に水をもらったのは2日前。"
+    """
+    # 1. 今の会話で水をもらった。プロンプトはこの会話の間ずっと使われるので、
+    #    「お礼を言う」だけにすると、返事のたびにお礼を言ってしまう。一度言えば十分と伝える
+    if watered_now:
+        return "- この会話で水をもらった。まだお礼を言っていなければ、うれしそうにお礼を言う。"
+    # 2. のどが渇いているか。一度ももらっていなければ、育ち始めた日から数える
+    since = days_between(last_watered_at or created_at, now)
+    if since >= remind_days:
+        if last_watered_at is None:
+            return "- まだ一度も水をもらっていなくて、のどが渇いている。最初にそれを伝える。"
+        return f"- 水をもらってから{since}日たって、のどが渇いている。最初にそれを伝える。"
+    # 3. 渇いてはいない。最後にもらった日だけ伝える（もらったことが無ければ何も言わない）
+    if last_watered_at is None:
+        return None
+    when = {0: "今日", 1: "きのう"}.get(since, f"{since}日前")
+    return f"- 最後に水をもらったのは{when}。"
 
 
 # 名前がまだ分からない相手に、自然に名前を聞かせる指示
