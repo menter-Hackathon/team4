@@ -490,6 +490,8 @@ URL・モデル名はすべて環境変数で指定する。開発時はロー�
 
 `.env` の `TTS_PROVIDER` で選ぶ。`aivis` ならローカルの AivisSpeech Engine、`openai`（既定）なら OpenAI TTS。
 
+**1 文ずつ声にする（2026-11-19、#39）**: どちらの TTS も「文字を全部もらってから声を作る」作りなので、`agent/plugins/sentence_stream.py` で包み、LLM の返事を日本語の文（「。！？」・閉じかっこ・文末の絵文字）で区切って 1 文ずつ声にする。LLM が書き終わるのを待たずに、1 文目から喋り始める。LiveKit の既定の区切り（blingfire）は日本語を区切らず、20 文字未満の文も次とつなげるため使わない。方言の指示（§6.4）は、包んだ TTS にそのまま渡す。
+
 **AivisSpeech（`TTS_PROVIDER=aivis`、2026-11-17 #56 で決定）**
 
 OpenAI の声（`coral`）は低く男性っぽく聞こえ、`nova`・`sage` でも「幼い女の子の声」に寄せきれなかった。また会話のたびに外部 API の料金と会場回線への依存がある。そこで、GPU の PC で動かす AivisSpeech Engine（Style-Bert-VITS2 ベースの日本語 TTS、VOICEVOX 互換の API）を使う。
