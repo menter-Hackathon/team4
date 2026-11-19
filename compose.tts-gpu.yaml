@@ -1,0 +1,32 @@
+# 植物の声（AivisSpeech、compose.yaml の tts）を GPU で動かすための上書き（#39）
+#
+#   使い方: .env に次の 1 行を書く（docker compose がこのファイルも一緒に読む）
+#     COMPOSE_FILE=compose.yaml:compose.tts-gpu.yaml
+#
+# なぜ要るか:
+#   CPU 版だと 1 文の声を作るのに 0.7〜1.7 秒かかり、返事の遅さのいちばん大きな原因だった。
+#   GPU 版は 0.16〜0.26 秒（2026-11-19、ohsawa の RTX 5060 で 6 字・25 字の文を測った）。
+#   その代わり GPU のメモリを約 1.4GB 使う。GPU 1 枚（8GB）に LLM・STT と一緒に載せるときは、
+#   .env で DOCKER_STT_COMPUTE_TYPE=int8_float16 にして STT のメモリを約 1GB 減らす（docs/deploy.md）。
+# 起動して最初の 1 回の読み上げは、GPU の準備で 1 分以上かかる。tts-init がその 1 回を済ませてから
+# agent が起動するので、会話には出ない（tts-init の待ち時間は 300 秒）。
+
+services:
+  tts:
+    # AivisSpeech Engine 公式イメージの GPU（NVIDIA）版。版は CPU 版と同じ 1.2.0 にそろえる
+    image: ghcr.io/aivis-project/aivisspeech-engine:nvidia-1.2.0
+    # CPU 版と同じく、声のモデルのフォルダの持ち主を user に変えてから起動する。--use_gpu で GPU を使う
+    entrypoint:
+      - bash
+      - -c
+      - >-
+        chown -R user /home/user/.local/share/AivisSpeech-Engine-Dev &&
+        exec gosu user .venv/bin/python ./run.py --use_gpu --host 0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # 使う GPU の番号（.env の TTS_GPU、空なら 0 番）
+              device_ids: ["${TTS_GPU:-0}"]
+              capabilities: [gpu]
