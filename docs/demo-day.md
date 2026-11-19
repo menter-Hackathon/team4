@@ -12,11 +12,11 @@
 2. `.env` に、デモ用の設定を書く（キーは Discord の DM で受け取る）
    ```
    TTS_PROVIDER=aivis
-   AIVIS_SPEAKER=893625024
+   AIVIS_SPEAKER=893625030
    JMA_AMEDAS_STATION=44132
    JMA_FORECAST_AREA=130000
    ```
-   - `AIVIS_SPEAKER` は植物の声（`893625024` =「らせつん / 標準」）。声が決まったら変える（#56）
+   - `AIVIS_SPEAKER` は植物の声（`893625030` =「らせつん / 標準２」、#106 で決定）。書かなくても同じ声になる
    - `JMA_…` は天気を取る場所（例は東京）。発表する場所に合わせて変える
    - デモでは登録したショーンさん・ちゃむさんだけを話し相手にするので、#96 がマージされたら `ALLOW_NEW_PEOPLE=false` も書く
 3. 発表用に育てた株の DB（`demo-day1.db`・`demo-day5.db`・`demo-day30.db`）を Discord の DM で受け取り、`team4/data/` に置く

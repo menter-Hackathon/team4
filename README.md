@@ -52,7 +52,7 @@
 | 音声エージェント | LiveKit Agents（Python） |
 | 会話の LLM | Gemma 4 E4B（`google/gemma-4-E4B-it`）。チームの PC で動かす |
 | 文字起こし | kotoba-whisper v2.0（日本語向けの Whisper） |
-| 声 | AivisSpeech Engine（声のモデル「まお」）。`.env` で OpenAI `gpt-4o-mini-tts` にも切り替えられる |
+| 声 | AivisSpeech Engine（声のモデル「らせつん」）。`.env` で OpenAI `gpt-4o-mini-tts` にも切り替えられる |
 | 鉢のハード | Seeed XIAO ESP32S3 ＋ M5Stack Atomic Voice Base（[部品の選び方](docs/hardware/parts-selection.md)） |
 
 詳しい設計は [仕様書](docs/superpowers/specs/2026-11-13-futamaru-agent-design.md) にあります。
@@ -67,7 +67,7 @@
 | ✅ できた | GPU のある PC でまとめて動かす Docker 構成 |
 | ✅ できた | 性格を5段階にして、変化が話し方に出やすくした（#57） |
 | ✅ できた | 2株の性格・成長曲線・記憶を並べて見せる Web 画面（ダッシュボード、#59） |
-| ✅ できた | 声をローカルの AivisSpeech で作る（明るい女の子の声「まお」、#56） |
+| ✅ できた | 声をローカルの AivisSpeech で作る（明るい女の子の声「らせつん」、#56・#106） |
 | 🔧 作業中 | PC で Gemma 4 と kotoba-whisper を動かす（#1・#2）、ESP32 の実機との通し確認（#3） |
 | 🔧 作業中 | 鉢の筐体の設計（#16） |
 | 🔧 作業中 | 返事の速さ。今は話し終えてから約4〜5秒かかっていて、3秒くらいが目標（植物なので少し間があってよい、#39） |
@@ -133,11 +133,11 @@ TTS_PROVIDER=aivis
 AIVIS_BASE_URL=http://127.0.0.1:10101   # AivisSpeech の URL（空ならこの値）
 ```
 
-`AIVIS_SPEAKER` を書かなければ、聞き比べて決めた「まお」の「あまあま」（`888753762`）を使います。AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。
+`AIVIS_SPEAKER` を書かなければ、聞き比べて決めた「らせつん」の「標準２」（`893625030`、#106）を使います。「らせつん」は AivisSpeech に最初から入っていないので、Docker を使わない PC では AivisSpeech の画面から AivisHub の「らせつん」を入れておきます（入っていないと植物が話せません）。AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。
 
 使っている外部の技術・素材:
 - [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)（音声合成エンジン、LGPL v3）
-- 音声合成モデル「まお」（制作: オズチャット / Trippy / ねゆたろ、Aivis Common Model License (ACML) 1.0）
+- 音声合成モデル「らせつん」（制作: こずかた学園プロジェクト / Aivis Project、声: 上戸恵里さん、Aivis Common Model License (ACML) 1.0）
 
 ### ESP32 用トークンの発行
 

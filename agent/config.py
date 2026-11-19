@@ -22,9 +22,9 @@ DEFAULT_WAKE_WORDS = ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
 TTS_PROVIDERS = ("openai", "aivis")
 # AIVIS_BASE_URL が .env に無いときの AivisSpeech Engine の URL（AivisSpeech の既定のポートは 10101）
 DEFAULT_AIVIS_BASE_URL = "http://127.0.0.1:10101"
-# AIVIS_SPEAKER が .env に無いときの声: 「まお」の「あまあま」スタイル（2026-11-17 に聞き比べて決定、#56）。
-# AivisSpeech に「まお」のモデルが入っている前提。入っていなければ --list で別の ID を調べて .env に書く
-DEFAULT_AIVIS_SPEAKER = 888753762
+# AIVIS_SPEAKER が .env に無いときの声: 「らせつん」の「標準２」スタイル（2026-11-19 に決定、#106。前は「まお / あまあま」）。
+# AivisSpeech に「らせつん」のモデルが入っている前提（AivisHub から入れる。Docker では tts-init が入れる）。入っていなければ --list で別の ID を調べて .env に書く
+DEFAULT_AIVIS_SPEAKER = 893625030
 # FUTAMARU_DB_PATH が .env に無いときの DB ファイルの場所
 DEFAULT_DB_PATH = "./data/futamaru.db"
 
@@ -53,7 +53,7 @@ class Config:
     tts_instructions: str  # 話し方の指示（OpenAI TTS だけ。AivisSpeech には無い）
     tts_provider: str  # "openai" か "aivis"（仕様 §8.3）
     aivis_base_url: str  # AivisSpeech Engine の URL
-    aivis_speaker: int  # AivisSpeech の声のスタイル ID（既定: まお / あまあま）
+    aivis_speaker: int  # AivisSpeech の声のスタイル ID（既定: らせつん / 標準２）
     aivis_speed: float  # AivisSpeech の話す速さ（1.0 がふつう）
     aivis_pitch: float  # AivisSpeech の声の高さ（0.0 がふつう）
     db_path: str  # 会話ログ・記憶を保存する DB ファイルの場所
@@ -134,7 +134,7 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
             raise ConfigError("環境変数 OPENAI_API_KEY が設定されていません（TTS に必要）")
         tts_api_key = "EMPTY"
 
-    # 3. AivisSpeech の声のスタイル ID。無ければ聞き比べて決めた声（まお / あまあま）
+    # 3. AivisSpeech の声のスタイル ID。無ければチームで決めた声（らせつん / 標準２、#106）
     aivis_speaker_raw = get("AIVIS_SPEAKER", str(DEFAULT_AIVIS_SPEAKER))
     try:
         aivis_speaker = int(aivis_speaker_raw)

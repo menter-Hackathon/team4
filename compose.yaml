@@ -136,8 +136,8 @@ services:
       # 入れておく声のモデルの UUID（カンマ区切り）。既定はらせつん。
       # まお・コハクは AivisSpeech に最初から入っているので書かなくてよい
       AIVIS_MODELS: ${AIVIS_MODELS:-9f36ec0d-8dac-42dc-aff4-149c5f99faad}
-      # 植物の声のスタイル ID。空なら agent と同じ既定（888753762 =「まお / あまあま」、agent/config.py）
-      AIVIS_SPEAKER: ${AIVIS_SPEAKER:-888753762}
+      # 植物の声のスタイル ID。空なら agent と同じ既定（893625030 =「らせつん / 標準２」、agent/config.py）
+      AIVIS_SPEAKER: ${AIVIS_SPEAKER:-893625030}
       PYTHONUNBUFFERED: "1"
     volumes:
       - ./scripts/tts_init.py:/tts_init.py:ro
