@@ -10,7 +10,7 @@
 // 手順（run_session()）:
 //   1. つながったら 5 秒以内に、文字で {"type":"start","version":1,"plant_id":"a1","codec":"mulaw"} を送る
 //   2. サーバーから {"type":"ready","sample_rate":16000,"codec":"mulaw","frame_bytes":320} が来るのを待つ
-//   3. ready のあとは、マイクの音を 100ms 分ずつまとめてバイナリで送り続ける（mic_task・send_task）
+//   3. ready のあとは、マイクの音を 40ms 分ずつまとめてバイナリで送り続ける（mic_task・send_task）
 //   4. サーバーから届くバイナリ（植物の声）は、届いた順に再生の待ち行列へ入れる（media_play）。
 //      無音のフレームは送られてこないので、待ち行列が空のあいだは media.c が無音を鳴らす
 //
@@ -263,13 +263,15 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 // 読むのと送るのを分けている（2026-11-19 の実機で決めた）:
 //   最初は 1 つのタスクで「20ms 読む → すぐ送る」をしていた。iPhone のテザリング越しだと送信が
 //   ときどき 1 秒以上詰まり、送信の時間切れで esp_websocket_client が接続ごと切ってしまった。
-//   今は mic_task が読み続けて待ち行列（s_mic_buf、2 秒分）に入れ、send_task が 100ms 分ずつ
+//   今は mic_task が読み続けて待ち行列（s_mic_buf、2 秒分）に入れ、send_task が 40ms 分ずつ
 //   まとめて送る。送信が少し詰まっても、マイクは読み続けられ（AEC があふれない）、接続も切れにくい。
-//   まとめて送ると、WebSocket と TLS の 1 回ごとの上乗せ分も減る（1 秒に 50 回 → 10 回）。
+//   まとめて送ると、WebSocket と TLS の 1 回ごとの上乗せ分も減る（1 秒に 50 回 → 25 回）。
+//   最初は 100ms ずつだったが、その分だけ返事が遅れるので 40ms にした（2026-11-19、返事の遅さ #39）。
+//   μ-law にして 1 回の量が小さくなったので、回数が増えても回線への負担は小さい。
 // ---------------------------------------------------------------------------
 
 #define MIC_BUF_BYTES (WIRE_FRAME_BYTES * 100) // 待ち行列の大きさ = 2 秒分（PSRAM に置く）
-#define SEND_BATCH_BYTES (WIRE_FRAME_BYTES * 5) // 1 回に送る量 = 100ms 分（μ-law なら 1600 バイト）
+#define SEND_BATCH_BYTES (WIRE_FRAME_BYTES * 2) // 1 回に送る量 = 40ms 分（μ-law なら 640 バイト）
 
 static StreamBufferHandle_t s_mic_buf;
 static StaticStreamBuffer_t s_mic_buf_struct;
@@ -307,14 +309,14 @@ static void mic_task(void *arg)
     }
 }
 
-/// 待ち行列から 100ms 分ずつ取り出して中継へ送る。ready の前・切れたあとの分は捨てる。
+/// 待ち行列から 40ms 分ずつ取り出して中継へ送る。ready の前・切れたあとの分は捨てる。
 static void send_task(void *arg)
 {
     static uint8_t batch[SEND_BATCH_BYTES];
     uint32_t send_failures = 0;
 
     for (;;) {
-        // 1. 100ms 分たまるまで待つ（トリガーレベルを SEND_BATCH_BYTES にしてあるので、その量で戻る）
+        // 1. 40ms 分たまるまで待つ（トリガーレベルを SEND_BATCH_BYTES にしてあるので、その量で戻る）
         size_t n = xStreamBufferReceive(s_mic_buf, batch, sizeof(batch), portMAX_DELAY);
         if (n == 0) {
             continue;
