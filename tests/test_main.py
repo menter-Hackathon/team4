@@ -348,7 +348,41 @@ async def test_prepare_fillers_keeps_only_words_the_tts_could_say(monkeypatch):
     agent = main.FutamaruAgent(FakeConv())
     session = FakeSession(SynthTTS(fail_words=("へえ",)))
     monkeypatch.setattr(main.FutamaruAgent, "session", property(lambda self: session))
+    # 無音を切る処理は tests/plugins/test_filler_audio.py で確かめる。ここではそのまま通す
+    monkeypatch.setattr(main, "trim_silence", lambda frames: frames)
     await agent.prepare_fillers(("うん", "へえ", "んー"))
     # TTS が失敗した言葉は飛ばし、残りの言葉を順番に使う
     assert agent._fillers == {"うん": ["うん-0", "うん-1"], "んー": ["んー-0", "んー-1"]}
     assert [next(agent._filler_order) for _ in range(3)] == ["うん", "んー", "うん"]
+
+
+def _agent_with_filler(monkeypatch, awake):
+    import itertools
+
+    agent = main.FutamaruAgent(DecidingConv(TurnDecision(kind="reply", text="こんにちは")))
+    agent._conv.awake = awake
+    session = SayingSession()
+    monkeypatch.setattr(main.FutamaruAgent, "session", property(lambda self: session))
+    agent._fillers = {"うん": ["frame"]}
+    agent._filler_order = itertools.cycle(["うん"])
+    return agent, session
+
+
+async def test_filler_plays_when_voice_stops_only_while_awake(monkeypatch):
+    agent, session = _agent_with_filler(monkeypatch, awake=False)
+    agent.on_user_paused()
+    assert session.said == []  # 眠っているとき（ウェイクワードかわからない）は鳴らさない
+    agent._conv.awake = True
+    agent.on_user_paused()
+    agent.on_user_paused()  # 同じ発話の間の 2 回目の間では鳴らさない
+    assert [text for text, _, _ in session.said] == ["うん"]
+
+
+async def test_filler_is_not_played_twice_in_one_turn_and_resets_after(monkeypatch):
+    agent, session = _agent_with_filler(monkeypatch, awake=True)
+    agent.on_user_paused()  # 声が途切れた瞬間に鳴った
+    msg = ChatMessage(role="user", content=["こんにちは"])
+    await agent.on_user_turn_completed(ChatContext.empty(), msg)
+    assert len(session.said) == 1  # 話し終わりの確定では、もう鳴らさない
+    agent.on_user_paused()  # 次の発話では、また鳴らせる
+    assert len(session.said) == 2

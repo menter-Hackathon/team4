@@ -58,6 +58,7 @@ from agent.plant.store import PlantStore
 from agent.plant.timeutil import jst_now
 from agent.plant.weather import WeatherCache
 from agent.plugins.aivis_tts import create_aivis_tts
+from agent.plugins.filler_audio import trim_silence
 from agent.plugins.jma_weather import fetch_jma_weather
 from agent.plugins.llm import create_json_completer, create_llm
 from agent.plugins.openai_tts import create_tts
@@ -110,6 +111,8 @@ class FutamaruAgent(Agent):
         # つなぎの声（相槌）の作り置き。言葉 → 声のフレーム。prepare_fillers() で作る
         self._fillers: dict[str, list[rtc.AudioFrame]] = {}
         self._filler_order: itertools.cycle[str] | None = None
+        # この発話の間に、つなぎの声をもう鳴らしたか（1 回の発話に 1 回だけ鳴らす）
+        self._filler_played = False
         self.sync_preemptive()
 
     def sync_preemptive(self) -> None:
@@ -144,6 +147,8 @@ class FutamaruAgent(Agent):
                 async with self.session.tts.synthesize(word) as stream:
                     async for audio in stream:
                         frames.append(audio.frame)
+                # 前後の無音を切る（長いと、そのぶん本当の返事が待たされる。filler_audio.py）
+                frames = trim_silence(frames)
                 if frames:
                     self._fillers[word] = frames
             except Exception:
@@ -155,11 +160,13 @@ class FutamaruAgent(Agent):
     def _play_filler(self) -> None:
         """作り置きのつなぎの声を 1 つ鳴らす。会話の履歴には残さない（LLM に「うん」を覚えさせないため）。
 
+        1 回の発話につき 1 回だけ鳴らす（on_user_turn_completed の終わりで数え直す）。
         鳴らしたあとに、本当の返事が続く（LiveKit は声を順番に鳴らす）。
         持ち主がまた話し始めたら、つなぎの声は途中で止まる（allow_interruptions）。
         """
-        if self._filler_order is None:
+        if self._filler_order is None or self._filler_played:
             return
+        self._filler_played = True
         word = next(self._filler_order)
         frames = self._fillers[word]
 
@@ -168,6 +175,17 @@ class FutamaruAgent(Agent):
                 yield frame
 
         self.session.say(word, audio=audio(), add_to_chat_ctx=False, allow_interruptions=True)
+
+    def on_user_paused(self) -> None:
+        """持ち主の声が途切れた瞬間（VAD）に呼ばれる。起きていれば、すぐにつなぎの声を鳴らす（#39）。
+
+        話し終わりの確定（言い終わりの判定・文字起こし）を待つと約 0.9 秒かかるが、
+        声が途切れた瞬間なら約 0.2 秒で鳴らせる。日本語の相槌と同じく、間で「うん」と返す形になる。
+        まだ文字が無いので、眠っているとき（ウェイクワードかわからない）は鳴らさない。
+        つなぎの声は短い（約 0.3 秒）ので、文字起こしが届く前に鳴り終わり、先読みの邪魔もしない。
+        """
+        if self._conv.awake:
+            self._play_filler()
 
     def _apply_dialect(self, dialect: str) -> None:
         """話し相手の方言に合わせて、TTS の話し方の指示を差し替える。
@@ -203,8 +221,19 @@ class FutamaruAgent(Agent):
             reply:  そのまま返事させる。発話を書き換えた（「ふたまる、」を外したなど）なら差し替える
         """
         original = new_message.text_content or ""
+        try:
+            await self._handle_user_turn(turn_ctx, new_message, original)
+        finally:
+            # 次の発話では、またつなぎの声を鳴らせるようにする
+            self._filler_played = False
+
+    async def _handle_user_turn(
+        self, turn_ctx: ChatContext, new_message: ChatMessage, original: str
+    ) -> None:
+        """on_user_turn_completed の中身（説明はそちら）。"""
         # 植物が応じそうなら、判断（起きるときは天気・名前探しで時間がかかる）を待たずに、
-        # すぐにつなぎの声を鳴らす（#39）。応じない発話（眠っていてウェイクワードが無い）では鳴らさない
+        # すぐにつなぎの声を鳴らす（#39）。声が途切れた瞬間（on_user_paused）に鳴らしていれば鳴らさない。
+        # 応じない発話（眠っていてウェイクワードが無い）では鳴らさない
         if self._conv.will_respond(original):
             self._play_filler()
         decision = await self._conv.on_user_turn(original)
@@ -463,6 +492,9 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("user_state_changed")
     def _on_user_state(ev) -> None:
         conv.on_user_speaking(ev.new_state == "speaking")
+        # 声が途切れた瞬間に、つなぎの声を鳴らす（#39。起きているときだけ）
+        if ev.old_state == "speaking" and ev.new_state == "listening":
+            agent.on_user_paused()
 
     # 植物が考え始めた・話し始めた・聞く状態に戻った
     @session.on("agent_state_changed")
