@@ -133,11 +133,11 @@ TTS_PROVIDER=aivis
 AIVIS_BASE_URL=http://127.0.0.1:10101   # AivisSpeech の URL（空ならこの値）
 ```
 
-`AIVIS_SPEAKER` を書かなければ、聞き比べて決めた「まお」の「あまあま」（`888753762`）を使います。AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。
+`AIVIS_SPEAKER` を書かなければ、聞き比べて決めた「らせつん」の「標準２」（`893625030`、#106）を使います。AivisSpeech には「話し方の指示」が無いので、方言は返事の文面（語尾など）だけで出ます。OpenAI に戻すときは `TTS_PROVIDER=openai` にします。
 
 使っている外部の技術・素材:
 - [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)（音声合成エンジン、LGPL v3）
-- 音声合成モデル「まお」（制作: オズチャット / Trippy / ねゆたろ、Aivis Common Model License (ACML) 1.0）
+- 音声合成モデル「らせつん」（制作: こずかた学園プロジェクト / Aivis Project、声: 上戸恵里さん、Aivis Common Model License (ACML) 1.0）
 
 ### ESP32 用トークンの発行
 

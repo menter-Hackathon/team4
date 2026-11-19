@@ -73,7 +73,7 @@ mkdir -p data
 | `OPENAI_API_KEY` | チームの OpenAI のキー（声を OpenAI にするとき） |
 | `LLM_GPU` / `STT_GPU` | 2 で決めた GPU の番号（空なら LLM が 0、STT が 1） |
 | `TTS_PROVIDER` | 植物の声。`aivis`（AivisSpeech）か `openai`（空なら openai） |
-| `AIVIS_SPEAKER` | `aivis` のときの声のスタイル ID（空なら「まお / あまあま」）。例: `893625024` =「らせつん / 標準」 |
+| `AIVIS_SPEAKER` | `aivis` のときの声のスタイル ID（空なら `893625030` =「らせつん / 標準２」）。例: `888753762` =「まお / あまあま」 |
 | `AIVIS_MODELS` | （任意）AivisHub から入れる声のモデルの UUID（カンマ区切り。空ならせつん） |
 | `JMA_AMEDAS_STATION` / `JMA_FORECAST_AREA` | （任意）天気を取る場所。例: 東京なら `44132` / `130000`（`.env.example` の説明を参照） |
 

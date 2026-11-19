@@ -22,9 +22,9 @@ DEFAULT_WAKE_WORDS = ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
 TTS_PROVIDERS = ("openai", "aivis")
 # AIVIS_BASE_URL が .env に無いときの AivisSpeech Engine の URL（AivisSpeech の既定のポートは 10101）
 DEFAULT_AIVIS_BASE_URL = "http://127.0.0.1:10101"
-# AIVIS_SPEAKER が .env に無いときの声: 「まお」の「あまあま」スタイル（2026-11-17 に聞き比べて決定、#56）。
-# AivisSpeech に「まお」のモデルが入っている前提。入っていなければ --list で別の ID を調べて .env に書く
-DEFAULT_AIVIS_SPEAKER = 888753762
+# AIVIS_SPEAKER が .env に無いときの声: 「らせつん」の「標準２」スタイル（2026-11-19 に決定、#106。前は「まお / あまあま」）。
+# AivisSpeech に「らせつん」のモデルが入っている前提（AivisHub から入れる。Docker では tts-init が入れる）。入っていなければ --list で別の ID を調べて .env に書く
+DEFAULT_AIVIS_SPEAKER = 893625030
 # FUTAMARU_DB_PATH が .env に無いときの DB ファイルの場所
 DEFAULT_DB_PATH = "./data/futamaru.db"
 
