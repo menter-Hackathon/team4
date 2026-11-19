@@ -29,7 +29,9 @@
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "esp_heap_caps.h"
 #include "freertos/semphr.h"
+#include "freertos/stream_buffer.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
@@ -41,7 +43,7 @@ static const char *TAG = "relay";
 // 待ち時間など
 #define CONNECT_TIMEOUT_MS 20000 // WebSocket がつながるまで待つ最長の時間
 #define READY_TIMEOUT_MS 10000   // start を送ってから ready を待つ最長の時間
-#define SEND_TIMEOUT_MS 1000     // 1 回の送信で待つ最長の時間
+#define SEND_TIMEOUT_MS 5000     // 1 回の送信で待つ最長の時間（テザリングで一瞬詰まっても切らないよう長め）
 #define BACKOFF_FIRST_MS 5000    // つなぎ直す前の最初の待ち時間
 #define BACKOFF_MAX_MS 60000     // つなぎ直す前の最長の待ち時間
 #define STATS_INTERVAL_MS 30000  // 送り受けした量をログに出す間隔
@@ -62,7 +64,7 @@ static EventGroupHandle_t s_events;
 // 今の接続と「マイクの音を送ってよいか」。relay_task と mic_task の両方が触るので、s_lock で守る
 static SemaphoreHandle_t s_lock;
 static esp_websocket_client_handle_t s_client;
-static bool s_streaming;
+static volatile bool s_streaming; // mic_task は s_lock を持たずに読むので volatile にする
 
 // 送り受けした量（ログ用）
 static volatile uint32_t s_mic_frames_sent;
@@ -233,16 +235,27 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 }
 
 // ---------------------------------------------------------------------------
-// マイクの音を送るタスク
+// マイクの音を読むタスクと、送るタスク
 //
-// マイクの音は、つながっていないあいだも読み続けて捨てる（録音の仕組みの中に音がたまり続けないように）。
-// ready のあとだけ、640 バイトずつバイナリで送る。
+// 読むのと送るのを分けている（2026-11-19 の実機で決めた）:
+//   最初は 1 つのタスクで「20ms 読む → すぐ送る」をしていた。iPhone のテザリング越しだと送信が
+//   ときどき 1 秒以上詰まり、送信の時間切れで esp_websocket_client が接続ごと切ってしまった。
+//   今は mic_task が読み続けて待ち行列（s_mic_buf、2 秒分）に入れ、send_task が 100ms 分ずつ
+//   まとめて送る。送信が少し詰まっても、マイクは読み続けられ（AEC があふれない）、接続も切れにくい。
+//   まとめて送ると、WebSocket と TLS の 1 回ごとの上乗せ分も減る（1 秒に 50 回 → 10 回）。
 // ---------------------------------------------------------------------------
 
+#define MIC_BUF_BYTES (MEDIA_FRAME_BYTES * 100) // 待ち行列の大きさ = 2 秒分（64000 バイト、PSRAM に置く）
+#define SEND_BATCH_BYTES (MEDIA_FRAME_BYTES * 5) // 1 回に送る量 = 100ms 分（3200 バイト）
+
+static StreamBufferHandle_t s_mic_buf;
+static StaticStreamBuffer_t s_mic_buf_struct;
+
+/// マイクの音を 20ms ずつ読み続ける。ready のあとは待ち行列に入れ、それ以外は捨てる。
 static void mic_task(void *arg)
 {
     static uint8_t frame[MEDIA_FRAME_BYTES];
-    uint32_t send_failures = 0;
+    uint32_t dropped = 0;
 
     for (;;) {
         // 1. 20ms 分のマイクの音を待つ
@@ -251,18 +264,41 @@ static void mic_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
-        // 2. ready のあとなら送る（接続を片付けている最中に送らないよう、s_lock を持って送る）
+        // 2. ready のあとなら待ち行列へ。いっぱい（送信が 2 秒以上詰まっている）なら、この 20ms は捨てる
+        if (s_streaming) {
+            if (xStreamBufferSend(s_mic_buf, frame, MEDIA_FRAME_BYTES, 0) < MEDIA_FRAME_BYTES) {
+                // ログが流れすぎないよう、50 回（1 秒分）に 1 回だけ出す
+                if (dropped++ % 50 == 0) {
+                    ESP_LOGW(TAG, "Network is slow; dropped mic audio (%lu frames)", (unsigned long)dropped);
+                }
+            }
+        }
+    }
+}
+
+/// 待ち行列から 100ms 分ずつ取り出して中継へ送る。ready の前・切れたあとの分は捨てる。
+static void send_task(void *arg)
+{
+    static uint8_t batch[SEND_BATCH_BYTES];
+    uint32_t send_failures = 0;
+
+    for (;;) {
+        // 1. 100ms 分たまるまで待つ（トリガーレベルを SEND_BATCH_BYTES にしてあるので、その量で戻る）
+        size_t n = xStreamBufferReceive(s_mic_buf, batch, sizeof(batch), portMAX_DELAY);
+        if (n == 0) {
+            continue;
+        }
+        // 2. 送る（接続を片付けている最中に送らないよう、s_lock を持って送る）
         xSemaphoreTake(s_lock, portMAX_DELAY);
         if (s_client != NULL && s_streaming) {
-            int sent = esp_websocket_client_send_bin(s_client, (const char *)frame, MEDIA_FRAME_BYTES,
+            int sent = esp_websocket_client_send_bin(s_client, (const char *)batch, (int)n,
                                                      pdMS_TO_TICKS(SEND_TIMEOUT_MS));
             if (sent < 0) {
-                // ログが流れすぎないよう、50 回に 1 回だけ出す
-                if (send_failures++ % 50 == 0) {
+                if (send_failures++ % 10 == 0) {
                     ESP_LOGW(TAG, "Failed to send mic audio (%lu times)", (unsigned long)send_failures);
                 }
             } else {
-                s_mic_frames_sent++;
+                s_mic_frames_sent += (uint32_t)(n / MEDIA_FRAME_BYTES);
             }
         }
         xSemaphoreGive(s_lock);
@@ -399,10 +435,19 @@ void relay_start_mic(void)
     s_lock = xSemaphoreCreateMutex();
     snprintf(s_headers, sizeof(s_headers), "Authorization: Bearer %s\r\n", CONFIG_FUTAMARU_DEVICE_KEY);
 
-    // 2. マイクの音を読むタスクを始める。中継につながるまでは読んで捨てる。
+    // 2. マイクの音の待ち行列（2 秒分）を PSRAM に作る。内部の RAM は TLS と AEC で足りなくなりやすいため
+    uint8_t *storage = heap_caps_malloc(MIC_BUF_BYTES + 1, MALLOC_CAP_SPIRAM);
+    if (storage == NULL) {
+        ESP_LOGE(TAG, "No memory for the mic buffer");
+        return;
+    }
+    s_mic_buf = xStreamBufferCreateStatic(MIC_BUF_BYTES, SEND_BATCH_BYTES, storage, &s_mic_buf_struct);
+
+    // 3. マイクの音を読むタスクと送るタスクを始める。中継につながるまでは読んで捨てる。
     //    Wi-Fi につながる前から読むのは、読まないと AEC（AFE）の中に音がたまってあふれ、
     //    「Ringbuffer of AFE(FEED) is full」の警告が出続けるため（2026-11-19 の実機で起きた）
     xTaskCreate(mic_task, "relay_mic", 4096, NULL, 8, NULL);
+    xTaskCreate(send_task, "relay_send", 4096, NULL, 7, NULL);
 }
 
 void relay_start(void)
