@@ -769,3 +769,31 @@ async def test_closed_roster_becomes_guest_after_three_unknown_names(store, cloc
     assert ASK_NAME_INSTRUCTION not in d.instructions  # 3 回目でお客さんになる（今までと同じ）
     assert [p.name for p in store.get_people("a")] == ["ちゃむ"]
     await c.close()
+
+
+@pytest.mark.parametrize("text", ["ごめん", "ご視聴ありがとうございました。", "야호, 참다요."])
+async def test_awake_stt_hallucination_is_ignored_and_not_recorded(conv, store, text):
+    await conv.on_user_turn("ふたまる")
+    await conv.on_user_turn("ただいま")
+    assert (await conv.on_user_turn(text)).kind == "ignore"
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["ただいま"]
+
+
+async def test_awake_sentence_containing_gomen_is_a_reply(conv, store):
+    await conv.on_user_turn("ふたまる")
+    d = await conv.on_user_turn("ごめん、水忘れてた")
+    assert (d.kind, d.text) == ("reply", "ごめん、水忘れてた")
+
+
+async def test_awake_hallucination_after_wake_word_is_ignored(conv, store):
+    await conv.on_user_turn("ふたまる")
+    await conv.on_user_turn("ただいま")
+    assert (await conv.on_user_turn("ふたまる、ご視聴ありがとうございました")).kind == "ignore"
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["ただいま"]
+
+
+async def test_sleeping_wake_word_with_hangul_rest_still_wakes(conv, store):
+    d = await conv.on_user_turn("ふたまる、참다요")
+    assert d.kind == "greet" and d.instructions
+    assert conv.awake
+    assert store.get_utterances(current_sid(store)) == []
