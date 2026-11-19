@@ -21,6 +21,7 @@
 
 #include "board.h"
 
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/i2s_std.h"
 #include "esp_check.h"
@@ -105,16 +106,61 @@ static bool i2c_has_device(uint8_t addr)
     return i2c_master_probe(s_i2c_bus, addr, 50) == ESP_OK;
 }
 
-static void i2c_scan(void)
+/// SDA と SCL を入力にして、内部のプルアップかプルダウンを付けたときの値を読む。
+static void read_i2c_lines(bool pull_up, int *sda, int *scl)
+{
+    gpio_config_t cfg = {
+        .pin_bit_mask = (1ULL << PIN_I2C_SDA) | (1ULL << PIN_I2C_SCL),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = pull_up ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+        .pull_down_en = pull_up ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
+    };
+    gpio_config(&cfg);
+    vTaskDelay(pdMS_TO_TICKS(5)); // 電圧が落ち着くのを少し待つ
+    *sda = gpio_get_level(PIN_I2C_SDA);
+    *scl = gpio_get_level(PIN_I2C_SCL);
+}
+
+/// I2C を始める前に、SDA と SCL の線の状態を調べてログに出す（配線の確認用）。
+///
+/// 調べ方:
+///   1. XIAO の内部のプルダウン（弱く Low に引く）を付けて読む。
+///      Voice Base に電源が来ていて線がつながっていれば、Voice Base のプルアップ抵抗（強い）が勝って 1 になる。
+///      0 なら、線が Voice Base まで届いていないか、Voice Base に電源（3V3）が来ていない。
+///   2. 内部のプルアップを付けて読む。0 なら、線が GND などに挿さって Low に張り付いている。
+/// 部品探しが全部タイムアウトしたとき（実機で起きた）、原因を絞るために足した。
+static void i2c_check_lines(void)
+{
+    int sda_down, scl_down, sda_up, scl_up;
+    read_i2c_lines(false, &sda_down, &scl_down);
+    read_i2c_lines(true, &sda_up, &scl_up);
+    ESP_LOGI(TAG, "I2C lines with pull-down: SDA(D4)=%d SCL(D5)=%d / with pull-up: SDA=%d SCL=%d (all should be 1)",
+             sda_down, scl_down, sda_up, scl_up);
+    if (sda_up == 0 || scl_up == 0) {
+        ESP_LOGW(TAG, "An I2C line is stuck low. Check that G38->D4 and G39->D5 are not on GND");
+    } else if (sda_down == 0 || scl_down == 0) {
+        ESP_LOGW(TAG, "No pull-up from the Voice Base. Check the 3V3/5V/GND wires and that G38->D4, G39->D5");
+    }
+}
+
+/// 0x08〜0x77 のアドレスを順に呼んで、返事をした部品をログに出す。
+///
+/// 戻り値: ES8311（0x18）が見つかれば true。
+static bool i2c_scan(void)
 {
     int found = 0;
+    bool es8311_found = false;
     for (uint8_t addr = 0x08; addr < 0x78; addr++) {
         if (i2c_has_device(addr)) {
             ESP_LOGI(TAG, "I2C device found at 0x%02X", addr);
             found++;
+            if (addr == ADDR_ES8311) {
+                es8311_found = true;
+            }
         }
     }
     ESP_LOGI(TAG, "I2C scan done: %d device(s) (expect 0x18 ES8311 and 0x43 PI4IOE5V6408)", found);
+    return es8311_found;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,11 +323,19 @@ bool board_init(bool with_aec_reference)
     ESP_LOGI(TAG, "Init XIAO ESP32S3 + Atomic Voice Base (AEC reference: %s)",
              with_aec_reference ? "on" : "off");
 
+    // 1. I2C の線の状態を見てから、I2C を始めて部品を探す
+    i2c_check_lines();
     if (init_i2c() != ESP_OK) {
         ESP_LOGE(TAG, "I2C init failed");
         return false;
     }
-    i2c_scan();
+    // ES8311 が見つからないまま先へ進むと、ES8311 への書き込みで止まってしまう（実機で起きた）。
+    // ここで失敗にして、main.c でエラーの LED を付けて止める。
+    if (!i2c_scan()) {
+        ESP_LOGE(TAG, "ES8311 (0x18) not found. Check SDA/SCL, 5V and GND wiring");
+        return false;
+    }
+    // 2. アンプ → I2S → ES8311 の順に動かす
     enable_speaker_amp();
     if (init_i2s() != ESP_OK) {
         ESP_LOGE(TAG, "I2S init failed");
