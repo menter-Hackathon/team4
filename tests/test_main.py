@@ -168,6 +168,10 @@ class DecidingConv(FakeConv):
         super().__init__()
         self._decision = decision
 
+    def will_respond(self, text):
+        # 本物と同じく、判断の結果が ignore 以外なら「応じそう」と見積もる
+        return self._decision.kind != "ignore"
+
     async def on_user_turn(self, text):
         return self._decision
 

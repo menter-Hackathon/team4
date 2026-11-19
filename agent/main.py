@@ -199,6 +199,10 @@ class FutamaruAgent(Agent):
             reply:  そのまま返事させる。発話を書き換えた（「ふたまる、」を外したなど）なら差し替える
         """
         original = new_message.text_content or ""
+        # 植物が応じそうなら、判断（起きるときは天気・名前探しで時間がかかる）を待たずに、
+        # すぐにつなぎの声を鳴らす（#39）。応じない発話（眠っていてウェイクワードが無い）では鳴らさない
+        if self._conv.will_respond(original):
+            self._play_filler()
         decision = await self._conv.on_user_turn(original)
         # 起きた（または起きている）なら、次の発話から先読みを使う
         self.sync_preemptive()
@@ -212,8 +216,6 @@ class FutamaruAgent(Agent):
             self._apply_dialect(decision.dialect)
         if decision.kind == "ignore":
             raise StopResponse()  # ユーザー発話は履歴にも残らない
-        # 返事をする（greet・reply）ときは、返事ができるまでの間をつなぎの声で埋める（#39）
-        self._play_filler()
         if decision.kind == "greet":
             self.session.generate_reply(
                 chat_ctx=direction_ctx(self.chat_ctx, WAKE_GREETING_INSTRUCTION)

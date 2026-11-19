@@ -768,3 +768,16 @@ async def test_closed_roster_becomes_guest_after_three_unknown_names(store, cloc
     assert ASK_NAME_INSTRUCTION not in d.instructions  # 3 回目でお客さんになる（今までと同じ）
     assert [p.name for p in store.get_people("a")] == ["ちゃむ"]
     await c.close()
+
+
+async def test_will_respond_estimates_without_changing_state(conv, store):
+    # 眠っているとき: ウェイクワードがあるときだけ応じる。見積もっても起きない（#39）
+    assert not conv.will_respond("おはよう")
+    assert conv.will_respond("ふたまる")
+    assert not conv.will_respond("。")
+    assert not conv.awake
+    # 起きているとき: 中身のある発話には応じる
+    await conv.on_user_turn("ふたまる")
+    assert conv.awake
+    assert conv.will_respond("ただいま")
+    assert not conv.will_respond("…")
