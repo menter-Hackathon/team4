@@ -12,6 +12,8 @@ Whisper 系の STT（kotoba-whisper など）は、無音や雑音しか無い�
 
 from __future__ import annotations
 
+import unicodedata
+
 from .wake import normalize
 
 # 文字起こしが丸ごとこれと同じなら、でっちあげとみなす。
@@ -36,8 +38,10 @@ def has_hangul(text: str) -> bool:
 
     例: "야호, 참다요." → True、"ちゃむだ요?" → True、"ちゃむだよ" → False
     """
-    # 0xAC00〜0xD7A3: ハングルの音節（가〜힣）。0x1100〜0x11FF・0x3130〜0x318F: ハングルの字母
-    return any("가" <= c <= "힣" or "ᄀ" <= c <= "ᇿ" or "㄰" <= c <= "㆏" for c in text)
+    # 文字の名前（Unicode の名前）に "HANGUL" が入っているかで見る。
+    # 音節（가 = HANGUL SYLLABLE GA）・字母（ㄱ）・半角の字母（HALFWIDTH HANGUL …）など、
+    # ハングルの文字はどれもこの言葉を名前に含む
+    return any("HANGUL" in unicodedata.name(c, "") for c in text)
 
 
 def is_stt_noise(text: str) -> bool:

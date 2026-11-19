@@ -33,7 +33,7 @@ from .reflection import JsonCompleter, reflect_session
 from .store import Person, PlantStore
 from .stt_noise import is_stt_noise
 from .timeutil import Clock
-from .wake import WakeController, detect_wake, normalize
+from .wake import WakeController, WakeMatch, detect_wake, normalize
 from .watering import mentions_watering
 from .weather import WeatherCache, describe_weather
 
@@ -176,14 +176,6 @@ class PlantConversation:
         if not normalize(text):
             return TurnDecision("ignore")
 
-        # 1.5 STT のでっちあげを捨てる（仕様 §8.2）。
-        #     無音・雑音から出てくる「ごめん」「ご視聴ありがとうございました」や、ハングルの書き起こし（#73）。
-        #     間違った文に返事をするより、黙って次の発話を待つほうが自然なため、返事も記録もしない
-        if is_stt_noise(text):
-            # 文の中身はログに出さない（会話の内容をログに残さないため、AGENTS.md）
-            logger.info("ignored STT noise (plant=%s)", self._plant_id)
-            return TurnDecision("ignore")
-
         # 2. 眠っているとき: ウェイクワードがあるときだけ起きる
         if not self.awake:
             match = detect_wake(text, self._wake_words)
@@ -196,6 +188,12 @@ class PlantConversation:
                 await self._weather.refresh()
             # 起きる。新しいセッションを始め、「名前を聞く」入りのシステムプロンプトを受け取る
             instructions = self._wake()
+            # 続きが STT のでっちあげ（「ふたまる、ご視聴ありがとうございました」や、#73 のハングル入り）なら、
+            # 続きは無かったことにして「ふたまる」だけで起こされたときと同じにする（仕様 §8.2）。
+            # 発話ごと捨てないのは、ウェイクワードは正しく聞き取れているので、起きないと相手が困るため
+            if is_stt_noise(match.rest):
+                logger.info("ignored STT noise after wake word (plant=%s)", self._plant_id)
+                match = WakeMatch(rest="")
             if match.rest:
                 # 「ふたまる、今日カレー食べた」のように続きがある → その続きに返事する
                 self._record("user", match.rest)
@@ -226,6 +224,14 @@ class PlantConversation:
         #    元の「ふたまる太郎だよ。」のまま会話の LLM に渡すと、名前を「太郎」と登録していても、
         #    植物が「ふたまる太郎」と呼んでしまうため
         content = self._without_leading_wake_word(text)
+        # 3.5 STT のでっちあげを捨てる（仕様 §8.2）。
+        #     無音・雑音から出てくる「ごめん」「ご視聴ありがとうございました」や、ハングルの書き起こし（#73）。
+        #     間違った文に返事をするより、黙って次の発話を待つほうが自然なため、返事も記録もしない。
+        #     先頭の「ふたまる、」を外したあとの文で調べる（「ふたまる、ご視聴…」も捨てるため）
+        if is_stt_noise(content if content is not None else text):
+            # 文の中身はログに出さない（会話の内容をログに残さないため、AGENTS.md）
+            logger.info("ignored STT noise (plant=%s)", self._plant_id)
+            return TurnDecision("ignore")
         # 4. 発話を記録し、無言タイマーをリセットする
         self._record("user", content if content is not None else text)
         self._controller.on_user_activity(self._clock())

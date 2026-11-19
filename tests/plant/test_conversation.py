@@ -782,3 +782,17 @@ async def test_awake_sentence_containing_gomen_is_a_reply(conv, store):
     await conv.on_user_turn("ふたまる")
     d = await conv.on_user_turn("ごめん、水忘れてた")
     assert (d.kind, d.text) == ("reply", "ごめん、水忘れてた")
+
+
+async def test_awake_hallucination_after_wake_word_is_ignored(conv, store):
+    await conv.on_user_turn("ふたまる")
+    await conv.on_user_turn("ただいま")
+    assert (await conv.on_user_turn("ふたまる、ご視聴ありがとうございました")).kind == "ignore"
+    assert [u.text for u in store.get_utterances(current_sid(store))] == ["ただいま"]
+
+
+async def test_sleeping_wake_word_with_hangul_rest_still_wakes(conv, store):
+    d = await conv.on_user_turn("ふたまる、참다요")
+    assert d.kind == "greet" and d.instructions
+    assert conv.awake
+    assert store.get_utterances(current_sid(store)) == []

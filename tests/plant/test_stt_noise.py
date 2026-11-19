@@ -18,7 +18,7 @@ def test_whole_utterance_hallucinations_are_noise(text):
     assert is_stt_noise(text)
 
 
-@pytest.mark.parametrize("text", ["야호, 참다요.", "ちゃむだ요?", "잠을 자요."])
+@pytest.mark.parametrize("text", ["야호, 참다요.", "ちゃむだ요?", "잠을 자요.", "ﾡ"])
 def test_text_with_hangul_is_noise(text):
     assert is_stt_noise(text)
 
