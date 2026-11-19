@@ -78,7 +78,8 @@ async def test_start_recovers_unreflected_session(store, clock, completer):
     c = make_conv(store, clock, completer)
     await c.start()
     await settle()
-    assert store.get_session(old).reflected and not c.awake
+    s = store.get_session(old)
+    assert s.ended_at is not None and s.reflected and not c.awake
 
 
 async def test_start_creates_new_plant(conv, store):
