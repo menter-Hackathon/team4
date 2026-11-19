@@ -392,14 +392,21 @@ static void relay_task(void *arg)
     }
 }
 
-void relay_start(void)
+void relay_start_mic(void)
 {
-    // 1. タスクのあいだで使う合図・鍵・ヘッダを用意する
+    // 1. タスクのあいだで使う合図・鍵・ヘッダを用意する（relay_start より先に呼ばれるので、ここで作る）
     s_events = xEventGroupCreate();
     s_lock = xSemaphoreCreateMutex();
     snprintf(s_headers, sizeof(s_headers), "Authorization: Bearer %s\r\n", CONFIG_FUTAMARU_DEVICE_KEY);
 
-    // 2. マイクの音を送るタスクと、接続を受け持つタスクを始める
+    // 2. マイクの音を読むタスクを始める。中継につながるまでは読んで捨てる。
+    //    Wi-Fi につながる前から読むのは、読まないと AEC（AFE）の中に音がたまってあふれ、
+    //    「Ringbuffer of AFE(FEED) is full」の警告が出続けるため（2026-11-19 の実機で起きた）
     xTaskCreate(mic_task, "relay_mic", 4096, NULL, 8, NULL);
+}
+
+void relay_start(void)
+{
+    // 接続を受け持つタスクを始める（relay_start_mic() のあとに呼ぶ）
     xTaskCreate(relay_task, "relay", 6144, NULL, 5, NULL);
 }

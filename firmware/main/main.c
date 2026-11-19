@@ -85,6 +85,8 @@ void app_main(void)
     if (!media_init(USE_AEC)) {
         halt("media init failed");
     }
+    // マイクの音は Wi-Fi を待たずに読み始める（つながるまでは捨てる。relay.h を参照）
+    relay_start_mic();
 
     // 3. Wi-Fi。sdkconfig.defaults で何度でも試す設定にしているので、つながるまでここで待つ。
     //    つながったあとに切れても、livekit/example_utils がつなぎ直す

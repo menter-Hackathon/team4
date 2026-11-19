@@ -12,8 +12,11 @@ extern "C" {
 /// 例: "a1" → true、"A1" → false、"" → false
 bool relay_plant_id_is_valid(const char *plant_id);
 
-/// 中継への接続を受け持つタスクと、マイクの音を送るタスクを始める。
-/// Wi-Fi につながり、media_init() が終わってから呼ぶ。
+/// マイクの音を読むタスクを始める。中継につながるまでは読んで捨て、ready のあとは中継へ送る。
+/// media_init() のすぐあと（Wi-Fi につなぐ前）に呼ぶ。読まないでいると AEC の中に音がたまってあふれるため。
+void relay_start_mic(void);
+
+/// 中継への接続を受け持つタスクを始める。relay_start_mic() のあと、Wi-Fi につながってから呼ぶ。
 /// 接続が失敗・切断されるたびに、5 秒から倍々に（最長 60 秒）間を空けてつなぎ直す。
 void relay_start(void);
 
