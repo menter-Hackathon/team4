@@ -22,6 +22,15 @@ menu "Futamaru"
             どの株として話すか（start メッセージの plant_id）。
             英小文字・数字・_・- だけで 1〜32 文字。2 台目は b1 などに変える。
 
+    config FUTAMARU_MULAW
+        bool "Compress audio to the relay with mu-law"
+        default y
+        help
+            中継との間の音を μ-law（G.711）で圧縮する（仕様 §3.2.1 の codec "mulaw"）。
+            送る量が半分（32KB/秒 → 16KB/秒）になる。テザリングなど上りの細い回線でも途切れにくい
+            （2026-11-19、iPhone のテザリングでは 16 ビットの PCM のままだと 1 割しか送れなかった）。
+            n にすると 16 ビットの PCM のまま送る。
+
     config FUTAMARU_USE_AEC
         bool "Use echo cancellation (AEC)"
         default y

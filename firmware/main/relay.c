@@ -3,12 +3,14 @@
 // 決まり（仕様 §3.2.1。サーバー側と同じ）:
 //   - つなぎ先: CONFIG_FUTAMARU_RELAY_URL（wss://… または手元の試験用の ws://…）
 //   - HTTP ヘッダ「Authorization: Bearer <CONFIG_FUTAMARU_DEVICE_KEY>」を付ける
-//   - 音: 16kHz・16 ビット・モノラルの PCM。1 フレーム = 20ms = 640 バイト。送りも受けも同じ
+//   - 音: 16kHz・モノラル。1 フレーム = 20ms。送りも受けも同じ形にする
+//       CONFIG_FUTAMARU_MULAW=y（既定）: μ-law で圧縮（1 フレーム 320 バイト。送る量が半分。mulaw.c）
+//       CONFIG_FUTAMARU_MULAW=n        : 16 ビットの PCM のまま（1 フレーム 640 バイト）
 //
 // 手順（run_session()）:
-//   1. つながったら 5 秒以内に、文字で {"type":"start","version":1,"plant_id":"a1"} を送る
-//   2. サーバーから {"type":"ready","sample_rate":16000,"frame_bytes":640} が来るのを待つ
-//   3. ready のあとは、マイクの音を 640 バイトずつバイナリで送り続ける（mic_task）
+//   1. つながったら 5 秒以内に、文字で {"type":"start","version":1,"plant_id":"a1","codec":"mulaw"} を送る
+//   2. サーバーから {"type":"ready","sample_rate":16000,"codec":"mulaw","frame_bytes":320} が来るのを待つ
+//   3. ready のあとは、マイクの音を 100ms 分ずつまとめてバイナリで送り続ける（mic_task・send_task）
 //   4. サーバーから届くバイナリ（植物の声）は、届いた順に再生の待ち行列へ入れる（media_play）。
 //      無音のフレームは送られてこないので、待ち行列が空のあいだは media.c が無音を鳴らす
 //
@@ -36,9 +38,19 @@
 #include "sdkconfig.h"
 
 #include "media.h"
+#include "mulaw.h"
 #include "status_led.h"
 
 static const char *TAG = "relay";
+
+// 中継との間の音の送り方（start の codec）と、その形での 20ms の大きさ
+#if CONFIG_FUTAMARU_MULAW
+#define RELAY_CODEC "mulaw"
+#define WIRE_FRAME_BYTES (MEDIA_FRAME_BYTES / 2) // μ-law は 1 サンプル 1 バイト → 320 バイト
+#else
+#define RELAY_CODEC "pcm16"
+#define WIRE_FRAME_BYTES MEDIA_FRAME_BYTES // 16 ビットの PCM → 640 バイト
+#endif
 
 // 待ち時間など
 #define CONNECT_TIMEOUT_MS 20000 // WebSocket がつながるまで待つ最長の時間
@@ -112,7 +124,7 @@ static const char *json_string(const cJSON *obj, const char *key)
 
 /// 届いた文字のメッセージを読んで、ready なら relay_task に知らせ、error ならログに出す。
 ///
-/// 例: {"type":"ready","sample_rate":16000,"frame_bytes":640} → EV_READY を立てる
+/// 例: {"type":"ready","sample_rate":16000,"codec":"mulaw","frame_bytes":320} → EV_READY を立てる
 ///     {"type":"error","code":"invalid_start","message":"..."} → エラーのログ
 static void handle_text_message(const char *text, size_t len)
 {
@@ -126,10 +138,12 @@ static void handle_text_message(const char *text, size_t len)
         // 音の形式がこちらの決め打ち（16kHz・640 バイト）と違えば、警告だけ出して続ける
         const cJSON *rate = cJSON_GetObjectItemCaseSensitive(msg, "sample_rate");
         const cJSON *frame = cJSON_GetObjectItemCaseSensitive(msg, "frame_bytes");
+        const char *codec = json_string(msg, "codec");
         if (!cJSON_IsNumber(rate) || rate->valueint != MEDIA_SAMPLE_RATE || !cJSON_IsNumber(frame) ||
-            frame->valueint != MEDIA_FRAME_BYTES) {
-            ESP_LOGW(TAG, "Relay expects a different audio format (sample_rate=%d, frame_bytes=%d)",
-                     cJSON_IsNumber(rate) ? rate->valueint : -1, cJSON_IsNumber(frame) ? frame->valueint : -1);
+            frame->valueint != WIRE_FRAME_BYTES || strcmp(codec, RELAY_CODEC) != 0) {
+            // 古いサーバー（codec を知らない）だと pcm16 で返ってくる。音がおかしくなるので気づけるようにする
+            ESP_LOGW(TAG, "Relay expects a different audio format (sample_rate=%d, codec=%s, frame_bytes=%d)",
+                     cJSON_IsNumber(rate) ? rate->valueint : -1, codec, cJSON_IsNumber(frame) ? frame->valueint : -1);
         }
         xEventGroupSetBits(s_events, EV_READY);
     } else if (strcmp(type, "error") == 0) {
@@ -161,9 +175,18 @@ static void handle_data(const esp_websocket_event_data_t *d)
 
     switch (op) {
     case WS_OP_BINARY:
-        // 2. 植物の声: 届いた順にそのまま再生へ
+        // 2. 植物の声: 届いた順に再生へ（μ-law なら 16 ビットの PCM に戻してから）
         if (d->data_len > 0) {
+#if CONFIG_FUTAMARU_MULAW
+            static int16_t pcm[WIRE_FRAME_BYTES]; // 一度に 20ms 分ずつ戻す
+            for (int off = 0; off < d->data_len; off += WIRE_FRAME_BYTES) {
+                int n = d->data_len - off < WIRE_FRAME_BYTES ? d->data_len - off : WIRE_FRAME_BYTES;
+                mulaw_decode((const uint8_t *)d->data_ptr + off, (size_t)n, pcm);
+                media_play((const uint8_t *)pcm, (size_t)n * sizeof(int16_t));
+            }
+#else
             media_play((const uint8_t *)d->data_ptr, (size_t)d->data_len);
+#endif
             s_voice_bytes_received += (uint32_t)d->data_len;
         }
         break;
@@ -245,8 +268,8 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 //   まとめて送ると、WebSocket と TLS の 1 回ごとの上乗せ分も減る（1 秒に 50 回 → 10 回）。
 // ---------------------------------------------------------------------------
 
-#define MIC_BUF_BYTES (MEDIA_FRAME_BYTES * 100) // 待ち行列の大きさ = 2 秒分（64000 バイト、PSRAM に置く）
-#define SEND_BATCH_BYTES (MEDIA_FRAME_BYTES * 5) // 1 回に送る量 = 100ms 分（3200 バイト）
+#define MIC_BUF_BYTES (WIRE_FRAME_BYTES * 100) // 待ち行列の大きさ = 2 秒分（PSRAM に置く）
+#define SEND_BATCH_BYTES (WIRE_FRAME_BYTES * 5) // 1 回に送る量 = 100ms 分（μ-law なら 1600 バイト）
 
 static StreamBufferHandle_t s_mic_buf;
 static StaticStreamBuffer_t s_mic_buf_struct;
@@ -254,7 +277,8 @@ static StaticStreamBuffer_t s_mic_buf_struct;
 /// マイクの音を 20ms ずつ読み続ける。ready のあとは待ち行列に入れ、それ以外は捨てる。
 static void mic_task(void *arg)
 {
-    static uint8_t frame[MEDIA_FRAME_BYTES];
+    // 16 ビットの音として読むので、2 バイト境界にそろえる（そろっていないと読み方によっては止まる）
+    static uint8_t frame[MEDIA_FRAME_BYTES] __attribute__((aligned(4)));
     uint32_t dropped = 0;
 
     for (;;) {
@@ -264,9 +288,16 @@ static void mic_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
-        // 2. ready のあとなら待ち行列へ。いっぱい（送信が 2 秒以上詰まっている）なら、この 20ms は捨てる
+        // 2. ready のあとなら、送る形にして（μ-law なら圧縮して）待ち行列へ。
+        //    いっぱい（送信が 2 秒以上詰まっている）なら、この 20ms は捨てる
         if (s_streaming) {
-            if (xStreamBufferSend(s_mic_buf, frame, MEDIA_FRAME_BYTES, 0) < MEDIA_FRAME_BYTES) {
+#if CONFIG_FUTAMARU_MULAW
+            static uint8_t wire[WIRE_FRAME_BYTES];
+            mulaw_encode((const int16_t *)frame, MEDIA_FRAME_BYTES / sizeof(int16_t), wire);
+#else
+            const uint8_t *wire = frame;
+#endif
+            if (xStreamBufferSend(s_mic_buf, wire, WIRE_FRAME_BYTES, 0) < WIRE_FRAME_BYTES) {
                 // ログが流れすぎないよう、50 回（1 秒分）に 1 回だけ出す
                 if (dropped++ % 50 == 0) {
                     ESP_LOGW(TAG, "Network is slow; dropped mic audio (%lu frames)", (unsigned long)dropped);
@@ -298,7 +329,7 @@ static void send_task(void *arg)
                     ESP_LOGW(TAG, "Failed to send mic audio (%lu times)", (unsigned long)send_failures);
                 }
             } else {
-                s_mic_frames_sent += (uint32_t)(n / MEDIA_FRAME_BYTES);
+                s_mic_frames_sent += (uint32_t)(n / WIRE_FRAME_BYTES);
             }
         }
         xSemaphoreGive(s_lock);
@@ -355,14 +386,16 @@ static bool run_session(void)
     }
 
     // 3. start を送る（つながってから 5 秒以内に送る決まり）
-    char start_msg[96];
-    int len = snprintf(start_msg, sizeof(start_msg), "{\"type\":\"start\",\"version\":1,\"plant_id\":\"%s\"}",
-                       CONFIG_FUTAMARU_PLANT_ID);
+    char start_msg[128];
+    int len = snprintf(start_msg, sizeof(start_msg),
+                       "{\"type\":\"start\",\"version\":1,\"plant_id\":\"%s\",\"codec\":\"%s\"}",
+                       CONFIG_FUTAMARU_PLANT_ID, RELAY_CODEC);
     if (esp_websocket_client_send_text(client, start_msg, len, pdMS_TO_TICKS(SEND_TIMEOUT_MS)) < 0) {
         ESP_LOGW(TAG, "Failed to send start");
         goto cleanup;
     }
-    ESP_LOGI(TAG, "Sent start (plant_id \"%s\"), waiting for ready", CONFIG_FUTAMARU_PLANT_ID);
+    ESP_LOGI(TAG, "Sent start (plant_id \"%s\", codec %s), waiting for ready", CONFIG_FUTAMARU_PLANT_ID,
+             RELAY_CODEC);
 
     // 4. ready を待つ
     bits = xEventGroupWaitBits(s_events, EV_READY | EV_ENDED, pdFALSE, pdFALSE, pdMS_TO_TICKS(READY_TIMEOUT_MS));

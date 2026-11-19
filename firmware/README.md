@@ -12,12 +12,13 @@ LiveKit には中継（サーバー側）が入るので、この端末は LiveK
 | 順番 | 向き | 中身 |
 |---|---|---|
 | 0 | 端末 → サーバー | `CONFIG_FUTAMARU_RELAY_URL` に接続。HTTP ヘッダ `Authorization: Bearer <CONFIG_FUTAMARU_DEVICE_KEY>` |
-| 1 | 端末 → サーバー | つながってから 5 秒以内に文字で `{"type":"start","version":1,"plant_id":"a1"}` |
-| 2 | サーバー → 端末 | 文字で `{"type":"ready","sample_rate":16000,"frame_bytes":640}`。これが来てからマイクの音を送り始める |
+| 1 | 端末 → サーバー | つながってから 5 秒以内に文字で `{"type":"start","version":1,"plant_id":"a1","codec":"mulaw"}` |
+| 2 | サーバー → 端末 | 文字で `{"type":"ready","sample_rate":16000,"codec":"mulaw","frame_bytes":320}`。これが来てからマイクの音を送り始める |
 | 3 | 端末 → サーバー | バイナリでマイクの音を送り続ける |
 | 4 | サーバー → 端末 | バイナリで植物の声。届いた順に鳴らす。無音は送られてこないので、届かないあいだは無音を鳴らす |
 
-- 音は送りも受けも 16kHz・16 ビット・モノラル・リトルエンディアンの PCM。1 フレーム = 20ms = 640 バイト
+- 音は送りも受けも 16kHz・モノラル。既定（`CONFIG_FUTAMARU_MULAW=y`）では μ-law（G.711）で圧縮し、1 フレーム = 20ms = 320 バイト（16KB/秒）。`n` にすると 16 ビットの PCM のまま（640 バイト、32KB/秒）。iPhone のテザリングでは、PCM のままだと上りが足りず 1 割しか送れなかった（2026-11-19）
+- マイクの音は 100ms 分ずつまとめて送ります。回線が詰まっても 2 秒分まではためておき、それを超えると古いものから捨てます（ログに `Network is slow; dropped mic audio`）
 - サーバーは間違いがあると `{"type":"error","code":"...","message":"..."}` を送って閉じます（ログに出ます）
 - 切れたら 5 秒待ってつなぎ直し、失敗が続くと待ち時間を倍にします（最長 60 秒）。ready まで進めたら 5 秒に戻します
 
@@ -170,8 +171,10 @@ from websockets.asyncio.server import serve
 
 async def handler(ws):
     print("Authorization:", ws.request.headers.get("Authorization"))
-    print("start:", json.loads(await ws.recv()))
-    await ws.send(json.dumps({"type": "ready", "sample_rate": 16000, "frame_bytes": 640}))
+    start = json.loads(await ws.recv())
+    codec = start.get("codec", "pcm16")
+    frame_bytes = 320 if codec == "mulaw" else 640
+    await ws.send(json.dumps({"type": "ready", "sample_rate": 16000, "codec": codec, "frame_bytes": frame_bytes}))
     async for message in ws:
         if isinstance(message, bytes):
             await ws.send(message)  # マイクの音をそのまま返す
