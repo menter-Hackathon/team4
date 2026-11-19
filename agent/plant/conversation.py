@@ -31,6 +31,7 @@ from .personality import nudge_delay
 from .prompt import build_system_prompt, plant_status_text
 from .reflection import JsonCompleter, reflect_session
 from .store import Person, PlantStore
+from .stt_noise import is_stt_noise
 from .timeutil import Clock
 from .wake import WakeController, detect_wake, normalize
 from .watering import mentions_watering
@@ -160,6 +161,7 @@ class PlantConversation:
         例（起きているとき）:
             "ただいま" → reply（text = "ただいま"）
             "。"       → ignore（#10）
+            "ごめん"   → ignore（STT のでっちあげ、§8.2）
         """
         text = text.strip()
 
@@ -172,6 +174,14 @@ class PlantConversation:
         #    STT は雑音を「。」「…」などと文字起こしすることがある。normalize() は空白・句読点・記号を
         #    消すので、消して何も残らなければ中身の無い発話として、返事も記録もしない（#10）
         if not normalize(text):
+            return TurnDecision("ignore")
+
+        # 1.5 STT のでっちあげを捨てる（仕様 §8.2）。
+        #     無音・雑音から出てくる「ごめん」「ご視聴ありがとうございました」や、ハングルの書き起こし（#73）。
+        #     間違った文に返事をするより、黙って次の発話を待つほうが自然なため、返事も記録もしない
+        if is_stt_noise(text):
+            # 文の中身はログに出さない（会話の内容をログに残さないため、AGENTS.md）
+            logger.info("ignored STT noise (plant=%s)", self._plant_id)
             return TurnDecision("ignore")
 
         # 2. 眠っているとき: ウェイクワードがあるときだけ起きる

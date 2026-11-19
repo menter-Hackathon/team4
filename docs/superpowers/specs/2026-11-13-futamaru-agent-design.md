@@ -94,6 +94,7 @@ agent/
     reflection.py      会話終了時の記憶抽出・性格変化量の判定（LLM 呼び出し）
     expression.py      表情タグの解析・除去（ストリーミング対応）
     wake.py            ウェイクワード検出・正規化、起きている/眠っている状態の管理
+    stt_noise.py       STT のでっちあげ（無音・雑音から出る言葉、ハングル）の判定（§8.2）
     conversation.py    1株ぶんの会話の進行（起床・記録・睡眠・reflection の起動）。LiveKit 非依存
     timeutil.py        JST の現在時刻と ISO 8601 変換
 scripts/
@@ -480,6 +481,7 @@ URL・モデル名はすべて環境変数で指定する。開発時はロー�
 | 環境変数 | `STT_BASE_URL`, `STT_MODEL` |
 | エンドポイント | `POST {STT_BASE_URL}/audio/transcriptions`（OpenAI 互換、multipart） |
 | パラメータ | `language=ja`、`prompt=ふたまる`（ウェイクワードの認識補助、§5.3） |
+| でっちあげの除外 | Whisper 系の STT は、無音・雑音から言葉をでっちあげることがある（YouTube の字幕で学習しているため）。文字起こしが丸ごと次のどれかと同じなら、発話として扱わない（返事も記録もしない。`stt_noise.py`）: 「ごめん」（2026-11-17・11-19 に kotoba-whisper が無音・雑音から出した）、「ご視聴ありがとうございました」など動画の締めの言葉。比べる前に §5.3 と同じ正規化をする。文の一部に含むだけなら除外しない（「ごめん、水忘れてた」は話しかけ）。また、ハングルが 1 文字でも入っていたら除外する（日本語の短い発話が韓国語で書き起こされることがあるため、#73）。誤った文に返事をするより、黙って次の発話を待つほうが自然なため |
 | サーバー | Speaches（旧 faster-whisper-server）。faster-whisper ベースで OpenAI 互換 API を提供 |
 | モデル | `kotoba-tech/kotoba-whisper-v2.0-faster`（kotoba-whisper v2.0 の CTranslate2 変換版、MIT ライセンス、日本語特化） |
 | 代替 | Speaches で上記モデルが読めない場合は `vllm serve kotoba-tech/kotoba-whisper-v2.0`（vLLM の Transcriptions API、`vllm[audio]` が必要）、それも不可なら Speaches 標準の `large-v3` 系 Whisper |
