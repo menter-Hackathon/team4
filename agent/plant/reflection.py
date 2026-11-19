@@ -397,14 +397,3 @@ async def reflect_session(
         owner_dialect=result.owner_dialect,
     )
     return True
-
-
-async def recover(
-    store: PlantStore, plant_id: str, complete_json: JsonCompleter, now: datetime
-) -> None:
-    """起動時の修復: 閉じていないセッションを閉じ、未処理の reflection を再実行する（§6.3 手順8）。"""
-    repaired = store.repair_unfinished_sessions(plant_id)
-    if repaired:
-        logger.info("repaired %d unfinished sessions for %s", repaired, plant_id)
-    for session_id in store.unreflected_sessions(plant_id):
-        await reflect_session(store, plant_id, session_id, complete_json, now)

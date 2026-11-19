@@ -7,7 +7,6 @@ from agent.plant.reflection import (
     REFLECTION_SCHEMA,
     ReflectionError,
     parse_reflection,
-    recover,
     reflect_session,
 )
 from agent.plant.store import NewMemory, PlantStore
@@ -204,14 +203,6 @@ async def test_prompt_lists_at_most_30_memories(store_with_session):
     fake = FakeCompleter([VALID])
     await reflect_session(store, "a", sid, fake, NOW)
     assert fake.calls[0][0][-1]["content"].count("[id=") == 30
-
-
-async def test_recover_repairs_and_reflects(store):
-    sid = store.start_session("a", NOW - timedelta(hours=1))
-    store.add_utterance(sid, "user", "ただいま", NOW - timedelta(minutes=50))
-    await recover(store, "a", FakeCompleter([VALID]), NOW)
-    s = store.get_session(sid)
-    assert s.ended_at is not None and s.reflected
 
 
 def test_owner_dialect_is_parsed():
