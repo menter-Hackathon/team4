@@ -531,6 +531,11 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 - `SLEEP_AFTER_SECONDS`（既定: 60）
 - `LLM_TIMEOUT` / `STT_TIMEOUT` / `TTS_TIMEOUT`（秒、既定: 15 / 10 / 10）
 - `VAD_MIN_SILENCE_SECONDS` / `ENDPOINTING_DELAY_SECONDS`（秒、既定: 0.55 / 0.5）: 話し終わりの判定の待ち。声が途切れてから、この 2 つを足した時間で返事を作り始める。返事の遅さ（§11 の 3 秒くらい）の調整に使う（#39）
+- 返事を速くする 3 つの機能（2026-11-19、#39。どれも既定は使わない）
+  - `TURN_DETECTOR`（true / false）・`ENDPOINTING_MAX_DELAY_SECONDS`（既定 3.0）: LiveKit の言い終わりの判定モデル（`livekit-plugins-turn-detector` の多言語版、日本語対応、PC の中で動く ONNX）。言い終わっていそうなら `ENDPOINTING_DELAY_SECONDS` 秒、途中なら最長 `ENDPOINTING_MAX_DELAY_SECONDS` 秒待つ。無音の待ちを短くしても、話の途中の間で割り込みにくい
+  - `PREEMPTIVE_GENERATION`（true / false）: 先読み。話し終わりが確定する前から、文字になった発話で返事（LLM と声）を作り始める。返事するかどうか（§5）は今までどおり話し終わってから決め、その判断で発話やプロンプトが変わったら（起きた・名前が決まった・ウェイクワードを外した）、先読みは捨てられて作り直す。眠っている間は先読みしない（周りの会話のたびに LLM を動かさないため）
+  - `FILLER_WORDS`（カンマ区切り、例: `うん,んー`）: つなぎの声（相槌）。起動時に一度だけ声にして前後の無音を切っておく。起きている間は声が途切れた瞬間（約 0.2 秒）に、眠っていてウェイクワードがあれば話し終わりが確定した直後に、1 回の発話につき 1 回だけ鳴らす。会話の履歴（LLM に渡す文脈・会話ログ）には入れない。文字起こしが届いた時点でまだ鳴っていれば止める（鳴っている間は先読みが始まらないため）
+  - 2026-11-19 の ohsawa（Cloudflare Tunnel 越し、2 回目の発話）での測定: 最初の声（つなぎの声）約 0.5〜0.6 秒、本当の返事 約 1.8〜2.0 秒（この 3 つを使う前は 約 2.1〜2.3 秒。最初は 約 3.9 秒）
 - `PLANT_SPECIES`（既定: ポトス）、`JMA_AMEDAS_STATION`（アメダスの観測所、5 桁）/ `JMA_FORECAST_AREA`（予報の地域、6 桁）（両方空なら天気を使わない）、`WEATHER_DRY_HUMIDITY`（既定: 40）、`WATER_REMIND_DAYS`（既定: 3）（§6.7）
 - TTS 関連（`OPENAI_API_KEY`, `TTS_MODEL`, `TTS_VOICE`, `TTS_BASE_URL`）は §8.3
 

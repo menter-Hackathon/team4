@@ -15,9 +15,10 @@ CFG = {
 
 
 class FakeConv:
-    def __init__(self):
+    def __init__(self, awake=False):
         self.expressions = []
         self.closed = False
+        self.awake = awake
 
     def express(self, name):
         self.expressions.append(name)
@@ -136,7 +137,8 @@ def test_turn_handling_uses_endpointing_delay_from_config():
     cfg = load_config({**CFG, "ENDPOINTING_DELAY_SECONDS": "0.2"})
     opts = main.turn_handling(cfg)
     assert opts["turn_detection"] == "vad"
-    assert opts["endpointing"] == {"min_delay": 0.2}
+    assert opts["endpointing"] == {"min_delay": 0.2, "max_delay": 3.0}
+    # 先読みはセッション全体では切っておく（起きている間だけ Agent 側で有効にする）
     assert opts["preemptive_generation"] == {"enabled": False}
 
 
@@ -165,6 +167,10 @@ class DecidingConv(FakeConv):
     def __init__(self, decision):
         super().__init__()
         self._decision = decision
+
+    def will_respond(self, text):
+        # 本物と同じく、判断の結果が ignore 以外なら「応じそう」と見積もる
+        return self._decision.kind != "ignore"
 
     async def on_user_turn(self, text):
         return self._decision
@@ -210,3 +216,206 @@ def test_weather_cache_only_when_location_is_set():
     assert main.create_weather_cache(load_config(CFG)) is None
     assert main.create_weather_cache(load_config({**CFG, "JMA_AMEDAS_STATION": "44132"}))
     assert main.create_weather_cache(load_config({**CFG, "JMA_FORECAST_AREA": "130000"}))
+
+
+# --- 返事を速くする機能（#39） ---
+def test_new_speed_options_are_off_by_default_and_can_be_turned_on():
+    cfg = load_config(CFG)
+    assert (cfg.turn_detector, cfg.preemptive_generation, cfg.filler_words) == (False, False, ())
+    cfg = load_config(
+        {
+            **CFG,
+            "TURN_DETECTOR": "true",
+            "PREEMPTIVE_GENERATION": "yes",
+            "ENDPOINTING_MAX_DELAY_SECONDS": "2",
+            "FILLER_WORDS": "うん, んー,,",
+        }
+    )
+    assert cfg.turn_detector and cfg.preemptive_generation
+    assert cfg.endpointing_max_delay == 2.0
+    assert cfg.filler_words == ("うん", "んー")
+
+
+def test_misspelled_speed_flag_stops_startup():
+    import pytest
+
+    from agent.config import ConfigError
+
+    with pytest.raises(ConfigError):
+        load_config({**CFG, "PREEMPTIVE_GENERATION": "ture"})
+
+
+def test_preemptive_generation_only_while_awake():
+    conv = FakeConv(awake=False)
+    agent = main.FutamaruAgent(conv, preemptive=True)
+    # 眠っている間は先読みしない（周りの会話のたびに LLM を動かさない）
+    assert agent._turn_handling["preemptive_generation"]["enabled"] is False
+    conv.awake = True
+    agent.sync_preemptive()
+    assert agent._turn_handling["preemptive_generation"] == {
+        "enabled": True,
+        "preemptive_tts": True,
+    }
+    conv.awake = False
+    agent.sync_preemptive()
+    assert agent._turn_handling["preemptive_generation"]["enabled"] is False
+
+
+def test_preemptive_generation_stays_off_when_not_configured():
+    agent = main.FutamaruAgent(FakeConv(awake=True), preemptive=False)
+    assert agent._turn_handling["preemptive_generation"]["enabled"] is False
+
+
+class SayingSession(FakeSession):
+    """say() の呼ばれ方を覚えておく偽のセッション。"""
+
+    def __init__(self):
+        super().__init__(FakeTTS())
+        self.said = []
+
+    def say(self, text, *, audio, add_to_chat_ctx, allow_interruptions):
+        self.said.append((text, add_to_chat_ctx, allow_interruptions))
+        self.handle = FakeHandle()
+        return self.handle
+
+
+class FakeHandle:
+    """session.say() が返す SpeechHandle のふり。"""
+
+    def __init__(self):
+        self.interrupted = False
+        self.finished = False
+
+    def done(self):
+        return self.finished
+
+    def interrupt(self):
+        self.interrupted = True
+
+
+async def _turn_with_fillers(monkeypatch, kind):
+    import itertools
+
+    from livekit.agents import StopResponse
+
+    agent = main.FutamaruAgent(DecidingConv(TurnDecision(kind=kind, text="こんにちは")))
+    session = SayingSession()
+    monkeypatch.setattr(main.FutamaruAgent, "session", property(lambda self: session))
+    agent._fillers = {"うん": ["frame"]}
+    agent._filler_order = itertools.cycle(["うん"])
+    msg = ChatMessage(role="user", content=["こんにちは"])
+    try:
+        await agent.on_user_turn_completed(ChatContext.empty(), msg)
+    except StopResponse:
+        pass
+    return session.said
+
+
+async def test_filler_plays_before_a_reply_without_entering_history(monkeypatch):
+    said = await _turn_with_fillers(monkeypatch, "reply")
+    # 会話の履歴に入れない（add_to_chat_ctx=False）。また話し始めたら止まる
+    assert said == [("うん", False, True)]
+
+
+async def test_no_filler_when_the_plant_ignores_the_turn(monkeypatch):
+    assert await _turn_with_fillers(monkeypatch, "ignore") == []
+
+
+async def test_no_filler_until_fillers_are_ready(monkeypatch):
+    agent = main.FutamaruAgent(DecidingConv(TurnDecision(kind="reply", text="こんにちは")))
+    session = SayingSession()
+    monkeypatch.setattr(main.FutamaruAgent, "session", property(lambda self: session))
+    msg = ChatMessage(role="user", content=["こんにちは"])
+    await agent.on_user_turn_completed(ChatContext.empty(), msg)
+    assert session.said == []
+
+
+class _SynthStream:
+    """tts.synthesize() が返す ChunkedStream のふり（frame を持つものを 2 つ出す）。"""
+
+    def __init__(self, text, fail):
+        self.text, self.fail = text, fail
+
+    async def __aenter__(self):
+        if self.fail:
+            raise RuntimeError("tts is down")
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def __aiter__(self):
+        async def gen():
+            for i in range(2):
+                yield type("Audio", (), {"frame": f"{self.text}-{i}"})()
+
+        return gen()
+
+
+class SynthTTS:
+    def __init__(self, fail_words=()):
+        self.fail_words = fail_words
+
+    def synthesize(self, text):
+        return _SynthStream(text, text in self.fail_words)
+
+
+async def test_prepare_fillers_keeps_only_words_the_tts_could_say(monkeypatch):
+    agent = main.FutamaruAgent(FakeConv())
+    session = FakeSession(SynthTTS(fail_words=("へえ",)))
+    monkeypatch.setattr(main.FutamaruAgent, "session", property(lambda self: session))
+    # 無音を切る処理は tests/plugins/test_filler_audio.py で確かめる。ここではそのまま通す
+    monkeypatch.setattr(main, "trim_silence", lambda frames: frames)
+    await agent.prepare_fillers(("うん", "へえ", "んー"))
+    # TTS が失敗した言葉は飛ばし、残りの言葉を順番に使う
+    assert agent._fillers == {"うん": ["うん-0", "うん-1"], "んー": ["んー-0", "んー-1"]}
+    assert [next(agent._filler_order) for _ in range(3)] == ["うん", "んー", "うん"]
+
+
+def _agent_with_filler(monkeypatch, awake):
+    import itertools
+
+    agent = main.FutamaruAgent(DecidingConv(TurnDecision(kind="reply", text="こんにちは")))
+    agent._conv.awake = awake
+    session = SayingSession()
+    monkeypatch.setattr(main.FutamaruAgent, "session", property(lambda self: session))
+    agent._fillers = {"うん": ["frame"]}
+    agent._filler_order = itertools.cycle(["うん"])
+    return agent, session
+
+
+async def test_filler_plays_when_voice_stops_only_while_awake(monkeypatch):
+    agent, session = _agent_with_filler(monkeypatch, awake=False)
+    agent.on_user_paused()
+    assert session.said == []  # 眠っているとき（ウェイクワードかわからない）は鳴らさない
+    agent._conv.awake = True
+    agent.on_user_paused()
+    agent.on_user_paused()  # 同じ発話の間の 2 回目の間では鳴らさない
+    assert [text for text, _, _ in session.said] == ["うん"]
+
+
+async def test_filler_is_not_played_twice_in_one_turn_and_resets_after(monkeypatch):
+    agent, session = _agent_with_filler(monkeypatch, awake=True)
+    agent.on_user_paused()  # 声が途切れた瞬間に鳴った
+    msg = ChatMessage(role="user", content=["こんにちは"])
+    await agent.on_user_turn_completed(ChatContext.empty(), msg)
+    assert len(session.said) == 1  # 話し終わりの確定では、もう鳴らさない
+    agent.on_user_paused()  # 次の発話では、また鳴らせる
+    assert len(session.said) == 2
+
+
+async def test_final_transcript_stops_a_filler_that_is_still_playing(monkeypatch):
+    # 鳴っている最中だと LiveKit が先読みを始めないので、文字起こしが届いたら止める（#39）
+    agent, session = _agent_with_filler(monkeypatch, awake=True)
+    agent.on_user_paused()
+    agent.on_user_transcribed()
+    assert session.handle.interrupted
+
+
+async def test_final_transcript_leaves_a_finished_filler_alone(monkeypatch):
+    agent, session = _agent_with_filler(monkeypatch, awake=True)
+    agent.on_user_paused()
+    session.handle.finished = True
+    agent.on_user_transcribed()
+    assert not session.handle.interrupted
+    agent.on_user_transcribed()  # つなぎの声が無いときに呼ばれても何も起きない

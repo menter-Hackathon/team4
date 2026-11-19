@@ -66,6 +66,14 @@ class Config:
     # --- 話し終わりの判定（#39）。短くするほど返事が早いが、言葉の途中の間で割り込みやすくなる ---
     vad_min_silence: float  # 声が途切れてから「話し終わった」とみなすまでの無音の秒数（VAD）
     endpointing_delay: float  # VAD が話し終わりと判定してから、返事を作り始めるまでの待ちの秒数
+    # 言い終わりの判定モデル（LiveKit の turn detector、日本語対応）を使うか。使うと、文の途中の間では
+    # 最長 endpointing_max_delay 秒まで待ち、言い終わっていれば endpointing_delay 秒で返事を始める
+    turn_detector: bool
+    endpointing_max_delay: float  # 言い終わっていないと判定したときに待つ最長の秒数
+    # 先読み: 話し終わりが確定する前から返事（LLM と声）を作り始めるか。起きている間だけ使う（main.py）
+    preemptive_generation: bool
+    # つなぎの声（相槌）。話し終わった直後に、作り置きのこの言葉のどれかを鳴らす。空なら鳴らさない
+    filler_words: tuple[str, ...]
     # --- 天気（気象庁のデータ、仕様 §6.7、#80）。両方 None なら天気を使わない ---
     jma_amedas_station: str | None  # 気温・湿度を取るアメダスの観測所のコード（例: "44132" 東京）
     jma_forecast_area: str | None  # 空の様子を取る予報の地域コード（例: "130000" 東京都）
@@ -176,6 +184,17 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
     else:
         raise ConfigError(f"ALLOW_NEW_PEOPLE は true か false にしてください: {allow_raw}")
 
+    # 返事を速くする 3 つの機能（#39）。どれも true / false で、書き間違いは起動時に止める
+    def flag(name: str, default: str) -> bool:
+        raw = get(name, default).lower()
+        if raw in ("true", "1", "yes"):
+            return True
+        if raw in ("false", "0", "no"):
+            return False
+        raise ConfigError(f"{name} は true か false にしてください: {raw}")
+
+    filler_words = tuple(w.strip() for w in get("FILLER_WORDS", "").split(",") if w.strip())
+
     # get(名前, 既定値): .env に無ければ既定値を使う。required(名前): .env に無ければ起動しない
     return Config(
         llm_base_url=required("LLM_BASE_URL"),
@@ -205,6 +224,10 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         # 既定の値は LiveKit の既定と同じ（Silero VAD 0.55 秒、endpointing 0.5 秒）。#39 で測って決める
         vad_min_silence=float(get("VAD_MIN_SILENCE_SECONDS", "0.55")),
         endpointing_delay=float(get("ENDPOINTING_DELAY_SECONDS", "0.5")),
+        turn_detector=flag("TURN_DETECTOR", "false"),
+        endpointing_max_delay=float(get("ENDPOINTING_MAX_DELAY_SECONDS", "3.0")),
+        preemptive_generation=flag("PREEMPTIVE_GENERATION", "false"),
+        filler_words=filler_words,
         jma_amedas_station=jma_amedas_station,
         jma_forecast_area=jma_forecast_area,
         weather_dry_humidity=float(get("WEATHER_DRY_HUMIDITY", "40")),

@@ -129,6 +129,21 @@ class PlantConversation:
         """起きているか。"""
         return self._controller.state == "AWAKE"
 
+    def will_respond(self, text: str) -> bool:
+        """この発話に植物が応じそうか（返事か、起きて話しかけるか）を、すぐに見積もる（#39）。
+
+        on_user_turn は、起きるときに天気を取り直したり、名前を探したりして時間がかかる。
+        その前に「つなぎの声（うん）」を鳴らしてよいかを決めるための、軽い見積もり。
+        状態は何も変えない。on_user_turn と同じ順番で、中身の無い発話・眠っているとき・ウェイクワードを見る。
+        例: 起きていて "ただいま" → True、眠っていて "おはよう" → False、眠っていて "ふたまる" → True、"。" → False
+        """
+        text = text.strip()
+        if self._shutting_down or not normalize(text):
+            return False
+        if self.awake:
+            return True
+        return detect_wake(text, self._wake_words) is not None
+
     async def start(self) -> None:
         """エージェントが株のルームに入ったときに 1 回呼ぶ準備の処理。"""
         # 初めての株なら、初期の性格（全部 0.5）で DB に登録する
