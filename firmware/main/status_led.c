@@ -25,10 +25,8 @@ static bool led_is_on(status_led_mode_t mode, int tick_ms)
         return true;
     case STATUS_LED_NETWORK: // 200ms ごとに点滅
         return (tick_ms / 100) % 2 == 0;
-    case STATUS_LED_ROOM: // 1 秒ごとに点滅
+    case STATUS_LED_RELAY: // 1 秒ごとに点滅
         return (tick_ms / 500) % 2 == 0;
-    case STATUS_LED_WAIT_AGENT: // 2 秒に 1 回、0.1 秒だけ光る
-        return tick_ms < 100;
     case STATUS_LED_ERROR: // 2 秒に 2 回、短く光る
         return tick_ms < 100 || (tick_ms >= 300 && tick_ms < 400);
     case STATUS_LED_OFF:

@@ -1,6 +1,6 @@
-# REQUIRES は書かない（SDK のサンプルと同じ）。書くと、SDK のヘッダが読む部品（esp_lcd など）まで
-# 全部並べる必要があり、SDK の版を上げたときに壊れやすいため
+# REQUIRES は書かない（ESP-IDF のサンプルと同じ）。書くと、使う部品（esp_websocket_client・esp_capture・
+# json など）とそのヘッダが読む部品まで全部並べる必要があり、部品の版を上げたときに壊れやすいため
 idf_component_register(
-    SRCS "main.c" "board.c" "media.c" "room.c" "status_led.c" "token_info.c"
+    SRCS "main.c" "board.c" "media.c" "relay.c" "status_led.c"
     INCLUDE_DIRS "."
 )

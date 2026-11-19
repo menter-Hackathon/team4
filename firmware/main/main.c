@@ -1,26 +1,24 @@
-// ふたまるの ESP32 ファームウェアの入り口（仕様 §9）
+// ふたまるの ESP32 ファームウェアの入り口（仕様 §3.2.1・§9）
 //
 // 鉢の中の XIAO ESP32S3 がすること:
 //   1. マイク・スピーカー（Atomic Voice Base）を使えるようにする
 //   2. Wi-Fi につなぐ
-//   3. LiveKit のルーム plant-<id> に入り、マイクの音を送りっぱなしにして、届いた声を鳴らす
+//   3. サーバーの中継（relay）に WebSocket でつなぎ、マイクの音を送りっぱなしにして、届いた声を鳴らす
 // 考える処理（ウェイクワード・会話・記憶）はすべてサーバー側（agent/）にある。
+// LiveKit にはサーバー側の中継が入るので、この端末は LiveKit を知らなくてよい。
 
 #include <string.h>
 
 #include "esp_log.h"
-#include "esp_netif_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "livekit.h"
 #include "livekit_example_utils.h"
 #include "sdkconfig.h"
 
 #include "board.h"
 #include "media.h"
-#include "room.h"
+#include "relay.h"
 #include "status_led.h"
-#include "token_info.h"
 
 static const char *TAG = "futamaru";
 
@@ -30,7 +28,7 @@ static const char *TAG = "futamaru";
 #define USE_AEC false
 #endif
 
-/// 設定に足りないものがあれば、ログに出して false を返す
+/// 設定に足りないもの・間違いがあれば、ログに出して false を返す
 static bool check_config(void)
 {
     bool ok = true;
@@ -38,12 +36,21 @@ static bool check_config(void)
         ESP_LOGE(TAG, "Wi-Fi SSID is empty. Set it in sdkconfig.secrets");
         ok = false;
     }
-    if (strlen(CONFIG_FUTAMARU_SERVER_URL) == 0) {
-        ESP_LOGE(TAG, "LiveKit server URL is empty. Set it in sdkconfig.secrets");
+    // URL は ws:// か wss:// で始まること（Cloudflare Tunnel 経由なら wss://<ホスト>/relay）
+    const char *url = CONFIG_FUTAMARU_RELAY_URL;
+    if (strlen(url) == 0) {
+        ESP_LOGE(TAG, "Relay URL is empty. Set it in sdkconfig.secrets");
+        ok = false;
+    } else if (strncmp(url, "ws://", 5) != 0 && strncmp(url, "wss://", 6) != 0) {
+        ESP_LOGE(TAG, "Relay URL must start with ws:// or wss:// (now: %s)", url);
         ok = false;
     }
-    if (strlen(CONFIG_FUTAMARU_TOKEN) == 0) {
-        ESP_LOGE(TAG, "LiveKit token is empty. Set it in sdkconfig.secrets");
+    if (strlen(CONFIG_FUTAMARU_DEVICE_KEY) == 0) {
+        ESP_LOGE(TAG, "Device key is empty. Set it in sdkconfig.secrets");
+        ok = false;
+    }
+    if (!relay_plant_id_is_valid(CONFIG_FUTAMARU_PLANT_ID)) {
+        ESP_LOGE(TAG, "Plant ID \"%s\" is invalid (use a-z, 0-9, _ and -, 1 to 32 chars)", CONFIG_FUTAMARU_PLANT_ID);
         ok = false;
     }
     return ok;
@@ -65,19 +72,13 @@ void app_main(void)
     status_led_init();
     status_led_set(STATUS_LED_NETWORK);
 
-    // 1. 設定の確認と、どの株として入るかの表示（2 台のトークンの取り違えに気づくため）
+    // 1. 設定の確認と、どの株として話すかの表示（2 台の取り違えに気づくため）
     if (!check_config()) {
         halt("missing settings (see firmware/README.md)");
     }
-    char room_name[64];
-    if (token_get_room(CONFIG_FUTAMARU_TOKEN, room_name, sizeof(room_name))) {
-        ESP_LOGI(TAG, "This device joins room \"%s\"", room_name);
-    } else {
-        ESP_LOGW(TAG, "Could not read the room name from the token");
-    }
+    ESP_LOGI(TAG, "This device is plant \"%s\"", CONFIG_FUTAMARU_PLANT_ID);
 
-    // 2. 音まわり（LiveKit SDK の初期化を先に行う。SDK のサンプルと同じ順番）
-    livekit_system_init();
+    // 2. 音まわり（ボード → 録音・再生）
     if (!board_init(USE_AEC)) {
         halt("audio board not ready (check wiring)");
     }
@@ -85,18 +86,13 @@ void app_main(void)
         halt("media init failed");
     }
 
-    // 3. 時刻合わせ（トークンの期限や TLS の確認に正しい時刻が要る）
-    esp_sntp_config_t sntp_config =
-        ESP_NETIF_SNTP_DEFAULT_CONFIG_MULTIPLE(2, ESP_SNTP_SERVER_LIST("time.google.com", "pool.ntp.org"));
-    esp_netif_sntp_init(&sntp_config);
-
-    // 4. Wi-Fi。sdkconfig.defaults で何度でも試す設定にしているので、つながるまでここで待つ
+    // 3. Wi-Fi。sdkconfig.defaults で何度でも試す設定にしているので、つながるまでここで待つ。
+    //    つながったあとに切れても、livekit/example_utils がつなぎ直す
     ESP_LOGI(TAG, "Connecting to Wi-Fi \"%s\"", CONFIG_LK_EXAMPLE_WIFI_SSID);
     if (!lk_example_network_connect()) {
         halt("Wi-Fi connection failed");
     }
 
-    // 5. LiveKit のルームへ（切れたら room.c のタスクが入り直す）
-    status_led_set(STATUS_LED_ROOM);
-    room_start();
+    // 4. 中継へ（切れたら relay.c のタスクがつなぎ直す）
+    relay_start();
 }

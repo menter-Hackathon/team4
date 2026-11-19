@@ -3,5 +3,5 @@ build/
 managed_components/
 sdkconfig
 sdkconfig.old
-# 秘密情報（Wi-Fi のパスワード・LiveKit のトークン）。コミットしない
+# 秘密情報（Wi-Fi のパスワード・中継の合言葉）。コミットしない
 sdkconfig.secrets
