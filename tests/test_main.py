@@ -275,6 +275,22 @@ class SayingSession(FakeSession):
 
     def say(self, text, *, audio, add_to_chat_ctx, allow_interruptions):
         self.said.append((text, add_to_chat_ctx, allow_interruptions))
+        self.handle = FakeHandle()
+        return self.handle
+
+
+class FakeHandle:
+    """session.say() が返す SpeechHandle のふり。"""
+
+    def __init__(self):
+        self.interrupted = False
+        self.finished = False
+
+    def done(self):
+        return self.finished
+
+    def interrupt(self):
+        self.interrupted = True
 
 
 async def _turn_with_fillers(monkeypatch, kind):
@@ -386,3 +402,20 @@ async def test_filler_is_not_played_twice_in_one_turn_and_resets_after(monkeypat
     assert len(session.said) == 1  # 話し終わりの確定では、もう鳴らさない
     agent.on_user_paused()  # 次の発話では、また鳴らせる
     assert len(session.said) == 2
+
+
+async def test_final_transcript_stops_a_filler_that_is_still_playing(monkeypatch):
+    # 鳴っている最中だと LiveKit が先読みを始めないので、文字起こしが届いたら止める（#39）
+    agent, session = _agent_with_filler(monkeypatch, awake=True)
+    agent.on_user_paused()
+    agent.on_user_transcribed()
+    assert session.handle.interrupted
+
+
+async def test_final_transcript_leaves_a_finished_filler_alone(monkeypatch):
+    agent, session = _agent_with_filler(monkeypatch, awake=True)
+    agent.on_user_paused()
+    session.handle.finished = True
+    agent.on_user_transcribed()
+    assert not session.handle.interrupted
+    agent.on_user_transcribed()  # つなぎの声が無いときに呼ばれても何も起きない

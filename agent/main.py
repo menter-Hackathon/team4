@@ -42,6 +42,7 @@ from livekit.agents import (
     metrics,
     room_io,
 )
+from livekit.agents.voice import SpeechHandle
 from livekit.plugins import silero
 
 # 言い終わりの判定モデル（#39）。import した時点で LiveKit に登録され、`download-files` でモデルが入る。
@@ -113,6 +114,8 @@ class FutamaruAgent(Agent):
         self._filler_order: itertools.cycle[str] | None = None
         # この発話の間に、つなぎの声をもう鳴らしたか（1 回の発話に 1 回だけ鳴らす）
         self._filler_played = False
+        # 鳴らしている（鳴らした）つなぎの声。文字起こしが届いたら止めるために覚えておく
+        self._filler_handle: SpeechHandle | None = None
         self.sync_preemptive()
 
     def sync_preemptive(self) -> None:
@@ -174,7 +177,23 @@ class FutamaruAgent(Agent):
             for frame in frames:
                 yield frame
 
-        self.session.say(word, audio=audio(), add_to_chat_ctx=False, allow_interruptions=True)
+        self._filler_handle = self.session.say(
+            word, audio=audio(), add_to_chat_ctx=False, allow_interruptions=True
+        )
+
+    def on_user_transcribed(self) -> None:
+        """持ち主の発話が文字になった（確定した）ときに呼ばれる。まだ鳴っているつなぎの声を止める（#39）。
+
+        LiveKit（1.8.12）は、何かを喋っている最中は先読みを始めない
+        （voice/agent_activity.py の on_preemptive_generation）。文字起こしが届いたときに
+        つなぎの声がまだ鳴っていると、先読みが始まらず、本当の返事が 0.5 秒ほど遅れた（2026-11-19 の ohsawa）。
+        LiveKit は「文字起こしが届いた」出来事を出してから先読みを始めるかを決めるので、
+        ここで止めれば先読みが始まれる。止めると「止まった」扱いになるのは、その場ですぐ。
+        """
+        handle = self._filler_handle
+        if handle is not None and not handle.done():
+            handle.interrupt()
+        self._filler_handle = None
 
     def on_user_paused(self) -> None:
         """持ち主の声が途切れた瞬間（VAD）に呼ばれる。起きていれば、すぐにつなぎの声を鳴らす（#39）。
@@ -487,6 +506,12 @@ async def entrypoint(ctx: JobContext) -> None:
     @session.on("metrics_collected")
     def _on_metrics(ev) -> None:
         metrics.log_metrics(ev.metrics)
+
+    # 持ち主の発話が文字になった。確定した文字なら、まだ鳴っているつなぎの声を止めて先読みを通す（#39）
+    @session.on("user_input_transcribed")
+    def _on_transcribed(ev) -> None:
+        if ev.is_final:
+            agent.on_user_transcribed()
 
     # 持ち主が話し始めた・話し終えた
     @session.on("user_state_changed")
