@@ -530,7 +530,7 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 - `WAKE_WORDS`（カンマ区切り、既定は §5.3）
 - `SLEEP_AFTER_SECONDS`（既定: 60）
 - `LLM_TIMEOUT` / `STT_TIMEOUT` / `TTS_TIMEOUT`（秒、既定: 15 / 10 / 10）
-- `VAD_MIN_SILENCE_SECONDS` / `ENDPOINTING_DELAY_SECONDS`（秒、既定: 0.55 / 0.5）: 話し終わりの判定の待ち。声が途切れてから、この 2 つを足した時間で返事を作り始める。返事の遅さ（§11 の 3 秒くらい）の調整に使う（#39）
+- `VAD_MIN_SILENCE_SECONDS` / `ENDPOINTING_DELAY_SECONDS`（秒、既定: 0.35 / 0.2）: 話し終わりの判定の待ち。声が途切れてから、この 2 つを足した時間で返事を作り始める。返事の遅さ（§11 の 3 秒くらい）の調整に使う（#39）
 - 返事を速くする 3 つの機能（2026-11-19、#39。どれも既定は使わない）
   - `TURN_DETECTOR`（true / false）・`ENDPOINTING_MAX_DELAY_SECONDS`（既定 3.0）: LiveKit の言い終わりの判定モデル（`livekit-plugins-turn-detector` の多言語版、日本語対応、PC の中で動く ONNX）。言い終わっていそうなら `ENDPOINTING_DELAY_SECONDS` 秒、途中なら最長 `ENDPOINTING_MAX_DELAY_SECONDS` 秒待つ。無音の待ちを短くしても、話の途中の間で割り込みにくい
   - `PREEMPTIVE_GENERATION`（true / false）: 先読み。話し終わりが確定する前から、文字になった発話で返事（LLM と声）を作り始める。返事するかどうか（§5）は今までどおり話し終わってから決め、その判断で発話やプロンプトが変わったら（起きた・名前が決まった・ウェイクワードを外した）、先読みは捨てられて作り直す。眠っている間は先読みしない（周りの会話のたびに LLM を動かさないため）
