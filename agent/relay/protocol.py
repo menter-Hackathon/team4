@@ -2,7 +2,9 @@
 
 鉢（ESP32）と中継は、1 本の WebSocket で次のものをやりとりする。
   - テキスト: JSON の合図（start・ready・error）
-  - バイナリ: 16kHz・16 ビット・モノラルの PCM（20ms = 640 バイトずつ）
+  - バイナリ: 16kHz・モノラルの音（20ms ずつ）。start の codec で形を選ぶ
+      pcm16: 16 ビットの PCM（20ms = 640 バイト）
+      mulaw: μ-law で圧縮（20ms = 320 バイト。送る量が半分。2026-11-19 に追加）
 
 このファイルは LiveKit にも WebSocket のライブラリにも依存しない。
 決まりごとだけを関数にして、テストで確かめやすくしている。
@@ -15,6 +17,7 @@ import hmac
 import json
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 # 音の形式（鉢・中継・LiveKit で同じにする）
 SAMPLE_RATE = 16000
@@ -25,6 +28,12 @@ SAMPLES_PER_FRAME = SAMPLE_RATE * FRAME_MS // 1000  # 320 サンプル
 FRAME_BYTES = SAMPLES_PER_FRAME * BYTES_PER_SAMPLE * NUM_CHANNELS  # 640 バイト
 
 PROTOCOL_VERSION = 1
+
+# 音の送り方（start の codec）。鉢と中継の間だけの話で、LiveKit には 16 ビットの PCM で流す
+CODEC_PCM16 = "pcm16"  # 16 ビットの PCM のまま（1 サンプル 2 バイト）
+CODEC_MULAW = "mulaw"  # μ-law で圧縮（1 サンプル 1 バイト。送る量が半分。agent/relay/mulaw.py）
+# codec ごとの、20ms 分のバイト数（ready で鉢に伝える）
+CODEC_FRAME_BYTES = {CODEC_PCM16: FRAME_BYTES, CODEC_MULAW: SAMPLES_PER_FRAME}
 
 # これ以下の振幅しかないフレームは無音として鉢へ送らない（16 ビットの最大は 32767。8 は聞こえない大きさ）
 SILENCE_PEAK = 8
@@ -65,10 +74,21 @@ def is_authorized(header: str | None, device_key: str) -> bool:
     return hmac.compare_digest(given.encode(), device_key.encode())
 
 
-def parse_start(text: str) -> str:
-    """鉢の最初のメッセージ（start）を読み、plant_id を返す。決まりに合わなければ ProtocolError。
+@dataclass(frozen=True)
+class StartRequest:
+    """鉢の start に書かれていたこと。"""
 
-    例: parse_start('{"type":"start","version":1,"plant_id":"a1"}') → "a1"
+    plant_id: str  # どの株か（ルーム plant-<plant_id> に入る）
+    codec: str  # 音の送り方（CODEC_PCM16 か CODEC_MULAW）
+
+
+def parse_start(text: str) -> StartRequest:
+    """鉢の最初のメッセージ（start）を読む。決まりに合わなければ ProtocolError。
+
+    例: parse_start('{"type":"start","version":1,"plant_id":"a1"}')
+          → StartRequest(plant_id="a1", codec="pcm16")
+        parse_start('{"type":"start","version":1,"plant_id":"a1","codec":"mulaw"}')
+          → StartRequest(plant_id="a1", codec="mulaw")
     """
     try:
         msg = json.loads(text)
@@ -86,13 +106,28 @@ def parse_start(text: str) -> str:
         raise ProtocolError(
             ERROR_INVALID_START, "plant_id は英小文字・数字・_・- の 1〜32 文字にしてください"
         )
-    return plant_id
+    # codec は書かなくてもよい（最初の版のファームは書かない）。書かなければ圧縮しない PCM
+    codec = msg.get("codec", CODEC_PCM16)
+    if codec not in CODEC_FRAME_BYTES:
+        raise ProtocolError(
+            ERROR_INVALID_START,
+            f"codec は {' か '.join(CODEC_FRAME_BYTES)} にしてください: {codec}",
+        )
+    return StartRequest(plant_id=plant_id, codec=codec)
 
 
-def ready_message() -> str:
-    """LiveKit のルームに入れたときに鉢へ送る合図（ready）。"""
+def ready_message(codec: str = CODEC_PCM16) -> str:
+    """LiveKit のルームに入れたときに鉢へ送る合図（ready）。使う codec と 20ms の大きさを伝える。
+
+    例: ready_message("mulaw") → {"type":"ready","sample_rate":16000,"codec":"mulaw","frame_bytes":320}
+    """
     return json.dumps(
-        {"type": "ready", "sample_rate": SAMPLE_RATE, "frame_bytes": FRAME_BYTES},
+        {
+            "type": "ready",
+            "sample_rate": SAMPLE_RATE,
+            "codec": codec,
+            "frame_bytes": CODEC_FRAME_BYTES[codec],
+        },
         separators=(",", ":"),
     )
 

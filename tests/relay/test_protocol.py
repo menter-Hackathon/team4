@@ -30,8 +30,14 @@ def test_authorized_only_with_the_right_bearer_key():
     assert not is_authorized(None, "secret-key")
 
 
-def test_parse_start_returns_plant_id():
-    assert parse_start('{"type":"start","version":1,"plant_id":"a1"}') == "a1"
+def test_parse_start_returns_plant_id_and_defaults_to_pcm16():
+    start = parse_start('{"type":"start","version":1,"plant_id":"a1"}')
+    assert start.plant_id == "a1" and start.codec == "pcm16"
+
+
+def test_parse_start_accepts_mulaw():
+    start = parse_start('{"type":"start","version":1,"plant_id":"a1","codec":"mulaw"}')
+    assert start.codec == "mulaw"
 
 
 @pytest.mark.parametrize(
@@ -45,6 +51,7 @@ def test_parse_start_returns_plant_id():
         '{"type":"start","version":1,"plant_id":"a/1"}',
         '{"type":"start","version":1,"plant_id":""}',
         "[1, 2]",
+        '{"type":"start","version":1,"plant_id":"a1","codec":"opus"}',
     ],
 )
 def test_parse_start_rejects_bad_messages(text):
@@ -57,8 +64,11 @@ def test_ready_and_error_messages_are_json():
     assert json.loads(ready_message()) == {
         "type": "ready",
         "sample_rate": 16000,
+        "codec": "pcm16",
         "frame_bytes": 640,
     }
+    # μ-law は 1 サンプル 1 バイトなので、20ms は 320 バイト
+    assert json.loads(ready_message("mulaw"))["frame_bytes"] == 320
     assert json.loads(error_message("invalid_audio", "長さが変")) == {
         "type": "error",
         "code": "invalid_audio",

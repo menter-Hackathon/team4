@@ -48,7 +48,12 @@ async def test_start_then_ready_and_audio_flows_both_ways():
         ws = await client.ws_connect("/relay", headers=AUTH)
         await ws.send_str(START)
         ready = await ws.receive_json(timeout=2)
-        assert ready == {"type": "ready", "sample_rate": 16000, "frame_bytes": 640}
+        assert ready == {
+            "type": "ready",
+            "sample_rate": 16000,
+            "codec": "pcm16",
+            "frame_bytes": 640,
+        }
         bridge = factory.bridges[0]
         assert bridge.plant_id == "a1"
 
@@ -65,6 +70,35 @@ async def test_start_then_ready_and_audio_flows_both_ways():
 
         await ws.close()
         await wait_until(lambda: bridge.closed)  # 鉢が切れたらルームから出る
+    finally:
+        await client.close()
+
+
+async def test_mulaw_audio_is_expanded_for_livekit_and_compressed_for_the_pot():
+    from agent.relay import mulaw
+
+    factory = FakeBridgeFactory()
+    client = await make_client(factory)
+    try:
+        ws = await client.ws_connect("/relay", headers=AUTH)
+        await ws.send_str(
+            json.dumps({"type": "start", "version": 1, "plant_id": "a1", "codec": "mulaw"})
+        )
+        ready = await ws.receive_json(timeout=2)
+        assert ready["codec"] == "mulaw" and ready["frame_bytes"] == 320
+        bridge = factory.bridges[0]
+
+        # 鉢 → LiveKit: μ-law の 320 バイト（20ms）が、16 ビットの 640 バイトに戻って流れる
+        voice = b"\xe8\x03" * 320  # 振幅 1000 の 20ms
+        await ws.send_bytes(mulaw.encode(voice))
+        await wait_until(lambda: len(bridge.mic) == 1)
+        assert bridge.mic[0] == mulaw.decode(mulaw.encode(voice))
+
+        # LiveKit → 鉢: 640 バイトの声が、μ-law の 320 バイトになって届く
+        bridge.say(voice)
+        msg = await ws.receive(timeout=2)
+        assert msg.type == WSMsgType.BINARY and msg.data == mulaw.encode(voice)
+        await ws.close()
     finally:
         await client.close()
 
@@ -123,11 +157,7 @@ async def test_new_connection_for_same_plant_replaces_the_old_one():
 
         msg = await old.receive(timeout=2)
         assert msg.type == WSMsgType.CLOSE and msg.data == 1000
-        assert await new.receive_json(timeout=2) == {
-            "type": "ready",
-            "sample_rate": 16000,
-            "frame_bytes": 640,
-        }
+        assert (await new.receive_json(timeout=2))["type"] == "ready"
         await wait_until(lambda: factory.bridges[0].closed)
         assert not factory.bridges[1].closed
         await new.close()
