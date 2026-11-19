@@ -24,9 +24,10 @@ AIVIS_SPEAKER=893625024
 LIVEKIT_URL=wss://example.livekit.cloud
 LIVEKIT_API_KEY=testkey
 LIVEKIT_API_SECRET=testsecret
-LIVEKIT_NODE_IP=192.168.1.20
+RELAY_DEVICE_KEY=test-device-key-0123456789
+CLOUDFLARE_TUNNEL_TOKEN=test-tunnel-token
 ENV
-docker compose config --format json > /tmp/compose.json
+docker compose --profile tunnel config --format json > /tmp/compose.json
 python3 - <<'PY'
 import json
 env = json.load(open("/tmp/compose.json"))["services"]["agent"]["environment"]
@@ -56,8 +57,10 @@ assert env["AIVIS_MODELS"], env
 print("ok: tts-init が .env の声の設定を受け取る")
 PY
 
-# 1c. LiveKit サーバー（仕様 §3.2）: .env のキーと LAN の IP を受け取り、3 つのポートを LAN に公開すること。
-#     エージェントは .env の LiveKit Cloud の URL ではなく、同じ compose の LiveKit サーバーにつなぐこと
+# 1c. LiveKit サーバー・中継・トンネル（仕様 §3.2）
+#     - LiveKit サーバーは .env のキーで動き、PC の外には公開しない
+#     - エージェントと中継は、.env の LiveKit Cloud の URL ではなく、同じ compose の LiveKit サーバーにつなぐ
+#     - 中継も PC の外には公開せず、トンネルが .env のトークンで動く
 python3 - <<'PY'
 import json
 s = json.load(open("/tmp/compose.json"))["services"]
@@ -65,13 +68,19 @@ assert s["agent"]["environment"]["LIVEKIT_URL"] == "ws://livekit:7880", s["agent
 assert "livekit" in s["agent"]["depends_on"], s["agent"]["depends_on"]
 env = s["livekit"]["environment"]
 assert env["LIVEKIT_KEYS"] == "testkey: testsecret", env
-assert env["NODE_IP"] == "192.168.1.20", env
 assert "udp_port: 7882" in env["LIVEKIT_CONFIG"] and "tcp_port: 7881" in env["LIVEKIT_CONFIG"], env
-ports = {(str(p["published"]), p["protocol"]) for p in s["livekit"]["ports"]}
-assert ports == {("7880", "tcp"), ("7881", "tcp"), ("7882", "udp")}, ports
-assert all(not p.get("host_ip") for p in s["livekit"]["ports"]), s["livekit"]["ports"]
-print("ok: LiveKit サーバーが .env のキーと IP で動き、エージェントがそこにつなぐ")
+assert not s["livekit"].get("ports"), s["livekit"].get("ports")
+relay = s["relay"]
+assert relay["command"] == ["python", "-m", "agent.relay"], relay["command"]
+assert relay["environment"]["LIVEKIT_URL"] == "ws://livekit:7880", relay["environment"]
+assert relay["environment"]["RELAY_PORT"] == "8780", relay["environment"]
+assert not relay.get("ports"), relay.get("ports")
+assert s["tunnel"]["environment"]["TUNNEL_TOKEN"] == "test-tunnel-token", s["tunnel"]["environment"]
+print("ok: LiveKit と中継は外に公開せず、トンネルだけが外とつながる")
 PY
+# トンネルは --profile tunnel を付けたときだけ動く（トークンの無い PC で失敗し続けないように）
+docker compose config --services | grep -qx tunnel && { echo "tunnel が profile なしで動いてしまう" >&2; exit 1; }
+echo "ok: トンネルは --profile tunnel のときだけ動く"
 
 # 2. DOCKER_STT_MODEL で STT のモデルを切り替えられること（stt-init と agent の両方）
 echo "DOCKER_STT_MODEL=Systran/faster-whisper-large-v3" >> .env

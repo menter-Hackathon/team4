@@ -38,7 +38,8 @@ AI スピーカーとの違いは、**AI が本物の植物の通訳になる**�
 | 項目 | 決定 |
 |---|---|
 | 音声エージェントフレームワーク | LiveKit Agents (Python) |
-| LiveKit サーバー | 自前の LiveKit サーバー（`livekit/livekit-server`）。脳と同じ PC の Docker で動かし、鉢と同じ LAN に置く（2026-11-19 決定。それまでは LiveKit Cloud） |
+| LiveKit サーバー | 自前の LiveKit サーバー（`livekit/livekit-server`）。脳と同じ PC の Docker の中だけで動かす（2026-11-19 決定。それまでは LiveKit Cloud） |
+| 鉢と脳のつなぎ方 | 鉢は WebSocket で音声（PCM）を送り合う。脳の PC の中継（relay）が鉢の代わりに LiveKit のルームに入る。鉢から中継までは Cloudflare Tunnel を通す（§3.2、2026-11-19 決定） |
 | LLM | Gemma 4 E4B（`google/gemma-4-E4B-it`）。チームの誰かの PC 上で OpenAI 互換 API として動かす（vLLM ≥ 0.19 など、§8.1） |
 | STT | kotoba-whisper v2.0（誰かの PC 上の Speaches、OpenAI 互換 API） |
 | TTS | ローカルの AivisSpeech Engine（GPU の PC 上、2026-11-17 #56）。`.env` の `TTS_PROVIDER` で OpenAI TTS（`gpt-4o-mini-tts`）にも戻せる |
@@ -57,33 +58,62 @@ AI スピーカーとの違いは、**AI が本物の植物の通訳になる**�
 ## 3. 全体構成
 
 ```
-[ESP32-S3 (植物)] ──WebRTC──> [LiveKit サーバー] <── [Agent ワーカー (GPU サーバー)]
-   マイク(常時送信)            ルーム: plant-<id>       │
-                               （GPU サーバーの Docker）│
-   スピーカー                                           │
-                                                       ├─> vLLM (Gemma 4)          [GPU サーバー]
-                                                       ├─> Speaches (kotoba-whisper) [GPU サーバー]
-                                                       ├─> OpenAI TTS (gpt-4o-mini-tts) [外部 API]
-                                                       └─> SQLite (性格・記憶)
+[ESP32-S3 (植物)] ──WebSocket(PCM)──> [Cloudflare Tunnel] ──> [GPU サーバーの Docker]
+   マイク(常時送信)                                            ├─ 中継 relay（鉢の代わりにルームに入る）
+   スピーカー                                                  │      │ WebRTC（ルーム: plant-<id>）
+                                                              ├─ LiveKit サーバー
+                                                              │      │
+                                                              └─ Agent ワーカー
+                                                                     ├─> Ollama (Gemma 4)
+                                                                     ├─> Speaches (kotoba-whisper)
+                                                                     ├─> AivisSpeech（声）
+                                                                     └─> SQLite (性格・記憶)
 ```
 
 ### 3.1 接続とディスパッチ
-- 各 ESP32 は `scripts/issue_token.py --plant-id <id>` で発行した長期トークン（有効期限 30 日）をファームウェアの設定に書き込んで使う。
+- 鉢（ESP32）は LiveKit には直接入らない。中継（relay、§3.2）が鉢の代わりに、次の名前でルームに入る。トークンは中継がその場で作る（`scripts/issue_token.py` は、LiveKit に直接入る機器を試すときに使う）。
   - identity: `device-<plant_id>`
   - ルーム名: `plant-<plant_id>`
   - 権限: ルーム参加、音声の publish / subscribe
 - エージェントは LiveKit サーバーの自動ディスパッチ（新しいルームすべてに参加）を使う。名前を付けずに登録したワーカーに配る仕組みで、LiveKit Cloud でも自前のサーバーでも同じように動く。
-- 鉢は LAN の中で LiveKit サーバーに直接つなぐ（`ws://<PC の LAN の IP>:7880`）。インターネットの向こうのサーバーを通さないので、会場の回線に左右されない。その代わり、鉢と PC を同じ LAN（Wi-Fi）に置く必要がある（§3.2）。
+- 鉢と PC は同じ LAN に置かなくてよい。鉢はインターネットにつながれば、Cloudflare Tunnel を通って中継に届く（§3.2）。
 - エージェントはルーム名が `plant-` で始まらない場合は即座に退出する。
 - ルーム名から `plant_id` を取り出し、その株の性格・記憶をロードする。該当する `plant_id` が DB に無ければ、初期状態（全パラメータ 0.5）で新規作成する。
 - 1つのワーカープロセスが複数の株（ルーム）を同時に扱う。DB は SQLite を WAL モードで使い、書き込みは株ごとに独立した行に対して行う。
 
-### 3.2 自前の LiveKit サーバー（2026-11-19）
-- 理由: 外部のサービスに頼らず、脳と同じ PC だけで動かしたい。以前は自前のサーバーを Cloudflare Tunnel で外に出す案だったが、WebRTC の音声（UDP）が通らない見込みで見送っていた（#3）。鉢と PC を同じ LAN に置けば Tunnel は要らない。
-- サーバーは `compose.yaml` の `livekit` サービス。ポートは 3 つだけ使う: 7880/TCP（接続の受付）、7881/TCP（音声。UDP が通らないときの予備）、7882/UDP（音声。1 つのポートにまとめる）。
-- キー（`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`）は PC ごとに自分で決めて `.env` に書く。エージェントと鉢のトークン（§3.1）は同じキーを使う。
-- サーバーが鉢に教える自分の IP アドレスは、`.env` の `LIVEKIT_NODE_IP`（PC の LAN の IP）。コンテナの中の IP を教えると鉢から届かないため。
-- エージェントはコンテナ同士の名前（`ws://livekit:7880`）でつなぐ。
+### 3.2 鉢と脳のつなぎ方: WebSocket の中継（relay）（2026-11-19）
+- 理由
+  - 脳の PC（ohsawa）は大学のネットワークの中にあり、外から入る通信を受けられない。鉢と同じ LAN にも置けない。
+  - LiveKit の音声（WebRTC）は UDP なので、Cloudflare Tunnel を通らない（#3）。
+  - WebSocket（TCP）なら Tunnel を通る。チームの別のプロジェクト（monban）が、XIAO から WebSocket で PCM を送る方式で、Tunnel 越しに動いている。
+- 構成
+  - 中継は `agent/relay/`（`python -m agent.relay`）。compose の `relay` サービス。
+  - 鉢 1 台につき、中継が LiveKit のルーム `plant-<plant_id>` に `device-<plant_id>` として入る。鉢のマイクの音を publish し、エージェントの声を subscribe して鉢へ送る。
+  - エージェントから見ると、今までと同じ「ESP32 がルームにいる」状態になる。エージェントのコードは変えない。
+  - LiveKit サーバーは compose の中だけで使い、PC の外には公開しない。
+  - Cloudflare Tunnel（compose の `tunnel`）が、公開の URL（`https://<ホスト名>/relay`）を中継（`http://relay:8780`）に届ける。
+
+#### 3.2.1 中継のプロトコル（バージョン 1）
+- 接続: `wss://<ホスト名>/relay`。HTTP ヘッダー `Authorization: Bearer <RELAY_DEVICE_KEY>` を付ける。
+  - キーは `.env` の `RELAY_DEVICE_KEY`（全株で共通、24 文字以上）。違えば接続を断る（WebSocket にする前に HTTP 401）。
+- 音の形式: 16kHz・16 ビット・モノラルの PCM（リトルエンディアン）。1 フレーム = 20ms = 320 サンプル = **640 バイト**。
+- 手順
+  1. 鉢 → 中継（テキスト）: 接続から 5 秒以内に `{"type":"start","version":1,"plant_id":"a1"}`
+     - `plant_id` は英小文字・数字・`_`・`-` の 1〜32 文字。
+  2. 中継 → 鉢（テキスト）: LiveKit のルームに入れたら `{"type":"ready","sample_rate":16000,"frame_bytes":640}`
+  3. 鉢 → 中継（バイナリ）: マイクの音を送り続ける。長さは 2 バイトの倍数なら何でもよい（640 バイトずつを勧める）。中継が 20ms ずつに区切り直して LiveKit に流す。
+  4. 中継 → 鉢（バイナリ）: エージェントの声を 640 バイトずつ、届いた順に送る。無音（全部 0）のフレームは送らない。鉢は届いた分を順に再生し、足りないときは無音を鳴らす。
+- エラー: 中継は `{"type":"error","code":"<コード>","message":"<説明>"}` を送ってから閉じる。
+  - `invalid_start`（start が来ない・形が違う、閉じるコード 1008）
+  - `invalid_audio`（バイナリの長さが奇数、1008）
+  - `livekit_unavailable`（ルームに入れない、1013 = あとでやり直してほしい）
+- 生きているかの確認: 中継は 15 秒ごとに WebSocket の ping を送る。鉢から 30 秒何も届かなければ閉じる。
+- 同じ株の鉢が新しくつないだら、古い接続を閉じる（閉じるコード 1000、`replaced`）。
+- 接続が閉じたら、中継はルームから出る。エージェントは今までどおり「ESP32 が出た」として会話を終える（§3.1、#5）。
+- 鉢は接続が切れたら、5 秒から 60 秒まで間を倍に延ばしながら、つなぎ直す。
+
+#### 3.2.2 エコー（植物が自分の声を聞いてしまう）
+- 鉢の中で消す（ESP32 の AEC）。スピーカーに出した音を参照にして、マイクの音から引く。中継とエージェントは何もしない。
 
 ## 4. ディレクトリ構成
 
@@ -532,8 +562,9 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 - 代替: OpenAI に繋がらない・遅い場合は、`TTS_BASE_URL` を OpenAI 互換の自前 TTS（例: PC 上の MioTTS）に向けるだけで切り替える。この場合 `instructions` は無視される前提で動くようにする。
 
 ### 8.4 その他の環境変数
-- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（自前の LiveKit サーバー、§3.2。Docker ではエージェントの `LIVEKIT_URL` を compose が `ws://livekit:7880` にする）
-- `LIVEKIT_NODE_IP`（Docker の LiveKit サーバーが鉢に教える PC の LAN の IP、§3.2）
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（自前の LiveKit サーバー、§3.2。Docker ではエージェントと中継の `LIVEKIT_URL` を compose が `ws://livekit:7880` にする）
+- `RELAY_DEVICE_KEY`（鉢が中継につなぐときのキー、§3.2.1）、`RELAY_PORT`（中継が待ち受けるポート、既定 8780）
+- `CLOUDFLARE_TUNNEL_TOKEN`（Docker の Cloudflare Tunnel のトークン、§3.2）
 - `FUTAMARU_DB_PATH`（既定: `./data/futamaru.db`）
 - `WAKE_WORDS`（カンマ区切り、既定は §5.3）
 - `SLEEP_AFTER_SECONDS`（既定: 60）
@@ -544,14 +575,14 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 
 ## 9. ESP32 側への要件（ハード担当との取り決め）
 
-ESP32 ファームウェアは LiveKit 公式の ESP32 SDK（`livekit/client-sdk-esp32`）で作る前提とする。この SDK は ESP32-S3 に対応し、Opus 音声の双方向送受信とエコーキャンセル（AEC）を備えている。ただし現在は Developer Preview で API が変わる可能性があるため、使う版を固定する。
+ESP32 ファームウェアは、中継（§3.2）と WebSocket で音声をやりとりする（2026-11-19 に変更。それまでは LiveKit 公式の ESP32 SDK で直接ルームに入る前提だった）。LiveKit の SDK は使わない。
 
 エージェントが正しく動くために、ESP32 ファームウェアに以下を求める。
 
-1. 起動時に Wi-Fi に接続し、書き込まれたトークンで `plant-<plant_id>` ルームに参加する。切断時は自動で再接続する。
-2. マイク音声を常時 publish する（ウェイクワードはサーバー側で検出するため）。
-3. エージェントの音声トラックを subscribe してスピーカーで再生する。
-4. **エコーキャンセル（AEC）を有効にする**（SDK の AEC 機能を使う）。植物自身の声をマイクで拾うと、割り込みやウェイクワードの誤検出が起きるため。
+1. 起動時に Wi-Fi に接続し、書き込まれた URL・キー・`plant_id` で中継につなぐ（§3.2.1 の手順）。切断時は自動で再接続する（5 秒から 60 秒まで間を倍に延ばす）。
+2. マイク音声を常時送る（ウェイクワードはサーバー側で検出するため）。
+3. 中継から届いた声をスピーカーで再生する。
+4. **エコーキャンセル（AEC）を有効にする**（ESP32 の中で、スピーカーに出した音を参照にして消す）。植物自身の声をマイクで拾うと、割り込みやウェイクワードの誤検出が起きるため。
 
 ディスプレイは付けないため（§2）、表情の表示と RPC メソッドの登録は求めない。
 

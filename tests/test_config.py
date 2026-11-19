@@ -174,3 +174,29 @@ def test_allow_new_people(value, expected):
 def test_allow_new_people_rejects_typos():
     with pytest.raises(ConfigError):
         load_config(BASE | {"ALLOW_NEW_PEOPLE": "flase"})
+
+
+RELAY_BASE = {
+    "LIVEKIT_URL": "ws://livekit:7880",
+    "LIVEKIT_API_KEY": "key",
+    "LIVEKIT_API_SECRET": "secret",
+    "RELAY_DEVICE_KEY": "d" * 24,
+}
+
+
+def test_relay_config_defaults_to_port_8780():
+    from agent.config import load_relay_config
+
+    c = load_relay_config(RELAY_BASE)
+    assert c.port == 8780 and c.livekit_url == "ws://livekit:7880" and c.device_key == "d" * 24
+
+
+def test_relay_config_rejects_short_device_key_and_bad_port():
+    from agent.config import load_relay_config
+
+    with pytest.raises(ConfigError):
+        load_relay_config({**RELAY_BASE, "RELAY_DEVICE_KEY": "short"})
+    with pytest.raises(ConfigError):
+        load_relay_config({**RELAY_BASE, "RELAY_PORT": "abc"})
+    with pytest.raises(ConfigError):
+        load_relay_config({k: v for k, v in RELAY_BASE.items() if k != "LIVEKIT_URL"})
