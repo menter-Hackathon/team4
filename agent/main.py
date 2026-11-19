@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 from collections.abc import AsyncIterable
 
@@ -41,6 +42,11 @@ from livekit.agents import (
     room_io,
 )
 from livekit.plugins import silero
+
+# 言い終わりの判定モデル（#39）。import した時点で LiveKit に登録され、`download-files` でモデルが入る。
+# LiveKit は新しい書き方（livekit.agents.inference.TurnDetector）を勧めているが、そちらは LiveKit Cloud の
+# 推論を使う。ふたまるは LiveKit も自前なので、PC の中で動くこちら（ONNX のモデル）を使う
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from agent.config import Config, load_config
 from agent.plant.conversation import PlantConversation
@@ -75,18 +81,89 @@ class FutamaruAgent(Agent):
 
     LiveKit の Agent は「声 → 文字（STT）→ 返事（LLM）→ 声（TTS）」の流れを自動で回す。
     途中のいくつかの場所（〜_node や on_user_turn_completed）を上書きして、ふたまるの動きを足している:
-        on_user_turn_completed: 返事する前に、返事すべきか（起きているか）を PlantConversation に聞く
+        on_user_turn_completed: 返事する前に、返事すべきか（起きているか）を PlantConversation に聞く。
+                                返事するときは、先につなぎの声（相槌）を鳴らす
         llm_node:               LLM が落ちても、代わりの返事を返す
         tts_node:               読み上げる前に表情タグを外す
         transcription_node:     画面・ログに出す文字からも表情タグを外す
     """
 
-    def __init__(self, conv: PlantConversation, tts_instructions: str = "") -> None:
+    def __init__(
+        self,
+        conv: PlantConversation,
+        tts_instructions: str = "",
+        *,
+        preemptive: bool = False,
+    ) -> None:
+        """引数:
+        conv: 植物のロジック
+        tts_instructions: TTS の基本の話し方の指示
+        preemptive: 先読み（話し終わりが確定する前に返事を作り始める）を、起きている間だけ使うか（#39）
+        """
         # システムプロンプト（instructions）は起きるたびに作るので、最初は空にしておく
         super().__init__(instructions="")
         self._conv = conv
         # TTS（声）の基本の話し方の指示。方言が決まったら、これの後ろに方言の指示を足す
         self._tts_instructions = tts_instructions
+        self._preemptive = preemptive
+        # つなぎの声（相槌）の作り置き。言葉 → 声のフレーム。prepare_fillers() で作る
+        self._fillers: dict[str, list[rtc.AudioFrame]] = {}
+        self._filler_order: itertools.cycle[str] | None = None
+        self.sync_preemptive()
+
+    def sync_preemptive(self) -> None:
+        """先読みを、植物が起きている間だけ有効にする（#39）。起きた・眠ったあとに呼ぶ。
+
+        眠っている間も先読みを有効にすると、周りの会話が文字になるたびに LLM が返事を作り始め、
+        GPU を無駄に使って本当の返事を遅らせる（眠っている間は、ウェイクワードが無ければ捨てるだけ）。
+
+        LiveKit（1.8.12）は、先読みの設定を Agent の _turn_handling["preemptive_generation"] から
+        毎回読む（voice/agent_activity.py の preemptive_generation_opts）。公開の書き換え方が無いので、
+        この辞書を直接書き換えている。LiveKit の版を上げたら、ここが効いているか確かめる。
+        preemptive_tts: 先読みのときに、声（TTS）まで作っておく（話し終わりが確定したらすぐ鳴らせる）
+        """
+        enabled = self._preemptive and self._conv.awake
+        self._turn_handling["preemptive_generation"] = {
+            "enabled": enabled,
+            "preemptive_tts": True,
+        }
+
+    async def prepare_fillers(self, words: tuple[str, ...]) -> None:
+        """つなぎの声（例: 「うん」）を、今の TTS で先に作っておく（#39）。
+
+        話し終わった直後に鳴らすので、その場で作ると間に合わない。起動時に 1 回だけ作る。
+        作れなかった言葉は飛ばす（つなぎの声が無くても、会話はできる）。
+        """
+        for word in words:
+            try:
+                frames: list[rtc.AudioFrame] = []
+                async with self.session.tts.synthesize(word) as stream:
+                    async for audio in stream:
+                        frames.append(audio.frame)
+                if frames:
+                    self._fillers[word] = frames
+            except Exception:
+                logger.exception("could not prepare filler %r", word)
+        if self._fillers:
+            self._filler_order = itertools.cycle(list(self._fillers))
+            logger.info("fillers ready: %s", ", ".join(self._fillers))
+
+    def _play_filler(self) -> None:
+        """作り置きのつなぎの声を 1 つ鳴らす。会話の履歴には残さない（LLM に「うん」を覚えさせないため）。
+
+        鳴らしたあとに、本当の返事が続く（LiveKit は声を順番に鳴らす）。
+        持ち主がまた話し始めたら、つなぎの声は途中で止まる（allow_interruptions）。
+        """
+        if self._filler_order is None:
+            return
+        word = next(self._filler_order)
+        frames = self._fillers[word]
+
+        async def audio() -> AsyncIterable[rtc.AudioFrame]:
+            for frame in frames:
+                yield frame
+
+        self.session.say(word, audio=audio(), add_to_chat_ctx=False, allow_interruptions=True)
 
     def _apply_dialect(self, dialect: str) -> None:
         """話し相手の方言に合わせて、TTS の話し方の指示を差し替える。
@@ -123,6 +200,8 @@ class FutamaruAgent(Agent):
         """
         original = new_message.text_content or ""
         decision = await self._conv.on_user_turn(original)
+        # 起きた（または起きている）なら、次の発話から先読みを使う
+        self.sync_preemptive()
         # 今まさに起きたなら、その株の性格・記憶入りのシステムプロンプトに入れ替える
         if decision.instructions is not None:
             await self.update_instructions(decision.instructions)
@@ -133,6 +212,8 @@ class FutamaruAgent(Agent):
             self._apply_dialect(decision.dialect)
         if decision.kind == "ignore":
             raise StopResponse()  # ユーザー発話は履歴にも残らない
+        # 返事をする（greet・reply）ときは、返事ができるまでの間をつなぎの声で埋める（#39）
+        self._play_filler()
         if decision.kind == "greet":
             self.session.generate_reply(
                 chat_ctx=direction_ctx(self.chat_ctx, WAKE_GREETING_INSTRUCTION)
@@ -219,16 +300,20 @@ def direction_ctx(chat_ctx: ChatContext, direction: str) -> ChatContext:
 def turn_handling(cfg: Config) -> TurnHandlingOptions:
     """話し終わりの判定と、返事の始め方の設定を作る（#39）。
 
-    - turn_detection="vad": 話し終わりは VAD（無音が続いたか）で判定する
-    - endpointing.min_delay: VAD が話し終わりと判定してから、返事を作り始めるまでの待ち（.env で変える）
-    - preemptive_generation: 話し終わる前に返事を作り始める機能。返事するかどうかは、話し終えてから
-      on_user_turn_completed で決める作りなので使わない
+    - turn_detection: 話し終わりの判定のしかた
+        "vad": 無音が続いたかだけで判定する（TURN_DETECTOR=false、既定）
+        MultilingualModel: 文字になった発話から「言い終わったか」も判定する（TURN_DETECTOR=true）。
+          言い終わっていそうなら endpointing.min_delay 秒、途中なら最長 endpointing.max_delay 秒待つ。
+          無音の待ち（VAD_MIN_SILENCE_SECONDS）を短くしても、話の途中の間で割り込みにくい
+    - endpointing.min_delay / max_delay: 話し終わりと判定してから返事を作り始めるまでの待ち（.env で変える）
+    - preemptive_generation: 話し終わる前に返事を作り始める先読み。ここでは切っておき、
+      FutamaruAgent.sync_preemptive() が、起きている間だけ有効にする（PREEMPTIVE_GENERATION=true のとき）
 
-    例: ENDPOINTING_DELAY_SECONDS=0.2 → {"turn_detection": "vad", "endpointing": {"min_delay": 0.2}, ...}
+    例: ENDPOINTING_DELAY_SECONDS=0.2 → {"turn_detection": "vad", "endpointing": {"min_delay": 0.2, ...}, ...}
     """
     return TurnHandlingOptions(
-        turn_detection="vad",
-        endpointing={"min_delay": cfg.endpointing_delay},
+        turn_detection=MultilingualModel() if cfg.turn_detector else "vad",
+        endpointing={"min_delay": cfg.endpointing_delay, "max_delay": cfg.endpointing_max_delay},
         preemptive_generation={"enabled": False},
     )
 
@@ -357,7 +442,7 @@ async def entrypoint(ctx: JobContext) -> None:
             max_unrecoverable_errors=1_000_000,
         ),
     )
-    agent = FutamaruAgent(conv, cfg.tts_instructions)
+    agent = FutamaruAgent(conv, cfg.tts_instructions, preemptive=cfg.preemptive_generation)
 
     # --- 4. LiveKit の出来事を、植物のロジックにつなぐ ---
     # @session.on("名前") / @ctx.room.on("名前") を付けた関数は、その出来事が起きるたびに LiveKit から呼ばれる
@@ -412,6 +497,10 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     await conv.start()
     await session.start(agent=agent, room=ctx.room, room_options=room_options())
+    # つなぎの声を作っておく（#39）。待たずに裏で作り、できるまでの返事はつなぎの声なしで進める
+    if cfg.filler_words:
+        filler_task = asyncio.create_task(agent.prepare_fillers(cfg.filler_words))
+        ctx.add_shutdown_callback(lambda: _cancel(filler_task))
 
     # --- 6. 1 秒ごとに無言タイマーを確かめる ---
     async def ticker() -> None:
@@ -427,6 +516,7 @@ async def entrypoint(ctx: JobContext) -> None:
                     )
                 elif result == "slept":
                     await agent.update_chat_ctx(ChatContext.empty())  # 眠ったら会話履歴を捨てる
+                    agent.sync_preemptive()  # 眠ったので、先読みを止める
             except Exception:
                 # 1 回失敗してもタイマーは止めない（止めると植物が眠らなくなる）
                 logger.exception("tick failed")
