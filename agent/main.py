@@ -39,6 +39,7 @@ from livekit.agents import (
     TurnHandlingOptions,
     cli,
     llm,
+    metrics,
     room_io,
 )
 from livekit.plugins import silero
@@ -123,6 +124,9 @@ class FutamaruAgent(Agent):
         preemptive_tts: 先読みのときに、声（TTS）まで作っておく（話し終わりが確定したらすぐ鳴らせる）
         """
         enabled = self._preemptive and self._conv.awake
+        current = self._turn_handling.get("preemptive_generation", {}).get("enabled")
+        if self._preemptive and current is not None and current != enabled:
+            logger.info("preemptive generation %s", "on" if enabled else "off")
         self._turn_handling["preemptive_generation"] = {
             "enabled": enabled,
             "preemptive_tts": True,
@@ -448,6 +452,12 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # --- 4. LiveKit の出来事を、植物のロジックにつなぐ ---
     # @session.on("名前") / @ctx.room.on("名前") を付けた関数は、その出来事が起きるたびに LiveKit から呼ばれる
+
+    # 段階ごとの時間（話し終わりの判定・STT・LLM の最初の文字・声の最初の音）をログに出す（#39）。
+    # 返事の遅さを、変更の前後で比べるため
+    @session.on("metrics_collected")
+    def _on_metrics(ev) -> None:
+        metrics.log_metrics(ev.metrics)
 
     # 持ち主が話し始めた・話し終えた
     @session.on("user_state_changed")
