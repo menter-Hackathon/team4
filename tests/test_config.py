@@ -25,8 +25,8 @@ def test_defaults():
     assert c.wake_words == ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
     assert (c.sleep_after, c.llm_timeout, c.stt_timeout, c.tts_timeout) == (60.0, 15.0, 10.0, 10.0)
     assert c.tts_instructions == TTS_INSTRUCTIONS and c.dev_plant_id is None
-    # 話し終わりの判定は、#39 の調整で短縮した値（VAD 0.3 秒、endpointing 0.2 秒）
-    assert (c.vad_min_silence, c.endpointing_delay) == (0.3, 0.2)
+    # 話し終わりの判定は、#39 の調整で短縮した値（VAD 0.35 秒、endpointing 0.2 秒）
+    assert (c.vad_min_silence, c.endpointing_delay) == (0.35, 0.2)
     assert c.llm_reasoning_effort is None
 
 

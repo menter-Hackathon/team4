@@ -221,8 +221,8 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         stt_timeout=float(get("STT_TIMEOUT", "10")),
         tts_timeout=float(get("TTS_TIMEOUT", "10")),
         dev_plant_id=get("DEV_PLANT_ID"),
-        # #39 の調整で LiveKit 既定（0.55 秒 / 0.5 秒）から短縮。話し終わりの待ちの合計が 1.05 秒 → 0.5 秒になる
-        vad_min_silence=float(get("VAD_MIN_SILENCE_SECONDS", "0.3")),
+        # #39 の調整で LiveKit 既定（0.55 秒 / 0.5 秒）から短縮。話し終わりの待ちの合計が 1.05 秒 → 0.55 秒になる
+        vad_min_silence=float(get("VAD_MIN_SILENCE_SECONDS", "0.35")),
         endpointing_delay=float(get("ENDPOINTING_DELAY_SECONDS", "0.2")),
         turn_detector=flag("TURN_DETECTOR", "false"),
         endpointing_max_delay=float(get("ENDPOINTING_MAX_DELAY_SECONDS", "3.0")),
