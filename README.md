@@ -36,7 +36,7 @@
 ## 仕組み
 
 ```
-[鉢: ESP32-S3 ＋ マイク・スピーカー] ──WebRTC（同じ LAN）──> [チームの PC: LiveKit サーバー ＋ エージェント]
+[鉢: ESP32-S3 ＋ マイク・スピーカー] ──WebSocket──> [Cloudflare Tunnel] ──> [チームの PC: 中継 ＋ LiveKit ＋ エージェント]
                                                                                    ├─ 文字起こし: kotoba-whisper
                                                                                    ├─ 会話: Gemma 4 E4B
                                                                                    ├─ 声: AivisSpeech（ローカル）

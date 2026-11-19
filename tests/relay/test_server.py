@@ -57,11 +57,11 @@ async def test_start_then_ready_and_audio_flows_both_ways():
         await wait_until(lambda: len(bridge.mic) == 1)
         assert bridge.mic[0] == (b"\x01\x00" * 500)[:640]
 
-        # LiveKit → 鉢: 完全な無音は送らず、声のフレームだけが届く
+        # LiveKit → 鉢: 無音は送らず、声のフレーム（振幅 1000）だけが届く
         bridge.say(bytes(640))
-        bridge.say(b"\x05\x00" * 320)
+        bridge.say(b"\xe8\x03" * 320)
         msg = await ws.receive(timeout=2)
-        assert msg.type == WSMsgType.BINARY and msg.data == b"\x05\x00" * 320
+        assert msg.type == WSMsgType.BINARY and msg.data == b"\xe8\x03" * 320
 
         await ws.close()
         await wait_until(lambda: bridge.closed)  # 鉢が切れたらルームから出る

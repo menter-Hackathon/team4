@@ -98,19 +98,23 @@ docker compose up
 - まだ確かめていないこと: NVIDIA の GPU で、この圧縮版が 12GB に全部載るか、話し方の質が Mac の版（MLX）と変わらないか。ショーンさんの PC でのリハーサルで確かめる
 
 
-## 2026-11-19 の追加: LiveKit サーバーもコンテナに入れる
+## 2026-11-19 の追加: LiveKit サーバー・中継・Cloudflare Tunnel もコンテナに入れる
 
-最初は「LiveKit は Cloud（外部サービス）」としていたが、脳と同じ PC の Docker で LiveKit サーバーも動かすことにした（エージェントの仕様 §3.2）。
+最初は「LiveKit は Cloud（外部サービス）」としていたが、脳と同じ PC の Docker で LiveKit サーバーも動かすことにした。鉢は WebSocket で中継（relay）につなぎ、中継が鉢の代わりに LiveKit のルームに入る（エージェントの仕様 §3.2）。
 
-- 理由: 外部のサービスに頼らず、脳の PC だけで動かしたい（ハード担当の希望）。鉢と PC を同じ LAN に置けば、インターネットに出さずに済む
-- デモの PC が 2 台目の PC（ohsawa、RTX 5060 8GB の 1 枚）に変わった。GPU が 1 枚なので、`.env` で `LLM_GPU=0`・`STT_GPU=0` にして同じ GPU に載せる（compose の作りは変えない）
+- 理由
+  - 外部のサービスに頼らず、脳の PC だけで動かしたい（ハード担当の希望）
+  - 脳の PC（ohsawa）は大学のネットワークの中にあり、外から入る通信を受けられない。鉢と同じ LAN にも置けない
+  - LiveKit の音声（WebRTC の UDP）は Cloudflare Tunnel を通らないが、WebSocket（TCP）なら通る（monban と同じ方式）
+- デモの PC が 2 台目の PC（ohsawa、RTX 5060 8GB の 1 枚）に変わった。`.env` で `LLM_GPU=0`・`STT_GPU=0` にして同じ GPU に載せる（compose の作りは変えない）。2026-11-19 に測ると、LLM と STT を合わせて GPU のメモリは 7.5GB / 8GB で収まった
 
 決めたこと:
 
-- **`livekit`**: LiveKit 公式イメージ（`livekit/livekit-server`、版を固定）。設定は compose の環境変数 `LIVEKIT_CONFIG` に直接書き、ファイルを増やさない
-- **ポート**: 7880/TCP（接続の受付）、7881/TCP（音声の予備）、7882/UDP（音声）の 3 つだけ公開する。UDP をポート 1 つにまとめる（`rtc.udp_port`）のは、ファイアウォールで開けるポートを少なくするため。LiveKit の既定（50000〜60000 の UDP）だと、Docker で 1 万個のポートを公開することになる
-- **キー**: `.env` の `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` を、そのまま LiveKit サーバーのキーにする（`LIVEKIT_KEYS`）。エージェントもトークンの発行（`scripts.issue_token`）も同じ値を読む
-- **鉢に教える IP**: `.env` の `LIVEKIT_NODE_IP`（PC の LAN の IP）。空だと LiveKit はコンテナの中の IP を教えてしまい、鉢から音声が届かない
-- **エージェントのつなぎ先**: compose で `LIVEKIT_URL=ws://livekit:7880` にする。`.env` に Cloud の URL が残っていても、こちらが優先される（LLM・STT と同じ考え方）
-- **Windows の PC**: Docker Engine を WSL2 の Ubuntu で動かす場合、LAN から WSL2 の中へは、そのままでは届かない。WSL の設定（`.wslconfig`）を `networkingMode=mirrored` にし、Hyper-V のファイアウォールで 3 つのポートの受信を許可する（`docs/deploy.md`）
-- まだ確かめていないこと: WSL2 の mirrored モードで、LAN の鉢から Docker のポートに届くか。エージェントのコンテナから `LIVEKIT_NODE_IP` 経由の音声がつながるか（届かなくても 7881/TCP で代わりにつながる見込み）。ohsawa で初めて確かめる
+- **`livekit`**: LiveKit 公式イメージ（`livekit/livekit-server`、版を固定）。設定は compose の環境変数 `LIVEKIT_CONFIG` に直接書く。compose の中（`relay` と `agent`）だけで使い、ports は書かない。LiveKit は自分のコンテナの IP を教えるので、ほかのコンテナからそのまま音声が届く
+- **`relay`**: エージェントと同じイメージで `python -m agent.relay`。ports は書かない（外からは `tunnel` を通ってだけ届く）
+- **`tunnel`**: Cloudflare Tunnel 公式イメージ（`cloudflare/cloudflared`、版を固定）。`.env` の `CLOUDFLARE_TUNNEL_TOKEN` で動く。公開ホスト名のサービスは `http://relay:8780`。`profiles: ["tunnel"]` にして、`--profile tunnel` を付けたときだけ起動する（トークンの無い PC で失敗し続けないように）
+- **キー**: `.env` の `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` を LiveKit サーバーのキーにし（`LIVEKIT_KEYS`）、エージェントと中継も同じ値を読む。鉢は `RELAY_DEVICE_KEY` で中継につなぐ
+- **エージェントと中継のつなぎ先**: compose で `LIVEKIT_URL=ws://livekit:7880` にする。`.env` に Cloud の URL が残っていても、こちらが優先される
+- **Windows の WSL**: ウィンドウや SSH が全部閉じると WSL が止まり、コンテナも止まる。デモの PC では、WSL を止めないタスクを作る（`docs/deploy.md` 3.5）
+- 確かめたこと（2026-11-19、ohsawa）: 合成した「ふたまる、こんにちは」を鉢のふりをして中継に送ると、エージェントが起きて約 7 秒の返事が中継から返ってきた（話し終わりから約 3 秒）
+- まだ確かめていないこと: Cloudflare Tunnel を通したとき。本物の鉢（ESP32）から

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import array
 import hmac
 import json
 import re
@@ -24,6 +25,9 @@ SAMPLES_PER_FRAME = SAMPLE_RATE * FRAME_MS // 1000  # 320 サンプル
 FRAME_BYTES = SAMPLES_PER_FRAME * BYTES_PER_SAMPLE * NUM_CHANNELS  # 640 バイト
 
 PROTOCOL_VERSION = 1
+
+# これ以下の振幅しかないフレームは無音として鉢へ送らない（16 ビットの最大は 32767。8 は聞こえない大きさ）
+SILENCE_PEAK = 8
 
 # plant_id に使える文字（英小文字・数字・_・-、1〜32 文字）。ルーム名 plant-<id> に入るので絞る
 PLANT_ID_PATTERN = re.compile(r"[a-z0-9_-]{1,32}")
@@ -103,8 +107,16 @@ def error_message(code: str, message: str) -> str:
 
 
 def is_silent(frame: bytes) -> bool:
-    """フレームが全部 0（完全な無音）かを返す。完全な無音は鉢へ送らない（通信量を減らすため）。"""
-    return not any(frame)
+    """フレームが無音か（どのサンプルも振幅が SILENCE_PEAK 以下か）を返す。無音は鉢へ送らない。
+
+    エージェントが黙っている間も、LiveKit からは振幅 1〜2 のごく小さな音が 20ms ごとに届く
+    （2026-11-19 の ohsawa の通し試験）。これを全部送ると、無言の間も 32KB/秒 を流し続けるので、
+    聞こえないほど小さい音は無音として扱う。例: 全部 0 → True、1 つでも 1000 → False
+    """
+    samples = array.array(
+        "h", frame
+    )  # 16 ビットの符号付き整数として読む（リトルエンディアンの PC 前提）
+    return max(samples, default=0) <= SILENCE_PEAK and min(samples, default=0) >= -SILENCE_PEAK
 
 
 class FrameChunker:

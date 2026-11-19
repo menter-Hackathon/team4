@@ -88,9 +88,14 @@ def test_chunker_rejects_odd_length_audio():
     assert e.value.code == ERROR_INVALID_AUDIO
 
 
-def test_only_all_zero_frames_are_silent():
+def test_tiny_noise_counts_as_silence_but_speech_does_not():
+    import array
+
     assert is_silent(bytes(640))
-    assert not is_silent(bytes(639) + b"\x01")
+    # LiveKit から届く振幅 1〜2 のごく小さな音は無音として扱う
+    assert is_silent(array.array("h", [2, -2, 1] * 106 + [0, 0]).tobytes())
+    assert not is_silent(array.array("h", [0] * 319 + [1000]).tobytes())
+    assert not is_silent(array.array("h", [0] * 319 + [-1000]).tobytes())
 
 
 def test_device_token_joins_the_plant_room_as_the_device():
