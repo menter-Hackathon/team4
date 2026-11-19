@@ -277,7 +277,7 @@ CREATE TABLE trait_history (
 7. ユーザー発話が0件のセッション（ウェイクワードだけで終わった等）は LLM を呼ばず、`reflected = 1` にするだけとする。
 8. エージェント起動時に以下を処理する。
    - `ended_at` が無いセッション（クラッシュ等で残ったもの）: 最後の発話時刻（発話が無ければ `started_at`）を `ended_at` にする
-   - `reflected = 0` のセッション: reflection を再実行する
+   - `reflected = 0` のセッション: 新しいものから最大 3 件（`RECOVERY_LIMIT`）だけ、reflection を裏で再実行する（`PlantConversation.start()`）。起動は待たせない。LLM が落ちていても、起動を何分も止めないため。それより古いものは `reflected = 0` のまま残る
 
 ### 6.4 プロンプト組み立て（`prompt.py`）
 システムプロンプトは以下の順で連結する。
