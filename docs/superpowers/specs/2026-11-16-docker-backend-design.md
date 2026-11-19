@@ -4,6 +4,8 @@
 
 更新 2026-11-18: 声（TTS）に AivisSpeech を使う場合に備えて、AivisSpeech Engine もコンテナに入れた。ダッシュボードもコンテナに入れた。LLM を vLLM から Ollama の圧縮版に替え、GPU を 2 枚に分けた（下の「2026-11-18 の追加」）
 
+更新 2026-11-19: LiveKit サーバーもコンテナに入れた（下の「2026-11-19 の追加」）
+
 ## 目的と理由
 
 ふたまるの「脳」（エージェント・LLM・STT）を Docker にまとめ、**チームの誰かが NVIDIA の GPU がある PC で `docker compose up` するだけで、脳全体が立ち上がる**ようにする。
@@ -95,3 +97,20 @@ docker compose up
 - 思考モードは compose で `LLM_REASONING_EFFORT=none` にして切る（Ollama の Gemma 4 は既定で思考し、遅くなるため。#54）
 - まだ確かめていないこと: NVIDIA の GPU で、この圧縮版が 12GB に全部載るか、話し方の質が Mac の版（MLX）と変わらないか。ショーンさんの PC でのリハーサルで確かめる
 
+
+## 2026-11-19 の追加: LiveKit サーバーもコンテナに入れる
+
+最初は「LiveKit は Cloud（外部サービス）」としていたが、脳と同じ PC の Docker で LiveKit サーバーも動かすことにした（エージェントの仕様 §3.2）。
+
+- 理由: 外部のサービスに頼らず、脳の PC だけで動かしたい（ハード担当の希望）。鉢と PC を同じ LAN に置けば、インターネットに出さずに済む
+- デモの PC が 2 台目の PC（ohsawa、RTX 5060 8GB の 1 枚）に変わった。GPU が 1 枚なので、`.env` で `LLM_GPU=0`・`STT_GPU=0` にして同じ GPU に載せる（compose の作りは変えない）
+
+決めたこと:
+
+- **`livekit`**: LiveKit 公式イメージ（`livekit/livekit-server`、版を固定）。設定は compose の環境変数 `LIVEKIT_CONFIG` に直接書き、ファイルを増やさない
+- **ポート**: 7880/TCP（接続の受付）、7881/TCP（音声の予備）、7882/UDP（音声）の 3 つだけ公開する。UDP をポート 1 つにまとめる（`rtc.udp_port`）のは、ファイアウォールで開けるポートを少なくするため。LiveKit の既定（50000〜60000 の UDP）だと、Docker で 1 万個のポートを公開することになる
+- **キー**: `.env` の `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` を、そのまま LiveKit サーバーのキーにする（`LIVEKIT_KEYS`）。エージェントもトークンの発行（`scripts.issue_token`）も同じ値を読む
+- **鉢に教える IP**: `.env` の `LIVEKIT_NODE_IP`（PC の LAN の IP）。空だと LiveKit はコンテナの中の IP を教えてしまい、鉢から音声が届かない
+- **エージェントのつなぎ先**: compose で `LIVEKIT_URL=ws://livekit:7880` にする。`.env` に Cloud の URL が残っていても、こちらが優先される（LLM・STT と同じ考え方）
+- **Windows の PC**: Docker Engine を WSL2 の Ubuntu で動かす場合、LAN から WSL2 の中へは、そのままでは届かない。WSL の設定（`.wslconfig`）を `networkingMode=mirrored` にし、Hyper-V のファイアウォールで 3 つのポートの受信を許可する（`docs/deploy.md`）
+- まだ確かめていないこと: WSL2 の mirrored モードで、LAN の鉢から Docker のポートに届くか。エージェントのコンテナから `LIVEKIT_NODE_IP` 経由の音声がつながるか（届かなくても 7881/TCP で代わりにつながる見込み）。ohsawa で初めて確かめる

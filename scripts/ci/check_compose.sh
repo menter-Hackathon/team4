@@ -21,6 +21,10 @@ DEV_PLANT_ID=dev
 TTS_PROVIDER=aivis
 AIVIS_BASE_URL=http://127.0.0.1:10101
 AIVIS_SPEAKER=893625024
+LIVEKIT_URL=wss://example.livekit.cloud
+LIVEKIT_API_KEY=testkey
+LIVEKIT_API_SECRET=testsecret
+LIVEKIT_NODE_IP=192.168.1.20
 ENV
 docker compose config --format json > /tmp/compose.json
 python3 - <<'PY'
@@ -50,6 +54,23 @@ assert env["AIVIS_SPEAKER"] == "893625024", env
 assert env["AIVIS_URL"] == "http://tts:10101", env
 assert env["AIVIS_MODELS"], env
 print("ok: tts-init が .env の声の設定を受け取る")
+PY
+
+# 1c. LiveKit サーバー（仕様 §3.2）: .env のキーと LAN の IP を受け取り、3 つのポートを LAN に公開すること。
+#     エージェントは .env の LiveKit Cloud の URL ではなく、同じ compose の LiveKit サーバーにつなぐこと
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))["services"]
+assert s["agent"]["environment"]["LIVEKIT_URL"] == "ws://livekit:7880", s["agent"]["environment"]
+assert "livekit" in s["agent"]["depends_on"], s["agent"]["depends_on"]
+env = s["livekit"]["environment"]
+assert env["LIVEKIT_KEYS"] == "testkey: testsecret", env
+assert env["NODE_IP"] == "192.168.1.20", env
+assert "udp_port: 7882" in env["LIVEKIT_CONFIG"] and "tcp_port: 7881" in env["LIVEKIT_CONFIG"], env
+ports = {(str(p["published"]), p["protocol"]) for p in s["livekit"]["ports"]}
+assert ports == {("7880", "tcp"), ("7881", "tcp"), ("7882", "udp")}, ports
+assert all(not p.get("host_ip") for p in s["livekit"]["ports"]), s["livekit"]["ports"]
+print("ok: LiveKit サーバーが .env のキーと IP で動き、エージェントがそこにつなぐ")
 PY
 
 # 2. DOCKER_STT_MODEL で STT のモデルを切り替えられること（stt-init と agent の両方）

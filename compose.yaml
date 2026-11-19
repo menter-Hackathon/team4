@@ -6,7 +6,7 @@
 #
 # 手順書: docs/deploy.md
 # 前提: NVIDIA の GPU が 2 枚ある PC（LLM 用に 12GB 以上、STT 用に 8GB 以上。例: RTX 5070 と RTX 5060）。
-#       鉢（ESP32）とは LiveKit Cloud 経由でつながる。
+#       鉢（ESP32）とは、同じ PC の LiveKit サーバー（下の livekit）で同じ LAN の中でつながる。
 #
 # 中身:
 #   llm      … Gemma 4 E4B の圧縮版を動かす（Ollama、GPU を 1 枚使う。.env の LLM_GPU）
@@ -15,6 +15,7 @@
 #   stt-init … 起動時に一度だけ動き、stt に音声認識のモデルをダウンロード・読み込みさせて終わる
 #   tts      … AivisSpeech Engine で植物の声を作る（CPU を使う。.env で TTS_PROVIDER=aivis のときに使われる）
 #   tts-init … 起動時に一度だけ動き、tts に声のモデル（らせつんなど）を AivisHub から入れて読み込ませて終わる
+#   livekit  … LiveKit サーバー。鉢とエージェントをつなぐ（仕様 §3.2。2026-11-19 に LiveKit Cloud から替えた）
 #   agent    … ふたまるのエージェント。llm-init・stt-init・tts-init の完了を待ってから起動する
 #   dashboard … 性格・成長・記憶を見せる画面。この PC のブラウザで http://127.0.0.1:8765 を開く
 
@@ -25,6 +26,35 @@
 #   空なら LLM が 0 番、STT が 1 番。LLM はメモリの大きいほう（RTX 5070）にする
 
 services:
+  livekit:
+    # LiveKit 公式イメージ。版を固定する（2026-10-25 の v1.13.11）
+    image: livekit/livekit-server:v1.13.11
+    # 設定はファイルにせず、ここに直接書く（LIVEKIT_CONFIG は LiveKit が読む環境変数）
+    #   port: 7880       … 鉢・エージェントからの接続の受付（WebSocket）
+    #   rtc.tcp_port     … 音声を TCP で送る予備の口（UDP が通らないとき）
+    #   rtc.udp_port     … 音声（UDP）をポート 1 つにまとめる。既定の 50000〜60000 だと
+    #                      Docker とファイアウォールで 1 万個のポートを開けることになるため
+    #   use_external_ip  … インターネット側の IP を調べに行かない（LAN の中だけで使う）
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          use_external_ip: false
+        logging:
+          level: info
+      # キーは .env の値をそのまま使う（エージェントとトークンの発行も同じ値を読む）。形式は「キー: シークレット」
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-}: ${LIVEKIT_API_SECRET:-}"
+      # 鉢に教える、この PC の LAN の IP。空だとコンテナの中の IP を教えてしまい、鉢から音声が届かない
+      NODE_IP: ${LIVEKIT_NODE_IP:-}
+    ports:
+      # LAN の鉢から届くように、0.0.0.0 で公開する（ダッシュボードと違い 127.0.0.1 には絞らない）
+      - "7880:7880/tcp"
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    restart: unless-stopped
+
   llm:
     # Ollama 公式イメージ。版を固定する（2026-11-18 に Mac で Gemma 4 を確かめたのと同じ版）
     # なぜ vLLM ではなく Ollama か:
@@ -164,10 +194,14 @@ services:
       FUTAMARU_DB_PATH: /app/data/futamaru.db
       # console 専用の設定なので、コンテナでは空にする
       DEV_PLANT_ID: ""
+      # 同じ compose の LiveKit サーバーにつなぐ。.env に LiveKit Cloud の URL が残っていても、こちらを使う
+      LIVEKIT_URL: ws://livekit:7880
     volumes:
       # 会話ログ・記憶の DB をホストの ./data に残す（コンテナを作り直しても植物の記憶が消えない）
       - ./data:/app/data
     depends_on:
+      livekit:
+        condition: service_started
       llm-init:
         condition: service_completed_successfully
       stt-init:

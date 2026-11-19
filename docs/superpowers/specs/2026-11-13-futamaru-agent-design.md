@@ -38,7 +38,7 @@ AI スピーカーとの違いは、**AI が本物の植物の通訳になる**�
 | 項目 | 決定 |
 |---|---|
 | 音声エージェントフレームワーク | LiveKit Agents (Python) |
-| LiveKit サーバー | LiveKit Cloud |
+| LiveKit サーバー | 自前の LiveKit サーバー（`livekit/livekit-server`）。脳と同じ PC の Docker で動かし、鉢と同じ LAN に置く（2026-11-19 決定。それまでは LiveKit Cloud） |
 | LLM | Gemma 4 E4B（`google/gemma-4-E4B-it`）。チームの誰かの PC 上で OpenAI 互換 API として動かす（vLLM ≥ 0.19 など、§8.1） |
 | STT | kotoba-whisper v2.0（誰かの PC 上の Speaches、OpenAI 互換 API） |
 | TTS | ローカルの AivisSpeech Engine（GPU の PC 上、2026-11-17 #56）。`.env` の `TTS_PROVIDER` で OpenAI TTS（`gpt-4o-mini-tts`）にも戻せる |
@@ -57,8 +57,9 @@ AI スピーカーとの違いは、**AI が本物の植物の通訳になる**�
 ## 3. 全体構成
 
 ```
-[ESP32-S3 (植物)] ──WebRTC──> [LiveKit Cloud] <──── [Agent ワーカー (GPU サーバー)]
-   マイク(常時送信)            ルーム: plant-<id>         │
+[ESP32-S3 (植物)] ──WebRTC──> [LiveKit サーバー] <── [Agent ワーカー (GPU サーバー)]
+   マイク(常時送信)            ルーム: plant-<id>       │
+                               （GPU サーバーの Docker）│
    スピーカー                                           │
                                                        ├─> vLLM (Gemma 4)          [GPU サーバー]
                                                        ├─> Speaches (kotoba-whisper) [GPU サーバー]
@@ -71,10 +72,18 @@ AI スピーカーとの違いは、**AI が本物の植物の通訳になる**�
   - identity: `device-<plant_id>`
   - ルーム名: `plant-<plant_id>`
   - 権限: ルーム参加、音声の publish / subscribe
-- エージェントは LiveKit Cloud の自動ディスパッチ（新しいルームすべてに参加）を使う。
+- エージェントは LiveKit サーバーの自動ディスパッチ（新しいルームすべてに参加）を使う。名前を付けずに登録したワーカーに配る仕組みで、LiveKit Cloud でも自前のサーバーでも同じように動く。
+- 鉢は LAN の中で LiveKit サーバーに直接つなぐ（`ws://<PC の LAN の IP>:7880`）。インターネットの向こうのサーバーを通さないので、会場の回線に左右されない。その代わり、鉢と PC を同じ LAN（Wi-Fi）に置く必要がある（§3.2）。
 - エージェントはルーム名が `plant-` で始まらない場合は即座に退出する。
 - ルーム名から `plant_id` を取り出し、その株の性格・記憶をロードする。該当する `plant_id` が DB に無ければ、初期状態（全パラメータ 0.5）で新規作成する。
 - 1つのワーカープロセスが複数の株（ルーム）を同時に扱う。DB は SQLite を WAL モードで使い、書き込みは株ごとに独立した行に対して行う。
+
+### 3.2 自前の LiveKit サーバー（2026-11-19）
+- 理由: 外部のサービスに頼らず、脳と同じ PC だけで動かしたい。以前は自前のサーバーを Cloudflare Tunnel で外に出す案だったが、WebRTC の音声（UDP）が通らない見込みで見送っていた（#3）。鉢と PC を同じ LAN に置けば Tunnel は要らない。
+- サーバーは `compose.yaml` の `livekit` サービス。ポートは 3 つだけ使う: 7880/TCP（接続の受付）、7881/TCP（音声。UDP が通らないときの予備）、7882/UDP（音声。1 つのポートにまとめる）。
+- キー（`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`）は PC ごとに自分で決めて `.env` に書く。エージェントと鉢のトークン（§3.1）は同じキーを使う。
+- サーバーが鉢に教える自分の IP アドレスは、`.env` の `LIVEKIT_NODE_IP`（PC の LAN の IP）。コンテナの中の IP を教えると鉢から届かないため。
+- エージェントはコンテナ同士の名前（`ws://livekit:7880`）でつなぐ。
 
 ## 4. ディレクトリ構成
 
@@ -523,7 +532,8 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 - 代替: OpenAI に繋がらない・遅い場合は、`TTS_BASE_URL` を OpenAI 互換の自前 TTS（例: PC 上の MioTTS）に向けるだけで切り替える。この場合 `instructions` は無視される前提で動くようにする。
 
 ### 8.4 その他の環境変数
-- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（LiveKit Cloud）
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（自前の LiveKit サーバー、§3.2。Docker ではエージェントの `LIVEKIT_URL` を compose が `ws://livekit:7880` にする）
+- `LIVEKIT_NODE_IP`（Docker の LiveKit サーバーが鉢に教える PC の LAN の IP、§3.2）
 - `FUTAMARU_DB_PATH`（既定: `./data/futamaru.db`）
 - `WAKE_WORDS`（カンマ区切り、既定は §5.3）
 - `SLEEP_AFTER_SECONDS`（既定: 60）

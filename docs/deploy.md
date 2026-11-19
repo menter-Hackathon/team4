@@ -2,10 +2,11 @@
 
 NVIDIA の GPU が 2 枚ある PC で、ふたまるの脳（エージェント・LLM・STT・声）と、性格を見せるダッシュボードをまとめて動かす手順です。
 準備ができたあとの、発表の日の手順は [`demo-day.md`](demo-day.md) にまとめています。
-鉢（ESP32）にはマイクとスピーカーだけがあり、LiveKit Cloud を通してこの PC の脳とつながります。
+鉢（ESP32）にはマイクとスピーカーだけがあり、同じ LAN（Wi-Fi）の中で、この PC の LiveKit サーバーを通して脳とつながります。
 
 ```
-鉢（ESP32: マイク・スピーカー） ──> LiveKit Cloud <── この PC の Docker
+鉢（ESP32: マイク・スピーカー） ──同じ LAN──> この PC の Docker
+                                                ├─ livekit（LiveKit サーバー。鉢とエージェントをつなぐ）
                                                       ├─ agent（エージェント）
                                                       ├─ llm（Gemma 4 E4B の圧縮版、Ollama。GPU 1 枚目）
                                                       ├─ stt（kotoba-whisper。GPU 2 枚目）
@@ -27,6 +28,7 @@ NVIDIA の GPU が 2 枚ある PC で、ふたまるの脳（エージェント�
   - **Windows**: Docker Desktop（WSL2 を使う設定）
   - **Linux**: Docker Engine と NVIDIA Container Toolkit
 - ディスクの空き 40GB 以上（モデルとイメージで十数〜数十 GB）
+- **鉢と同じ LAN（Wi-Fi）につながっていること**。鉢はこの PC の LAN の IP に直接つなぎます。ESP32 は 2.4GHz の Wi-Fi にしかつながらないので、PC は有線でも、同じルーターの下にあれば大丈夫です
 - インターネット接続（初回のモデルのダウンロード。声を AivisSpeech にするときは、声のモデルを AivisHub から取る）
 
 **GPU とドライバがコンテナから使えるか**を先に確かめます。
@@ -69,15 +71,65 @@ mkdir -p data
 
 | 項目 | 書くもの |
 |---|---|
-| `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | チームの LiveKit Cloud の値 |
-| `OPENAI_API_KEY` | チームの OpenAI のキー（声を OpenAI にするとき） |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | この PC の LiveKit サーバーのキー。**自分で決めます**（下の作り方）。シークレットは 32 文字以上 |
+| `LIVEKIT_NODE_IP` | この PC の LAN の IP（例: `192.168.1.20`）。調べ方は 3.5 |
+| `OPENAI_API_KEY` | チームの OpenAI のキー（声を OpenAI にするときだけ。`TTS_PROVIDER=aivis` なら空でよい） |
 | `LLM_GPU` / `STT_GPU` | 2 で決めた GPU の番号（空なら LLM が 0、STT が 1） |
 | `TTS_PROVIDER` | 植物の声。`aivis`（AivisSpeech）か `openai`（空なら openai） |
 | `AIVIS_SPEAKER` | `aivis` のときの声のスタイル ID（空なら「まお / あまあま」）。例: `893625024` =「らせつん / 標準」 |
 | `AIVIS_MODELS` | （任意）AivisHub から入れる声のモデルの UUID（カンマ区切り。空ならせつん） |
 | `JMA_AMEDAS_STATION` / `JMA_FORECAST_AREA` | （任意）天気を取る場所。例: 東京なら `44132` / `130000`（`.env.example` の説明を参照） |
 
+LiveKit のキーは、次のコマンドで作れます（出てきた文字列を `.env` に書く）。
+
+```bash
+openssl rand -hex 8    # LIVEKIT_API_KEY に書く
+openssl rand -hex 32   # LIVEKIT_API_SECRET に書く
+```
+
+`LIVEKIT_URL` は書かなくて大丈夫です。Docker では、エージェントは同じ compose の LiveKit サーバー（`ws://livekit:7880`）につなぎます。
+
 `LLM_BASE_URL`・`LLM_MODEL`・`LLM_REASONING_EFFORT`・`STT_BASE_URL`・`STT_MODEL`・`AIVIS_BASE_URL` は書かなくて大丈夫です。Docker では `compose.yaml` の設定（コンテナ内の LLM・STT・AivisSpeech）が使われます。開発用に OpenAI や手元の AivisSpeech を向けた値が書いてあっても、Docker では無視されます。
+
+## 3.5 鉢から PC に届くようにする（ネットワーク）
+
+鉢は、この PC の 3 つのポートにつなぎます: **7880/TCP**（接続の受付）、**7881/TCP**（音声の予備）、**7882/UDP**（音声）。
+
+### PC の LAN の IP を調べる
+
+- **Windows**: PowerShell で `ipconfig` を実行し、Wi-Fi か イーサネット の「IPv4 アドレス」（例: `192.168.1.20`）。Tailscale の `100.` で始まる IP ではありません
+- **Linux**: `hostname -I` の最初の値
+
+この IP を `.env` の `LIVEKIT_NODE_IP` に書きます。IP が変わると鉢がつながらなくなるので、ルーターの設定で固定（DHCP の予約）しておくと安心です。
+
+### Windows（WSL2 の Ubuntu で Docker を動かす場合）
+
+WSL2 の中の Docker には、そのままでは LAN からつながりません。次の 2 つを 1 回だけ行います。
+
+1. WSL のネットワークを、Windows と同じ IP を使う「mirrored」にします。`C:\Users\<ユーザー名>\.wslconfig` に次を書き（無ければ作る）、PowerShell で `wsl --shutdown` してから Ubuntu を開き直します
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+2. **管理者の PowerShell** で、3 つのポートへの受信を許可します（WSL の中への通信は、Hyper-V のファイアウォールで決まります）
+
+```powershell
+New-NetFirewallHyperVRule -Name futamaru-livekit-tcp -DisplayName "futamaru LiveKit TCP" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol TCP -LocalPorts 7880,7881 -Action Allow
+New-NetFirewallHyperVRule -Name futamaru-livekit-udp -DisplayName "futamaru LiveKit UDP" -Direction Inbound -VMCreatorId '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}' -Protocol UDP -LocalPorts 7882 -Action Allow
+```
+
+ネットワークの種類が「パブリック」だと通らないことがあります。Windows の設定 → ネットワークとインターネット で、つないでいる Wi-Fi・イーサネットを「プライベート」にしてください。
+
+### Linux
+
+ファイアウォール（ufw）を使っているときだけ、3 つのポートを開けます。
+
+```bash
+sudo ufw allow 7880:7881/tcp
+sudo ufw allow 7882/udp
+```
 
 ## 4. 起動する
 
@@ -105,10 +157,18 @@ docker compose logs -f agent     # エージェントのログ
 1. `docker compose ps -a` で `llm-init`・`stt-init`・`tts-init` が `exited (0)`、ほかが `running` になっている
    - `docker compose logs llm-init` に「モデルが全部 GPU に載りました」と出ている。「注意: モデルの …% しか GPU に載っていません」と出たら、`.env` の `LLM_GPU` がメモリの大きい GPU の番号か確かめる（2 を参照）
    - `TTS_PROVIDER=aivis` なら、`docker compose logs tts-init` の最後に `準備完了` と出ている（openai なら「準備はしません」と出るだけでよい）
-2. `docker compose logs agent` に `registered worker` などの、LiveKit Cloud へ接続したログが出ている
-3. 鉢（ESP32）の電源を入れる。ESP32 がルーム `plant-<id>` に入ると、エージェントが参加する
-4. 「ふたまる」と呼びかけて、植物から話しかけてくれば成功
-5. この PC のブラウザで http://127.0.0.1:8765 を開くと、ダッシュボードが映る（並べる株は `.env` の `DASHBOARD_PLANTS`、既定 `a1,b1`）
+2. `docker compose logs livekit` に `starting LiveKit server` と、`.env` の `LIVEKIT_NODE_IP` の IP が出ている。`docker compose logs agent` に `registered worker` などの、LiveKit サーバーへ接続したログが出ている
+3. 鉢のトークンを作り、ファームの `firmware/sdkconfig.secrets` に書いて書き込む（`firmware/README.md`）
+
+```bash
+docker compose exec agent python -m scripts.issue_token --plant-id a1   # 出てきた文字列が CONFIG_FUTAMARU_TOKEN
+```
+
+   `CONFIG_FUTAMARU_SERVER_URL` は `ws://<LIVEKIT_NODE_IP の値>:7880`（`wss` ではなく `ws`）。LiveKit のキーを変えたら、トークンも作り直す
+
+4. 鉢（ESP32）の電源を入れる。ESP32 がルーム `plant-<id>` に入ると、エージェントが参加する
+5. 「ふたまる」と呼びかけて、植物から話しかけてくれば成功
+6. この PC のブラウザで http://127.0.0.1:8765 を開くと、ダッシュボードが映る（並べる株は `.env` の `DASHBOARD_PLANTS`、既定 `a1,b1`）
 
 ## 6. 止める・作り直す
 
@@ -159,6 +219,9 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 | `tts-init` が `exited (1)` で終わり、`agent` が起動しない | 声のモデルを用意できなかった。`docker compose logs tts-init` を見る。「入れられませんでした」ならインターネット接続か `AIVIS_MODELS` の UUID、「スタイル ID … が見つかりません」なら `AIVIS_SPEAKER` を直す（ログに入っている ID の一覧が出る）。急ぐときは `.env` を `TTS_PROVIDER=openai` にして `docker compose up -d` すれば、OpenAI の声で動く |
 | 植物の声が出ない（aivis のとき） | `docker compose logs tts` にエラーが無いか見る。CPU が足りず遅いときは、ほかのアプリを閉じる |
 | `agent` は `running` なのに、植物が返事をしない | `docker compose logs agent` に `STT` や `LLM` のエラーが無いか、`docker compose logs stt`・`docker compose logs llm` にエラーが無いかを見る。ほかのメンバーが同じ LiveKit のキーで `uv run python -m agent.main dev` を動かしていると、そちらに植物を取られることがあるので止めてもらう |
+| 鉢が LiveKit につながらない（ESP32 のログに接続の失敗が出る） | 鉢と PC が同じ LAN か、`CONFIG_FUTAMARU_SERVER_URL` が `ws://<PC の LAN の IP>:7880` か確かめる。同じ LAN のスマホのブラウザで `http://<PC の LAN の IP>:7880` を開き、`OK` と出なければ 3.5 のネットワークの設定を見直す |
+| 鉢はつながるのに声が届かない・返事が聞こえない | 音声の UDP（7882）が通っていない。`.env` の `LIVEKIT_NODE_IP` が今の PC の IP か、3.5 のファイアウォールの設定（UDP 7882）を確かめる |
+| `docker compose logs livekit` に `secret is too short` | `.env` の `LIVEKIT_API_SECRET` を 32 文字以上にする（3 の `openssl rand -hex 32`） |
 | `agent` がすぐ止まる | `docker compose logs agent` を見る。`環境変数 … が設定されていません` なら `.env` の書き漏れ |
 
 解決しないときは、`docker compose logs` の該当部分を Discord に貼ってください（**キーが含まれていないか確認してから**）。
