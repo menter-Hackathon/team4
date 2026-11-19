@@ -93,12 +93,12 @@ print("ok: 既定では LLM が 0 番、STT が 1 番の GPU を使う")
 PY
 
 # 4. 声の設定が空（.env.example のまま）なら、tts-init は OpenAI の声として何もしない設定になり、
-#    声のスタイル ID は agent と同じ既定（まお / あまあま）になること
+#    声のスタイル ID は agent と同じ既定（らせつん / 標準２）になること
 python3 - <<'PY'
 import json
 env = json.load(open("/tmp/compose.json"))["services"]["tts-init"]["environment"]
 assert env["TTS_PROVIDER"] == "openai", env
-assert env["AIVIS_SPEAKER"] == "888753762", env
+assert env["AIVIS_SPEAKER"] == "893625030", env
 print("ok: 声の設定が空なら tts-init は既定の値で動く")
 PY
 
