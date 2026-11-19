@@ -95,3 +95,13 @@ docker compose up
 - 思考モードは compose で `LLM_REASONING_EFFORT=none` にして切る（Ollama の Gemma 4 は既定で思考し、遅くなるため。#54）
 - まだ確かめていないこと: NVIDIA の GPU で、この圧縮版が 12GB に全部載るか、話し方の質が Mac の版（MLX）と変わらないか。ショーンさんの PC でのリハーサルで確かめる
 
+
+## 2026-11-19 の追加: 声（AivisSpeech）を GPU でも動かせるようにする
+
+返事の遅さ（#39）を測ると、CPU 版の AivisSpeech が 1 文の声を作るのに 0.7〜1.7 秒かかり、いちばん大きな原因だった（ohsawa の Core Ultra 7）。GPU 版（`aivisspeech-engine:nvidia-1.2.0`）は同じ文が 0.16〜0.26 秒だった。
+
+- **`compose.tts-gpu.yaml`**: `tts` を GPU 版にする上書きのファイル。`.env` の `COMPOSE_FILE=compose.yaml:compose.tts-gpu.yaml` で使う。`compose.yaml` は CPU 版のまま（GPU に空きの無い PC でも、今までどおり動くように）
+- **GPU のメモリ**（RTX 5060 8GB、2026-11-19）: LLM 約 4.75GB、STT 約 2.35GB、声（GPU 版）約 1.4GB、その他約 0.4GB で、合わせると 8GB を超える
+- **`DOCKER_STT_COMPUTE_TYPE`**: Speaches の `WHISPER__COMPUTE_TYPE`。`int8_float16` にすると STT が約 1GB 減り（7.5GB → 6.5GB）、聞き取り（「二丸、こんにちは」）と速さ（0.34 秒）は変わらなかった。これで 3 つ合わせて 7.6〜7.8GB に収まった
+- 結果: 話し終わりから植物が喋り始めるまで、約 3.3〜3.5 秒 → 約 2.1〜2.3 秒（Cloudflare Tunnel 越し。1 文ずつ声にする #110 と、話し終わりの判定の短縮を含む）
+- 残り 0.35GB ほどしか空きが無いので、LLM の文脈の長さ（8192）や同時に扱う数（2）を増やすときは、メモリが足りるか確かめる
