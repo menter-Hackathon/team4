@@ -174,7 +174,11 @@ async def handler(ws):
     start = json.loads(await ws.recv())
     codec = start.get("codec", "pcm16")
     frame_bytes = 320 if codec == "mulaw" else 640
-    await ws.send(json.dumps({"type": "ready", "sample_rate": 16000, "codec": codec, "frame_bytes": frame_bytes}))
+    await ws.send(
+        json.dumps(
+            {"type": "ready", "sample_rate": 16000, "codec": codec, "frame_bytes": frame_bytes}
+        )
+    )
     async for message in ws:
         if isinstance(message, bytes):
             await ws.send(message)  # マイクの音をそのまま返す
