@@ -3,13 +3,17 @@
   ふたまるのダッシュボード（仕様 §6.6、#59）。scripts/dashboard.py が返す HTML 1 枚。
   「ふたまる診断の結果画面」: 育てた人ごとに、どんな性格に育ったかを一発で見せる（設計メモ 2026-11-20）。
   しくみ:
-    1. 数秒ごとに /api/state（JSON）を読みに行く
-    2. 株ごとにカードを作り、上から
+    1. 数秒ごとに /api/state（JSON）を読みに行き、Alpine.js のデータ（plants）に入れる
+    2. 画面の形は下の HTML にそのまま書いてあり、Alpine.js がデータに合わせて中身を入れ替える
+       （x-for: くり返す、x-if: 出す・出さない、x-text: 文字を入れる、:class・:style: 見た目を変える）
+       株ごとのカードは上から
          結果（イラスト・タイプ名・キャッチコピー）→ せいかく（4 軸のゲージ）→ 説明文
          → こんなふうに育てられた（育て方の記録）→ くわしく（成長曲線・覚えていること・前回の会話）
-       を描く
-    3. 2 回目からは、部品を作り直さずに中身だけ入れ替える（ちらつかせないため）
-  記憶や要約は LLM が作った文なので、HTML としてではなく必ず textContent で入れる（タグを実行させない）。
+    3. Alpine.js は変わったところだけを書き換えるので、3 秒ごとに読み直してもちらつかない
+    4. 成長曲線のグラフだけは Chart.js が描く（Alpine.js の外で、JS から更新する）
+  なぜ Alpine.js か: ビルドが要らず（CDN から読むだけ）、Docker もデモの手順も変えずに、
+    「要素を 1 つずつ JS で作る」書き方から「HTML に書く」書き方にできるため（2026-11-20）。
+  記憶や要約は LLM が作った文なので、必ず x-text で入れる（HTML として入れる x-html は使わない。タグを実行させない）。
   色・線・丸ゴシックは、ちゃむさんのイラスト（クリーム色の鉢・茶色の太い線）に合わせている。
 -->
 <html lang="ja">
@@ -37,7 +41,7 @@
   }
   * { box-sizing: border-box; }
   /* hidden を付けた部品は必ず隠す（display: grid などの指定より優先させる） */
-  [hidden] { display: none !important; }
+  [hidden], [x-cloak] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); line-height: 1.7; }
   header {
     display: flex; align-items: baseline; gap: 6px 16px; flex-wrap: wrap;
@@ -131,11 +135,109 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>ふたまるたちの育ったすがた</h1>
-  <span id="status" class="status">読み込み中…</span>
-</header>
-<main id="plants"></main>
+<div x-data="dashboard">
+  <header>
+    <h1>ふたまるたちの育ったすがた</h1>
+    <span id="status" class="status" :class="{ error }" x-text="status">読み込み中…</span>
+  </header>
+
+  <main id="plants" x-cloak>
+    <!-- 株 1 つぶんのカード。:key で株を見分けるので、読み直しても同じカードが使い回される -->
+    <template x-for="c in cards" :key="c.plant.plant_id">
+      <section class="card" :style="accent(c.index)">
+        <!-- 上の帯: 株の名前とタブ（お客さん・人ごと） -->
+        <div class="bar">
+          <h2 x-text="c.plant.found ? `${c.plant.name}（${c.plant.plant_id}）` : c.plant.plant_id"></h2>
+          <div class="tabs">
+            <template x-for="v in (c.plant.views || [])" :key="v.key">
+              <button type="button" :class="{ on: v.key === selected[c.plant.plant_id] }"
+                      @click="pick(c.plant, v.key)" x-text="v.person_id === null ? 'お客さん' : v.label"></button>
+            </template>
+          </div>
+        </div>
+
+        <template x-if="!c.plant.found">
+          <div class="notfound">この株はまだ DB にありません（一度起こすと作られます）</div>
+        </template>
+
+        <template x-if="c.plant.found">
+          <div>
+            <!-- 1. 結果 -->
+            <div class="result">
+              <div class="owner" x-text="owner(c.view)"></div>
+              <div class="lead" x-text="`${c.view.days} 日育てた結果…`"></div>
+              <div class="pic">
+                <!-- イラストがあれば画像、無ければ絵文字。src はサーバーが返した /types/<英語名>.png だけ -->
+                <template x-if="c.view.type.image"><img :src="c.view.type.image" :alt="c.view.type.name"></template>
+                <template x-if="!c.view.type.image"><span x-text="c.view.type.emoji"></span></template>
+              </div>
+              <div class="tname" x-text="c.view.type.name"></div>
+              <div class="catch" x-text="c.view.type.description"></div>
+            </div>
+
+            <div class="body">
+              <!-- 2. せいかく（4 軸のゲージ。真ん中 = 0.5 から、育った側へ棒が伸びる） -->
+              <section>
+                <h3>せいかく</h3>
+                <template x-for="a in axes" :key="a.key">
+                  <div class="axis">
+                    <span class="hi" :class="{ on: gauge(c.view.traits[a.key]).hi }" x-text="a.hi"></span>
+                    <div class="track"><i :style="gauge(c.view.traits[a.key]).style"></i></div>
+                    <span class="lo" :class="{ on: gauge(c.view.traits[a.key]).lo }" x-text="a.lo"></span>
+                  </div>
+                </template>
+              </section>
+
+              <!-- 3. 説明文 -->
+              <p class="detail" x-text="c.view.type.detail"></p>
+
+              <!-- 4. こんなふうに育てられた（DB にある事実だけ。原因のようには書かない） -->
+              <section>
+                <h3>こんなふうに育てられた</h3>
+                <template x-if="c.view.growth.talks === 0">
+                  <div class="empty">まだお話ししていません</div>
+                </template>
+                <template x-if="c.view.growth.talks > 0">
+                  <div>
+                    <div class="stats">
+                      <div><b x-text="c.view.growth.talks"></b><small>回お話しした</small></div>
+                      <div><b x-text="c.view.growth.waterings"></b><small>回お水をもらった</small></div>
+                      <div><b x-text="c.view.growth.time_band"></b><small>によく話しかけてくれた</small></div>
+                    </div>
+                    <ul class="facts">
+                      <template x-for="f in facts(c.view.growth)" :key="f"><li x-text="f"></li></template>
+                    </ul>
+                  </div>
+                </template>
+              </section>
+
+              <!-- 5. くわしく（今までのダッシュボードにあった情報） -->
+              <section class="more">
+                <h3>くわしく</h3>
+                <!-- 成長曲線。Chart.js が描く（drawChart） -->
+                <div class="chart"><canvas :id="`chart-${c.plant.plant_id}`"></canvas></div>
+                <h3>覚えていること（大事で新しい順・上位10件）</h3>
+                <template x-if="c.view.memories.length === 0">
+                  <div class="empty">まだ何も覚えていません</div>
+                </template>
+                <ol class="mem" x-show="c.view.memories.length > 0">
+                  <template x-for="(m, i) in c.view.memories" :key="i">
+                    <li><span x-text="m.content"></span><span class="tag" x-text="memoryTag(m)"></span></li>
+                  </template>
+                </ol>
+                <div class="meta">
+                  <template x-for="row in metaRows(c.view)" :key="row[0]">
+                    <div><span class="k" x-text="row[0]"></span><span x-text="row[1]"></span></div>
+                  </template>
+                </div>
+              </section>
+            </div>
+          </div>
+        </template>
+      </section>
+    </template>
+  </main>
+</div>
 
 <script>
 // 何秒ごとに読み直すか。デモで会話して眠らせた直後にゲージが動くのを見せるため短めにする
@@ -156,76 +258,149 @@ const ACCENTS = [
   { k: "#3f8f6c", kl: "#e3f2ea" },
 ];
 
-// 株ごとの画面の部品と、選んでいる人（タブ）を覚えておく。{ plant_id: { card, line, selected, ... } }
-const cards = {};
+// 成長曲線のグラフ（Chart.js）。{ plant_id: Chart }
+// Alpine.js のデータには入れない。Alpine.js が中身を見張るしかけ（Proxy）と Chart.js がぶつかって壊れるため
+const charts = {};
 
-// 小さな要素を作る関数。文字は textContent で入れる（HTML として解釈させない）
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
+// 最初に開くタブを決める。views は先頭がお客さん、続いて登録された人（dashboard.py の plant_state）。
+// 例: [お客さん, ショーン] → ショーンのタブ、[お客さん] や [お客さん, たろう, はなこ] → お客さんのタブ
+function defaultView(views) {
+  return views.length === 2 ? views[1].key : "guest";
 }
 
-// 1 株ぶんのカードを最初に 1 回だけ作る
-function createCard(plant, index) {
-  const accent = ACCENTS[index % ACCENTS.length];
-  const card = el("section", "card");
-  card.style.setProperty("--k", accent.k);
-  card.style.setProperty("--kl", accent.kl);
+// Alpine.js が動き出すときに、画面のデータと関数（x-data="dashboard"）を登録する
+document.addEventListener("alpine:init", () => {
+  Alpine.data("dashboard", () => ({
+    axes: AXES,
+    plants: [],      // /api/state の plants をそのまま入れる
+    selected: {},    // 株ごとに選んでいるタブ。{ plant_id: "guest" | "person-1" ... }
+    picked: {},      // 株ごとに、タブを押したことがあるか（押したら自動で切り替えない）
+    status: "読み込み中…",
+    error: false,
 
-  // 上の帯: 株の名前とタブ（お客さん・人ごと）
-  const bar = el("div", "bar");
-  const title = el("h2");
-  const tabs = el("div", "tabs");
-  bar.append(title, tabs);
+    // 画面ができたら 1 回読み、そのあと REFRESH_MS ごとに読み直す
+    init() {
+      this.refresh();
+      setInterval(() => this.refresh(), REFRESH_MS);
+    },
 
-  // 1. 結果
-  const result = el("div", "result");
-  const owner = el("div", "owner"), lead = el("div", "lead");
-  const pic = el("div", "pic");
-  const tname = el("div", "tname"), ctch = el("div", "catch");
-  result.append(owner, lead, pic, tname, ctch);
+    // /api/state を読んで画面のデータを入れ替える。失敗しても次の回にまた試す
+    async refresh() {
+      try {
+        const res = await fetch("/api/state", { cache: "no-store" });
+        const state = await res.json();
+        if (state.error) throw new Error(state.error);
+        for (const plant of state.plants) {
+          if (!plant.found) continue;
+          const id = plant.plant_id;
+          // まだ誰もタブを押していない間は、登録されている人が 1 人だけの株ならその人のタブ、
+          // それ以外はお客さんのタブ。デモでは 1 株に 1 人（a1 はショーン、b1 はちゃむ）が育てるので、
+          // 開いた直後からその人が育てた結果を見せるため。開いたあとに人が登録されたときも自動で切り替える
+          if (!this.picked[id]) this.selected[id] = defaultView(plant.views);
+          // 選んでいた人がいなくなっていたら（DB を替えたなど）、最初のタブに戻す
+          if (!plant.views.some(v => v.key === this.selected[id])) this.selected[id] = defaultView(plant.views);
+        }
+        this.plants = state.plants;
+        this.error = false;
+        this.status = `最終更新 ${new Date().toLocaleTimeString("ja-JP")}（${REFRESH_MS / 1000} 秒ごとに更新）`;
+        // 画面（canvas）が書き換わるのを待ってから、グラフを描き直す
+        await this.$nextTick();
+        this.plants.forEach(p => this.drawChart(p));
+      } catch (e) {
+        this.error = true;
+        this.status = `読み込めません: ${e.message}`;
+      }
+    },
 
-  const body = el("div", "body");
-  // 2. せいかく。ゲージは最初に 4 本作り、あとは棒の位置と色だけ変える
-  const traits = el("section");
-  traits.append(el("h3", null, "せいかく"));
-  const gauges = AXES.map(a => {
-    const row = el("div", "axis");
-    const hi = el("span", "hi", a.hi), lo = el("span", "lo", a.lo);
-    const track = el("div", "track"), fill = el("i");
-    track.append(fill);
-    row.append(hi, track, lo);
-    traits.append(row);
-    return { hi, lo, fill };
-  });
-  // 3. 説明文
-  const detail = el("p", "detail");
-  // 4. こんなふうに育てられた
-  const growth = el("section");
-  growth.append(el("h3", null, "こんなふうに育てられた"));
-  const growthBody = el("div");
-  growth.append(growthBody);
-  // 5. くわしく（今までのダッシュボードにあった情報）
-  const more = el("section", "more");
-  more.append(el("h3", null, "くわしく"));
-  const chartBox = el("div", "chart"), lineCanvas = el("canvas");
-  chartBox.append(lineCanvas);
-  more.append(chartBox);
-  more.append(el("h3", null, "覚えていること（大事で新しい順・上位10件）"));
-  const mem = el("div");
-  more.append(mem);
-  const meta = el("div", "meta");
-  more.append(meta);
+    // カードの一覧。株ごとに、今選んでいるタブの中身（view）を添える
+    get cards() {
+      return this.plants.map((plant, index) => ({
+        plant, index,
+        view: plant.found ? plant.views.find(v => v.key === this.selected[plant.plant_id]) : null,
+      }));
+    },
 
-  body.append(traits, detail, growth, more);
-  const notfound = el("div", "notfound");
-  card.append(bar, result, body, notfound);
-  document.getElementById("plants").append(card);
+    // タブを押した。それ以降は自動で切り替えない（見たいタブを勝手に変えないため）
+    pick(plant, key) {
+      this.selected[plant.plant_id] = key;
+      this.picked[plant.plant_id] = true;
+      this.$nextTick(() => this.drawChart(plant));
+    },
 
-  // 成長曲線: 会話（振り返り）ごとの 4 軸の値
-  const line = new Chart(lineCanvas, {
+    // 株ごとの差し色（CSS の --k・--kl）
+    accent(index) {
+      const a = ACCENTS[index % ACCENTS.length];
+      return `--k: ${a.k}; --kl: ${a.kl}`;
+    },
+
+    // 「〇〇さんのふたまる」。お客さんは「お客さんのふたまる」
+    owner(view) {
+      return view.person_id === null ? "お客さんのふたまる" : `${view.label}さんのふたまる`;
+    },
+
+    // ゲージ 1 本ぶん。0.5 から値の側へ棒を伸ばし、伸びた側の名前に色を付ける。
+    // 例: 0.8 → 真ん中から右へ 30%、hi に色。0.5 ちょうどはどちらにも色を付けない
+    gauge(value) {
+      const v = Math.min(1, Math.max(0, value));
+      const left = Math.min(v, 0.5), width = Math.abs(v - 0.5);
+      return { style: `left: ${left * 100}%; width: ${width * 100}%`, hi: v > 0.505, lo: v < 0.495 };
+    },
+
+    // 「こんなふうに育てられた」の箇条書き。DB にある事実だけを並べる（原因のようには書かない）
+    facts(growth) {
+      const list = [];
+      if (growth.interval_days !== null) {
+        list.push(growth.interval_days <= 1.5
+          ? "ほぼ毎日、会いに来てくれた"
+          : `だいたい ${Math.round(growth.interval_days)} 日おきに会いに来てくれた`);
+      }
+      list.push(`1 回のお話で、平均 ${growth.avg_turns} 回話しかけてくれた`);
+      if (growth.biggest_change) {
+        const axis = AXES.find(a => a.key === growth.biggest_change.trait);
+        const side = growth.biggest_change.delta > 0 ? axis.hi : axis.lo;
+        list.push(`いちばん育ったのは「${side}」のところ`);
+      }
+      return list;
+    },
+
+    // 覚えていることの横に出す、種類と重要度（例: 「好み・重要度 0.8」）
+    memoryTag(m) {
+      return `${KIND[m.kind] || m.kind}・重要度 ${m.importance}`;
+    },
+
+    // くわしくの下の行（前回の会話・話し方・振り返った回数・今の値）
+    metaRows(view) {
+      return [
+        ["前回の会話:", view.last_summary || "（まだありません）"],
+        ["話し方:", DIALECT[view.dialect] || view.dialect],
+        ["振り返った会話:", `${view.history.length - 1} 回`],
+        ["今の値:", AXES.map(a => `${a.label} ${view.traits[a.key].toFixed(2)}`).join("　")],
+      ];
+    },
+
+    // 成長曲線を描く。横軸は「初期」「1回目」「2回目」…（振り返りのたびに 1 点増える）
+    drawChart(plant) {
+      if (!plant.found) return;
+      const canvas = document.getElementById(`chart-${plant.plant_id}`);
+      if (!canvas) return;
+      const view = plant.views.find(v => v.key === this.selected[plant.plant_id]);
+      // canvas が作り直されていたら（株が一度消えて戻ったなど）、グラフも作り直す
+      if (charts[plant.plant_id] && charts[plant.plant_id].canvas !== canvas) {
+        charts[plant.plant_id].destroy();
+        delete charts[plant.plant_id];
+      }
+      const chart = charts[plant.plant_id] || (charts[plant.plant_id] = newChart(canvas));
+      // .map で作った普通の配列を渡す（Alpine.js の Proxy を Chart.js に渡さない）
+      chart.data.labels = view.history.map((h, i) => (i === 0 ? "初期" : `${i}回目`));
+      AXES.forEach((a, i) => { chart.data.datasets[i].data = view.history.map(h => h.traits[a.key]); });
+      chart.update();
+    },
+  }));
+});
+
+// 成長曲線のグラフを 1 つ作る（中身は drawChart で入れる）
+function newChart(canvas) {
+  return new Chart(canvas, {
     type: "line",
     data: { labels: [], datasets: AXES.map(a => ({
       label: a.label, data: [], borderColor: a.color, backgroundColor: a.color,
@@ -240,182 +415,10 @@ function createCard(plant, index) {
                      title: { display: true, text: "会話の回数", color: "#8a6a55" } } },
     },
   });
-  return { card, title, tabs, result, owner, lead, pic, tname, ctch, body, gauges, detail,
-           growthBody, mem, meta, notfound, line, selected: "guest" };
 }
-
-// タイプのイラスト。あれば画像、無ければ絵文字。
-// 3 秒ごとに画像を作り直すとちらつくので、表示する中身が変わったときだけ入れ替える
-function renderPic(c, type) {
-  const shown = type.image || type.emoji;
-  if (c.pic.dataset.shown === shown) return;
-  c.pic.dataset.shown = shown;
-  if (type.image) {
-    const img = el("img");
-    img.src = type.image;  // サーバーが返した /types/<英語名>.png だけを使う
-    img.alt = type.name;
-    c.pic.replaceChildren(img);
-  } else {
-    c.pic.textContent = type.emoji;
-  }
-}
-
-// ゲージ 1 本。0.5 から値の側へ棒を伸ばし、伸びた側の名前に色を付ける。
-// 例: 0.8 → 真ん中から右へ 30%、「おしゃべり」に色。0.5 ちょうどはどちらにも色を付けない
-function renderGauge(g, value) {
-  const v = Math.min(1, Math.max(0, value));
-  const left = Math.min(v, 0.5), width = Math.abs(v - 0.5);
-  g.fill.style.left = `${left * 100}%`;
-  g.fill.style.width = `${width * 100}%`;
-  g.hi.classList.toggle("on", v > 0.505);
-  g.lo.classList.toggle("on", v < 0.495);
-}
-
-// 「こんなふうに育てられた」。DB にある事実だけを並べる（原因のようには書かない、設計メモ 2026-11-20）
-function renderGrowth(c, growth) {
-  c.growthBody.replaceChildren();
-  if (growth.talks === 0) {
-    c.growthBody.append(el("div", "empty", "まだお話ししていません"));
-    return;
-  }
-  const stats = el("div", "stats");
-  const tile = (value, label) => {
-    const d = el("div");
-    d.append(el("b", null, value), el("small", null, label));
-    return d;
-  };
-  stats.append(
-    tile(String(growth.talks), "回お話しした"),
-    tile(String(growth.waterings), "回お水をもらった"),
-    tile(growth.time_band, "によく話しかけてくれた"),
-  );
-  const facts = el("ul", "facts");
-  if (growth.interval_days !== null) {
-    facts.append(el("li", null, growth.interval_days <= 1.5
-      ? "ほぼ毎日、会いに来てくれた"
-      : `だいたい ${Math.round(growth.interval_days)} 日おきに会いに来てくれた`));
-  }
-  facts.append(el("li", null, `1 回のお話で、平均 ${growth.avg_turns} 回話しかけてくれた`));
-  if (growth.biggest_change) {
-    const axis = AXES.find(a => a.key === growth.biggest_change.trait);
-    const side = growth.biggest_change.delta > 0 ? axis.hi : axis.lo;
-    facts.append(el("li", null, `いちばん育ったのは「${side}」のところ`));
-  }
-  c.growthBody.append(stats, facts);
-}
-
-// 選んでいる人の内容をカードに入れる
-function renderView(c, plant, view) {
-  // 1. 結果
-  c.owner.textContent = view.person_id === null ? "お客さんのふたまる" : `${view.label}さんのふたまる`;
-  c.lead.textContent = `${view.days} 日育てた結果…`;
-  renderPic(c, view.type);
-  c.tname.textContent = view.type.name;
-  c.ctch.textContent = view.type.description;
-  // 2. せいかく
-  AXES.forEach((a, i) => renderGauge(c.gauges[i], view.traits[a.key]));
-  // 3. 説明文
-  c.detail.textContent = view.type.detail;
-  // 4. こんなふうに育てられた
-  renderGrowth(c, view.growth);
-  // 5. くわしく: 成長曲線。横軸は「初期」「1回目」「2回目」…（振り返りのたびに 1 点増える）
-  c.line.data.labels = view.history.map((h, i) => (i === 0 ? "初期" : `${i}回目`));
-  AXES.forEach((a, i) => { c.line.data.datasets[i].data = view.history.map(h => h.traits[a.key]); });
-  c.line.update();
-  // 覚えていること
-  c.mem.replaceChildren();
-  if (view.memories.length === 0) {
-    c.mem.append(el("div", "empty", "まだ何も覚えていません"));
-  } else {
-    const ol = el("ol", "mem");
-    for (const m of view.memories) {
-      const li = el("li", null, m.content);
-      li.append(el("span", "tag", `${KIND[m.kind] || m.kind}・重要度 ${m.importance}`));
-      ol.append(li);
-    }
-    c.mem.append(ol);
-  }
-  // 前回の会話・方言・振り返った回数・今の値
-  c.meta.replaceChildren();
-  const row = (k, v) => {
-    const d = el("div");
-    d.append(el("span", "k", k), document.createTextNode(v));
-    return d;
-  };
-  c.meta.append(
-    row("前回の会話:", view.last_summary || "（まだありません）"),
-    row("話し方:", DIALECT[view.dialect] || view.dialect),
-    row("振り返った会話:", `${view.history.length - 1} 回`),
-    row("今の値:", AXES.map(a => `${a.label} ${view.traits[a.key].toFixed(2)}`).join("　")),
-  );
-}
-
-// 最初に開くタブを決める。views は先頭がお客さん、続いて登録された人（dashboard.py の plant_state）。
-// 例: [お客さん, ショーン] → ショーンのタブ、[お客さん] や [お客さん, たろう, はなこ] → お客さんのタブ
-function defaultView(views) {
-  return views.length === 2 ? views[1].key : "guest";
-}
-
-// 株 1 つぶんを描く（タブ = お客さんと、知っている人）
-function renderPlant(plant, index) {
-  const c = cards[plant.plant_id] || (cards[plant.plant_id] = createCard(plant, index));
-  if (!plant.found) {
-    c.title.textContent = plant.plant_id;
-    c.notfound.textContent = "この株はまだ DB にありません（一度起こすと作られます）";
-    c.result.hidden = true;
-    c.body.hidden = true;
-    c.tabs.replaceChildren();
-    c.tabKeys = "";
-    return;
-  }
-  c.notfound.textContent = "";
-  c.result.hidden = false;
-  c.body.hidden = false;
-  c.title.textContent = `${plant.name}（${plant.plant_id}）`;
-  const views = plant.views;
-  // 最初に開くタブ。まだ誰もタブを押していない間は、登録されている人が 1 人だけの株なら
-  // その人のタブ、それ以外はお客さん（株の性格）のタブにする。
-  // デモでは「a1 はショーンさん、b1 はちゃむさんのふたまる」と 1 株に 1 人が育てるので、
-  // 開いた直後からその人が育てた結果を見せるため。
-  // 開いたあとに人が登録されたときも、タブを押していなければ自動で切り替える
-  if (!c.picked) c.selected = defaultView(views);
-  // 選んでいた人がいなくなっていたら（DB を替えたなど）、最初のタブに戻す
-  if (!views.some(v => v.key === c.selected)) c.selected = defaultView(views);
-  c.plant = plant;  // タブを押したときは、最後に読んだ内容で描き直す
-  // タブのボタンは、人の顔ぶれが変わったときだけ作り直す（毎回作り直すと押した瞬間に消えることがある）
-  const keys = views.map(v => v.key + ":" + v.label).join("|");
-  if (c.tabKeys !== keys) {
-    c.tabKeys = keys;
-    c.tabs.replaceChildren(...views.map(v => {
-      const b = el("button", null, v.person_id === null ? "お客さん" : v.label);
-      b.dataset.key = v.key;
-      // 押したら、それ以降は自動で切り替えない（見たいタブを勝手に変えないため）
-      b.onclick = () => { c.selected = v.key; c.picked = true; renderPlant(c.plant, index); };
-      return b;
-    }));
-  }
-  for (const b of c.tabs.children) b.classList.toggle("on", b.dataset.key === c.selected);
-  renderView(c, plant, views.find(v => v.key === c.selected));
-}
-
-// /api/state を読んで画面を描き直す。失敗しても次の回にまた試す
-async function refresh() {
-  const status = document.getElementById("status");
-  try {
-    const res = await fetch("/api/state", { cache: "no-store" });
-    const state = await res.json();
-    if (state.error) throw new Error(state.error);
-    state.plants.forEach(renderPlant);
-    status.className = "status";
-    status.textContent = `最終更新 ${new Date().toLocaleTimeString("ja-JP")}（${REFRESH_MS / 1000} 秒ごとに更新）`;
-  } catch (e) {
-    status.className = "status error";
-    status.textContent = `読み込めません: ${e.message}`;
-  }
-}
-
-refresh();
-setInterval(refresh, REFRESH_MS);
 </script>
+<!-- Alpine.js（画面を HTML に書くためのライブラリ。外部の技術。README に記載）。版を固定する。
+     上の script で alpine:init を待ち受けてから読むよう、最後に defer で読む -->
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </body>
 </html>

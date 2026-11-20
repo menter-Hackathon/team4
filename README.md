@@ -194,7 +194,7 @@ uv run python -m scripts.dashboard --plants a1,b1                               
 uv run python -m scripts.dashboard --db data/sim.db --plants sample-a,sample-b       # 早送りデモの結果
 ```
 
-ブラウザで http://127.0.0.1:8765 を開くと、2株の性格のタイプ（「〇〇ふたまる」の16タイプ、#64）・レーダーチャート・成長曲線・覚えていることが並びます。タイプのイラストは `scripts/dashboard_assets/types/` に置きます（ファイル名はそのフォルダの README を参照）。3 秒ごとに読み直すので、会話して眠らせると数秒後にグラフが動きます。DB は読むだけなので、エージェントと同時に動かして大丈夫です。会話の記憶が見えるため、この PC からしか開けません（仕様 §6.6）。グラフの描画には [Chart.js](https://www.chartjs.org/)（MIT ライセンス）を CDN から読み込んでいます。
+ブラウザで http://127.0.0.1:8765 を開くと、2株の性格のタイプ（「〇〇ふたまる」の16タイプ、#64）・性格のゲージ・育て方の記録・成長曲線・覚えていることが並びます。タイプのイラストは `scripts/dashboard_assets/types/` に置きます（ファイル名はそのフォルダの README を参照）。3 秒ごとに読み直すので、会話して眠らせると数秒後にグラフが動きます。DB は読むだけなので、エージェントと同時に動かして大丈夫です。会話の記憶が見えるため、この PC からしか開けません（仕様 §6.6）。グラフの描画には [Chart.js](https://www.chartjs.org/)（MIT ライセンス）、画面の組み立てには [Alpine.js](https://alpinejs.dev/)（MIT ライセンス）を CDN から読み込んでいます。
 
 人ごとの機能が入る前の古い DB だと「DB を読めません: no such column: person_id」と出ます。エージェントを一度起動すると DB が新しい形に直り、表示されるようになります。
 
