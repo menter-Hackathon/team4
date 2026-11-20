@@ -1,4 +1,5 @@
 import json
+import socket
 import sqlite3
 import threading
 import urllib.error
@@ -163,6 +164,73 @@ def test_server_host_can_be_changed_for_docker(db):
         assert server.server_address[0] == "0.0.0.0"
     finally:
         server.server_close()
+
+
+# --- 起動を楽にするオプション（--day・--open・短いコマンド） ---
+def test_day_option_picks_the_demo_db():
+    args = dashboard.parse_args(["--day", "30"])
+    assert args.db == "data/demo-day30.db"
+    assert args.plants == "a1,b1"  # 省略したら a1,b1
+
+
+def test_db_defaults_to_the_live_db():
+    assert dashboard.parse_args([]).db == "data/futamaru.db"
+
+
+def test_day_and_db_cannot_be_used_together():
+    with pytest.raises(SystemExit):
+        dashboard.parse_args(["--day", "1", "--db", "x.db"])
+
+
+def test_short_command_name_runs_the_dashboard():
+    # uv run futamaru-dashboard で起動できる（pyproject.toml の [project.scripts]）
+    import tomllib
+    from pathlib import Path
+
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["scripts"]["futamaru-dashboard"] == "scripts.dashboard:main"
+
+
+def test_wsl_opens_the_windows_browser():
+    url = "http://127.0.0.1:8765"
+    # WSL の中では Python からブラウザを開けないので、Windows の explorer.exe に開かせる
+    assert dashboard.browser_command(url, "5.15.153.1-microsoft-standard-WSL2") == [
+        "explorer.exe",
+        url,
+    ]
+    # Mac・Windows・ふつうの Linux は Python の webbrowser に任せる（None）
+    assert dashboard.browser_command(url, "24.1.0") is None
+
+
+def test_busy_port_gives_a_short_message(db, capsys):
+    busy = socket.socket()
+    busy.bind((HOST, 0))  # 空いている番号を 1 つ使っておく
+    busy.listen()
+    try:
+        with pytest.raises(SystemExit) as e:
+            dashboard.main(["--db", db, "--port", str(busy.getsockname()[1])])
+    finally:
+        busy.close()
+    assert e.value.code == 1
+    assert "もう使われています" in capsys.readouterr().out
+
+
+def test_open_flag_opens_the_browser(db, monkeypatch):
+    opened = []
+    monkeypatch.setattr(dashboard, "open_browser", opened.append)
+
+    class FakeServer:
+        server_address = (HOST, 8765)
+
+        def serve_forever(self):
+            raise KeyboardInterrupt  # すぐに Ctrl+C されたことにする
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(dashboard, "make_server", lambda *a, **k: FakeServer())
+    dashboard.main(["--db", db, "--open"])
+    assert opened == ["http://127.0.0.1:8765"]
 
 
 def test_views_include_the_plant_type(db, monkeypatch, tmp_path):

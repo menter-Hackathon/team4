@@ -11,6 +11,10 @@ dependencies = [
     "python-dotenv",
 ]
 
+# 短い名前のコマンド。uv run futamaru-dashboard --day 30 --open のように使う（README の「ダッシュボード」）
+[project.scripts]
+futamaru-dashboard = "scripts.dashboard:main"
+
 [dependency-groups]
 dev = ["pytest", "pytest-asyncio"]
 

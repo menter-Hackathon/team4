@@ -1,6 +1,8 @@
 """性格・成長・記憶を見せるダッシュボード（仕様 §6.6、#59）。
 
-uv run python -m scripts.dashboard --db data/futamaru.db --plants a1,b1
+uv run futamaru-dashboard                 # 本番の DB（data/futamaru.db）の a1,b1
+uv run futamaru-dashboard --day 30 --open # 30 日目のデモ用 DB。ブラウザも開く
+（uv run python -m scripts.dashboard ... と同じ。短い名前は pyproject.toml の [project.scripts]）
 → ブラウザで http://127.0.0.1:8765 を開く
 
 しくみ:
@@ -19,9 +21,13 @@ Docker で動かすときだけ、コンテナの中では --host 0.0.0.0 で待
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import logging
+import platform
 import sqlite3
+import subprocess
+import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -284,15 +290,34 @@ def make_server(
     return ThreadingHTTPServer((host, port), make_handler(db_path, plant_ids))
 
 
-def main(argv: list[str] | None = None) -> None:
+# 本番の DB と、発表用のデモ DB（docs/demo-day.md）。--day 30 なら data/demo-day30.db
+LIVE_DB = "data/futamaru.db"
+DEMO_DAYS = (1, 5, 30)
+DEMO_DB = "data/demo-day{day}.db"
+# 並べる株の既定。デモでは a1 がショーンさん、b1 がちゃむさんのふたまる（compose.yaml の既定と同じ）
+DEFAULT_PLANTS = "a1,b1"
+
+
+def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """コマンドの引数を読む。--day を指定したら、--db の代わりにデモ用 DB のパスを入れて返す。
+
+    例: ["--day", "30"] → db="data/demo-day30.db", plants="a1,b1"
+        []              → db="data/futamaru.db"（本番の DB）
+    --day と --db は一緒に使えない（どちらの DB か分からなくなるため。argparse がエラーで終わる）
+    """
     parser = argparse.ArgumentParser(description="ふたまるの性格・成長・記憶を見せるダッシュボード")
-    parser.add_argument(
-        "--db", default="data/futamaru.db", help="読む DB（既定: data/futamaru.db）"
+    which = parser.add_mutually_exclusive_group()  # この中の引数は、どれか 1 つだけ
+    which.add_argument("--db", help=f"読む DB（既定: {LIVE_DB}）")
+    which.add_argument(
+        "--day",
+        type=int,
+        choices=DEMO_DAYS,
+        help="発表用のデモ DB を日数で選ぶ（1・5・30。data/demo-day<日数>.db を読む）",
     )
     parser.add_argument(
         "--plants",
-        required=True,
-        help="並べる株の plant_id をカンマ区切りで（例: a1,b1。simulate.py なら sample-a,sample-b）",
+        default=DEFAULT_PLANTS,
+        help=f"並べる株の plant_id をカンマ区切りで（既定: {DEFAULT_PLANTS}。simulate.py なら sample-a,sample-b）",
     )
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT, help=f"待ち受けるポート（既定: {DEFAULT_PORT}）"
@@ -302,16 +327,66 @@ def main(argv: list[str] | None = None) -> None:
         default=HOST,
         help=f"待ち受けるアドレス（既定: {HOST}。Docker のコンテナの中でだけ 0.0.0.0 にする）",
     )
+    parser.add_argument(
+        "--open", action="store_true", help="起動したらブラウザで開く（Docker の中では使わない）"
+    )
     args = parser.parse_args(argv)
+    if args.day is not None:
+        args.db = DEMO_DB.format(day=args.day)
+    elif args.db is None:
+        args.db = LIVE_DB
+    return args
+
+
+def browser_command(url: str, release: str) -> list[str] | None:
+    """ブラウザを開くのに使うコマンド。Python の webbrowser に任せてよいなら None。
+
+    release は OS のバージョンの文字列（platform.release()）。
+    WSL（Windows の中の Linux。発表の PC）だと release に "microsoft" が入る。
+    WSL の中の Python からは Windows のブラウザを開けないので、Windows の explorer.exe に URL を渡して開かせる。
+    例: "5.15.153.1-microsoft-standard-WSL2" → ["explorer.exe", url]、Mac の "24.1.0" → None
+    """
+    if "microsoft" in release.lower():
+        return ["explorer.exe", url]
+    return None
+
+
+def open_browser(url: str) -> None:
+    """url をブラウザで開く（--open のとき）。Mac・Windows・WSL のどれでも開けるようにする。"""
+    command = browser_command(url, platform.release())
+    if command:
+        subprocess.Popen(command)  # 開き終わるのは待たない
+    else:
+        webbrowser.open(url)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
     plant_ids = [p.strip() for p in args.plants.split(",") if p.strip()]
     # DB がまだ無くても起動はする（エージェントが後から作ることがあるため）。ただし理由がわかるように知らせる
     if not Path(args.db).exists():
         print(f"注意: DB がまだありません: {args.db}")
         print("  早送りデモなら先に scripts.simulate を実行してください（LLM が必要）。")
         print("  本番の DB なら、エージェントを起動して一度起こすと作られます。")
-    server = make_server(args.db, plant_ids, args.port, args.host)
+    try:
+        server = make_server(args.db, plant_ids, args.port, args.host)
+    except OSError as e:
+        # ポートが使われている。たいていは、ダッシュボードをもう起動している（Docker の dashboard も含む）
+        # Windows でそのまま動かしたときは、番号の違う WSAEADDRINUSE になるので両方見る
+        if e.errno not in (errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", None)):
+            raise
+        print(f"{args.port} 番のポートがもう使われています。")
+        print(
+            f"  ダッシュボードがもう動いていないか確かめてください（ブラウザで http://{HOST}:{args.port}）。"
+        )
+        print("  別のポートで開くなら --port 8766 のように指定してください。")
+        raise SystemExit(1) from None
     # ブラウザで開く URL は、どちらの待ち受けでも 127.0.0.1（Docker でも PC 側は 127.0.0.1 に公開する）
-    print(f"ダッシュボード: http://{HOST}:{server.server_address[1]}  （Ctrl+C で終了）")
+    url = f"http://{HOST}:{server.server_address[1]}"
+    print(f"ダッシュボード: {url}  （DB: {args.db}、Ctrl+C で終了）")
+    if args.open:
+        # サーバーはもう待ち受けているので、ブラウザが先に来ても受け付けられる
+        open_browser(url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
