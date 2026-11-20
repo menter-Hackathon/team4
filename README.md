@@ -54,7 +54,7 @@
 | 文字起こし | kotoba-whisper v2.0（日本語向けの Whisper） |
 | 声 | AivisSpeech Engine（声のモデル「らせつん」）。`.env` で OpenAI `gpt-4o-mini-tts` にも切り替えられる |
 | 鉢のハード | Seeed XIAO ESP32S3 ＋ M5Stack Atomic Voice Base（[部品の選び方](docs/hardware/parts-selection.md)） |
-| 鉢のファームウェア | ESP-IDF v5.4.2 ＋ LiveKit ESP32 SDK 0.3.12（[firmware/](firmware/README.md)） |
+| 鉢のファームウェア | ESP-IDF v5.4.2。PC の中継（relay）に WebSocket でつなぐ（[firmware/](firmware/README.md)） |
 
 詳しい設計は [仕様書](docs/superpowers/specs/2026-11-13-futamaru-agent-design.md) にあります。
 
@@ -157,12 +157,17 @@ cp .env.example .env   # LiveKit・LLM・STT・OpenAI の値を埋める
 # PC のマイク・スピーカーで試す（ESP32 不要）。.env に DEV_PLANT_ID=dev を入れておく
 uv run python -m agent.main console
 
-# LiveKit サーバー（.env の LIVEKIT_URL）に接続して ESP32 からの接続を待つ
+# LiveKit サーバー（.env の LIVEKIT_URL）に接続して、鉢が来るのを待つ
 uv run python -m agent.main dev     # 開発用（ホットリロード）
 uv run python -m agent.main start   # 本番
+
+# 中継（鉢と WebSocket でつながり、鉢の代わりに LiveKit のルームに入る）
+uv run python -m agent.relay
 ```
 
-NVIDIA の GPU がある PC では、エージェント・LLM・STT をまとめて Docker で動かせます（`docker compose up -d`）。手順は [docs/deploy.md](docs/deploy.md) を見てください。
+鉢（ESP32）は LiveKit に直接はつながず、中継に WebSocket でつなぎます。中継が鉢の代わりにルーム `plant-<株の ID>` に入ると、エージェントが呼ばれます。
+
+本番は、NVIDIA の GPU がある PC で、LiveKit サーバー・中継・Cloudflare Tunnel・エージェント・LLM・STT・声をまとめて Docker で動かします（`docker compose up -d`）。手順は [docs/deploy.md](docs/deploy.md) を見てください。
 
 会話・記憶・性格は `data/futamaru.db` に保存されます。
 
@@ -191,18 +196,19 @@ AIVIS_BASE_URL=http://127.0.0.1:10101   # AivisSpeech の URL（空ならこの�
 - [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)（音声合成エンジン、LGPL v3）
 - 音声合成モデル「らせつん」（制作: こずかた学園プロジェクト / Aivis Project、声: 上戸恵里さん、Aivis Common Model License (ACML) 1.0）
 
-### ESP32 用トークンの発行
+### 鉢（ESP32）の設定
 
-```bash
-uv run python -m scripts.issue_token --plant-id a1
-```
+鉢のファームウェアの設定（`firmware/sdkconfig.secrets`）には、次の 3 つを書きます。書き方とビルドの手順は [firmware/README.md](firmware/README.md)、中継の公開のしかたは [docs/deploy.md](docs/deploy.md) の「3.5」にあります。
 
-identity `device-a1`、ルーム `plant-a1`、有効期限 30 日のトークンを1行で出力します。
+| 鉢の設定 | 書く値 |
+|---|---|
+| `CONFIG_FUTAMARU_RELAY_URL` | 中継の URL。`wss://<.env の RELAY_PUBLIC_HOSTNAME>/relay` |
+| `CONFIG_FUTAMARU_DEVICE_KEY` | 中継の合言葉。`.env` の `RELAY_DEVICE_KEY` と同じ値 |
+| `CONFIG_FUTAMARU_PLANT_ID` | どの株として話すか。1 台目は `a1`、2 台目は `b1` など。同じ ID を 2 台に入れると、同じ株として扱われる |
 
-- **ESP32 の担当者に渡し、ファームウェアの設定（`firmware/sdkconfig.secrets`）に書き込んでもらいます。** 一緒に渡すのはサーバーの URL（`.env` の `LIVEKIT_URL`）だけです。`LIVEKIT_API_KEY` と `LIVEKIT_API_SECRET` は渡しません。
-- **株ごとに別のトークンを使います。** 2台目には `--plant-id b1` などで発行してください。同じトークンを2台に入れると、同じ株として扱われます。
-- **期限が切れたら、同じコマンドで発行し直して書き込み直します。**
-- **トークンは秘密情報です。** 持っている人は誰でもその株のルームに入れて、マイクの音を聞けます。Issue・PR・チャンネルには貼らず、DM で渡してください。
+- **合言葉は秘密情報です。** 持っている人は誰でも中継につなげます。Issue・PR・チャンネルには貼らず、DM で渡してください。
+- LiveKit のトークンは、中継が鉢の代わりに作ります（[`agent/relay/bridge.py`](agent/relay/bridge.py)）。鉢には書きません。
+- `uv run python -m scripts.issue_token --plant-id a1` で、ルーム `plant-a1` に入れるトークンを手で作ることもできます（中継を通さずにルームへ入って試すとき用）。
 
 ### 成長の早送りデモ
 
