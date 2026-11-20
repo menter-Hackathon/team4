@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "ふたまる: 育て方で個性が変わる、話せる観葉植物の音声AIエージェント"
 requires-python = ">=3.12"
 dependencies = [
+    "aiohttp>=3.14.5",
     "livekit-agents[openai,silero]~=1.8",
     "livekit-api",
     "openai",

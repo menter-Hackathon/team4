@@ -14,9 +14,36 @@ def test_traits_default_all_half():
 
 @pytest.mark.parametrize(
     "v,lv",
-    [(0.0, "low"), (0.33, "low"), (0.34, "mid"), (0.66, "mid"), (0.67, "high"), (1.0, "high")],
+    [
+        (0.0, "very_low"),
+        (0.2, "very_low"),
+        (0.21, "low"),
+        (0.4, "low"),
+        (0.41, "mid"),
+        (0.5, "mid"),
+        (0.59, "mid"),
+        (0.6, "high"),
+        (0.79, "high"),
+        (0.8, "very_high"),
+        (1.0, "very_high"),
+    ],
 )
 def test_level_boundaries(v, lv):
+    assert level(v) == lv
+
+
+def test_two_max_steps_from_the_start_change_the_level_both_ways():
+    # 1 回の会話で動く最大量（±0.05）で 2 回動かすと、上げても下げても段階が変わる（#57）
+    up = apply_deltas(apply_deltas(Traits(), {"affection": 0.05}, 50), {"affection": 0.05}, 50)
+    down = apply_deltas(apply_deltas(Traits(), {"affection": -0.05}, 50), {"affection": -0.05}, 50)
+    assert level(up.affection) == "high"
+    assert level(down.affection) == "low"
+    # 1 回だけでは変わらない
+    assert level(apply_deltas(Traits(), {"affection": 0.05}, 50).affection) == "mid"
+
+
+@pytest.mark.parametrize("v,lv", [(0.6000000000000001, "high"), (0.39999999999999997, "low")])
+def test_level_ignores_float_rounding_noise(v, lv):
     assert level(v) == lv
 
 
@@ -51,6 +78,13 @@ def test_bad_delta_values_are_zero():
     t = apply_deltas(
         Traits(), {"energy": "high", "curiosity": None, "affection": True, "unknown": 0.05}, 50
     )
+    assert t.energy == 0.5 and t.curiosity == 0.5 and t.affection == 0.5
+
+
+def test_non_finite_deltas_are_zero():
+    # NaN / Infinity は上限（+0.05）ではなく、変化なしにする（#7）
+    nan, inf = float("nan"), float("inf")
+    t = apply_deltas(Traits(), {"energy": nan, "curiosity": inf, "affection": -inf}, 50)
     assert t.energy == 0.5 and t.curiosity == 0.5 and t.affection == 0.5
 
 
