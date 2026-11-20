@@ -21,8 +21,14 @@ DEV_PLANT_ID=dev
 TTS_PROVIDER=aivis
 AIVIS_BASE_URL=http://127.0.0.1:10101
 AIVIS_SPEAKER=893625024
+LIVEKIT_URL=wss://example.livekit.cloud
+LIVEKIT_API_KEY=testkey
+LIVEKIT_API_SECRET=testsecret
+RELAY_DEVICE_KEY=test-device-key-0123456789
+CLOUDFLARE_TUNNEL_TOKEN=test-tunnel-token
+RELAY_PUBLIC_HOSTNAME=relay.example.com
 ENV
-docker compose config --format json > /tmp/compose.json
+docker compose --profile tunnel config --format json > /tmp/compose.json
 python3 - <<'PY'
 import json
 env = json.load(open("/tmp/compose.json"))["services"]["agent"]["environment"]
@@ -51,6 +57,44 @@ assert env["AIVIS_URL"] == "http://tts:10101", env
 assert env["AIVIS_MODELS"], env
 print("ok: tts-init が .env の声の設定を受け取る")
 PY
+
+# 1c. LiveKit サーバー・中継・トンネル（仕様 §3.2）
+#     - LiveKit サーバーは .env のキーで動き、PC の外には公開しない
+#     - エージェントと中継は、.env の LiveKit Cloud の URL ではなく、同じ compose の LiveKit サーバーにつなぐ
+#     - 中継も PC の外には公開せず、トンネルが .env のトークンで動く
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))["services"]
+assert s["agent"]["environment"]["LIVEKIT_URL"] == "ws://livekit:7880", s["agent"]["environment"]
+assert "livekit" in s["agent"]["depends_on"], s["agent"]["depends_on"]
+env = s["livekit"]["environment"]
+assert env["LIVEKIT_KEYS"] == "testkey: testsecret", env
+assert "udp_port: 7882" in env["LIVEKIT_CONFIG"] and "tcp_port: 7881" in env["LIVEKIT_CONFIG"], env
+assert not s["livekit"].get("ports"), s["livekit"].get("ports")
+relay = s["relay"]
+assert relay["command"] == ["python", "-m", "agent.relay"], relay["command"]
+assert relay["environment"]["LIVEKIT_URL"] == "ws://livekit:7880", relay["environment"]
+assert relay["environment"]["RELAY_PORT"] == "8780", relay["environment"]
+assert not relay.get("ports"), relay.get("ports")
+assert s["tunnel"]["environment"]["TUNNEL_TOKEN"] == "test-tunnel-token", s["tunnel"]["environment"]
+print("ok: LiveKit と中継は外に公開せず、トンネルだけが外とつながる")
+PY
+
+# 1d. トンネルの ingress: .env の RELAY_PUBLIC_HOSTNAME を中継（relay:8780）に届け、ほかは 404 にすること
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))
+tunnel = s["services"]["tunnel"]
+assert tunnel["command"][-1] == "run" and "/etc/cloudflared/config.yml" in tunnel["command"], tunnel
+assert tunnel["configs"][0]["target"] == "/etc/cloudflared/config.yml", tunnel["configs"]
+content = s["configs"]["tunnel-ingress"]["content"]
+assert "hostname: relay.example.com" in content and "service: http://relay:8780" in content, content
+assert content.rstrip().endswith("service: http_status:404"), content
+print("ok: トンネルは RELAY_PUBLIC_HOSTNAME を中継に届け、ほかは 404 にする")
+PY
+# トンネルは --profile tunnel を付けたときだけ動く（トークンの無い PC で失敗し続けないように）
+docker compose config --services | grep -qx tunnel && { echo "tunnel が profile なしで動いてしまう" >&2; exit 1; }
+echo "ok: トンネルは --profile tunnel のときだけ動く"
 
 # 2. DOCKER_STT_MODEL で STT のモデルを切り替えられること（stt-init と agent の両方）
 echo "DOCKER_STT_MODEL=Systran/faster-whisper-large-v3" >> .env

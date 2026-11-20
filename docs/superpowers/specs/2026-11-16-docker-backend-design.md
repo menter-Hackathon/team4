@@ -4,6 +4,8 @@
 
 更新 2026-11-18: 声（TTS）に AivisSpeech を使う場合に備えて、AivisSpeech Engine もコンテナに入れた。ダッシュボードもコンテナに入れた。LLM を vLLM から Ollama の圧縮版に替え、GPU を 2 枚に分けた（下の「2026-11-18 の追加」）
 
+更新 2026-11-19: LiveKit サーバーもコンテナに入れた（下の「2026-11-19 の追加」）
+
 ## 目的と理由
 
 ふたまるの「脳」（エージェント・LLM・STT）を Docker にまとめ、**チームの誰かが NVIDIA の GPU がある PC で `docker compose up` するだけで、脳全体が立ち上がる**ようにする。
@@ -95,3 +97,24 @@ docker compose up
 - 思考モードは compose で `LLM_REASONING_EFFORT=none` にして切る（Ollama の Gemma 4 は既定で思考し、遅くなるため。#54）
 - まだ確かめていないこと: NVIDIA の GPU で、この圧縮版が 12GB に全部載るか、話し方の質が Mac の版（MLX）と変わらないか。ショーンさんの PC でのリハーサルで確かめる
 
+
+## 2026-11-19 の追加: LiveKit サーバー・中継・Cloudflare Tunnel もコンテナに入れる
+
+最初は「LiveKit は Cloud（外部サービス）」としていたが、脳と同じ PC の Docker で LiveKit サーバーも動かすことにした。鉢は WebSocket で中継（relay）につなぎ、中継が鉢の代わりに LiveKit のルームに入る（エージェントの仕様 §3.2）。
+
+- 理由
+  - 外部のサービスに頼らず、脳の PC だけで動かしたい（ハード担当の希望）
+  - 脳の PC（ohsawa）は大学のネットワークの中にあり、外から入る通信を受けられない。鉢と同じ LAN にも置けない
+  - LiveKit の音声（WebRTC の UDP）は Cloudflare Tunnel を通らないが、WebSocket（TCP）なら通る（monban と同じ方式）
+- デモの PC が 2 台目の PC（ohsawa、RTX 5060 8GB の 1 枚）に変わった。`.env` で `LLM_GPU=0`・`STT_GPU=0` にして同じ GPU に載せる（compose の作りは変えない）。2026-11-19 に測ると、LLM と STT を合わせて GPU のメモリは 7.5GB / 8GB で収まった
+
+決めたこと:
+
+- **`livekit`**: LiveKit 公式イメージ（`livekit/livekit-server`、版を固定）。設定は compose の環境変数 `LIVEKIT_CONFIG` に直接書く。compose の中（`relay` と `agent`）だけで使い、ports は書かない。LiveKit は自分のコンテナの IP を教えるので、ほかのコンテナからそのまま音声が届く
+- **`relay`**: エージェントと同じイメージで `python -m agent.relay`。ports は書かない（外からは `tunnel` を通ってだけ届く）
+- **`tunnel`**: Cloudflare Tunnel 公式イメージ（`cloudflare/cloudflared`、版を固定）。`.env` の `CLOUDFLARE_TUNNEL_TOKEN` で動く。公開ホスト名のサービスは `http://relay:8780`。`profiles: ["tunnel"]` にして、`--profile tunnel` を付けたときだけ起動する（トークンの無い PC で失敗し続けないように）
+- **キー**: `.env` の `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` を LiveKit サーバーのキーにし（`LIVEKIT_KEYS`）、エージェントと中継も同じ値を読む。鉢は `RELAY_DEVICE_KEY` で中継につなぐ
+- **エージェントと中継のつなぎ先**: compose で `LIVEKIT_URL=ws://livekit:7880` にする。`.env` に Cloud の URL が残っていても、こちらが優先される
+- **Windows の WSL**: ウィンドウや SSH が全部閉じると WSL が止まり、コンテナも止まる。デモの PC では、WSL を止めないタスクを作る（`docs/deploy.md` 3.5）
+- 確かめたこと（2026-11-19、ohsawa）: 合成した「ふたまる、こんにちは」を鉢のふりをして中継に送ると、エージェントが起きて約 7 秒の返事が中継から返ってきた（話し終わりから約 3 秒）
+- まだ確かめていないこと: Cloudflare Tunnel を通したとき。本物の鉢（ESP32）から

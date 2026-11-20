@@ -2,10 +2,13 @@
 
 NVIDIA の GPU が 2 枚ある PC で、ふたまるの脳（エージェント・LLM・STT・声）と、性格を見せるダッシュボードをまとめて動かす手順です。
 準備ができたあとの、発表の日の手順は [`demo-day.md`](demo-day.md) にまとめています。
-鉢（ESP32）にはマイクとスピーカーだけがあり、LiveKit Cloud を通してこの PC の脳とつながります。
+鉢（ESP32）にはマイクとスピーカーだけがあり、インターネットと Cloudflare Tunnel を通って、この PC の中継（relay）に WebSocket でつながります（仕様 §3.2）。鉢と PC は同じ LAN に置かなくて大丈夫です。
 
 ```
-鉢（ESP32: マイク・スピーカー） ──> LiveKit Cloud <── この PC の Docker
+鉢（ESP32: マイク・スピーカー） ──WebSocket──> Cloudflare Tunnel ──> この PC の Docker
+                                                ├─ tunnel（Cloudflare Tunnel。外からの接続を relay に届ける）
+                                                ├─ relay（中継。鉢の代わりに LiveKit のルームに入る）
+                                                ├─ livekit（LiveKit サーバー。PC の外には公開しない）
                                                       ├─ agent（エージェント）
                                                       ├─ llm（Gemma 4 E4B の圧縮版、Ollama。GPU 1 枚目）
                                                       ├─ stt（kotoba-whisper。GPU 2 枚目）
@@ -27,6 +30,7 @@ NVIDIA の GPU が 2 枚ある PC で、ふたまるの脳（エージェント�
   - **Windows**: Docker Desktop（WSL2 を使う設定）
   - **Linux**: Docker Engine と NVIDIA Container Toolkit
 - ディスクの空き 40GB 以上（モデルとイメージで十数〜数十 GB）
+- **Cloudflare のアカウントと、Cloudflare で管理しているドメイン**（Cloudflare Tunnel で公開の URL を作るため。3.5）
 - インターネット接続（初回のモデルのダウンロード。声を AivisSpeech にするときは、声のモデルを AivisHub から取る）
 
 **GPU とドライバがコンテナから使えるか**を先に確かめます。
@@ -69,21 +73,89 @@ mkdir -p data
 
 | 項目 | 書くもの |
 |---|---|
-| `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | チームの LiveKit Cloud の値 |
-| `OPENAI_API_KEY` | チームの OpenAI のキー（声を OpenAI にするとき） |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | この PC の LiveKit サーバーのキー。**自分で決めます**（下の作り方）。シークレットは 32 文字以上 |
+| `RELAY_DEVICE_KEY` | 鉢が中継につなぐときのキー。**自分で決めます**（`openssl rand -hex 16`）。ファームの `CONFIG_FUTAMARU_DEVICE_KEY` にも同じ値を書く |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel のトークン（3.5） |
+| `OPENAI_API_KEY` | チームの OpenAI のキー（声を OpenAI にするときだけ。`TTS_PROVIDER=aivis` なら空でよい） |
 | `LLM_GPU` / `STT_GPU` | 2 で決めた GPU の番号（空なら LLM が 0、STT が 1） |
 | `TTS_PROVIDER` | 植物の声。`aivis`（AivisSpeech）か `openai`（空なら openai） |
 | `AIVIS_SPEAKER` | `aivis` のときの声のスタイル ID（空なら `893625030` =「らせつん / 標準２」）。例: `888753762` =「まお / あまあま」 |
 | `AIVIS_MODELS` | （任意）AivisHub から入れる声のモデルの UUID（カンマ区切り。空ならせつん） |
 | `JMA_AMEDAS_STATION` / `JMA_FORECAST_AREA` | （任意）天気を取る場所。例: 東京なら `44132` / `130000`（`.env.example` の説明を参照） |
 
+LiveKit のキーは、次のコマンドで作れます（出てきた文字列を `.env` に書く）。
+
+```bash
+openssl rand -hex 8    # LIVEKIT_API_KEY に書く
+openssl rand -hex 32   # LIVEKIT_API_SECRET に書く
+```
+
+`LIVEKIT_URL` は書かなくて大丈夫です。Docker では、エージェントと中継は同じ compose の LiveKit サーバー（`ws://livekit:7880`）につなぎます。
+
 `LLM_BASE_URL`・`LLM_MODEL`・`LLM_REASONING_EFFORT`・`STT_BASE_URL`・`STT_MODEL`・`AIVIS_BASE_URL` は書かなくて大丈夫です。Docker では `compose.yaml` の設定（コンテナ内の LLM・STT・AivisSpeech）が使われます。開発用に OpenAI や手元の AivisSpeech を向けた値が書いてあっても、Docker では無視されます。
+
+## 3.5 鉢から PC に届くようにする（Cloudflare Tunnel）
+
+鉢は `wss://<ホスト名>/relay` につなぎます。Cloudflare Tunnel が、その URL を PC の中継（compose の `relay`、`http://relay:8780`）に届けます。PC 側でポートを開けたり、ルーターを設定したりする必要はありません。
+
+作り方は 2 通りあります。**CLI で作る方法**なら、ブラウザで「許可」を押すだけで、残りはコマンドでできます。
+
+#### CLI で作る（おすすめ）
+
+PC に何も入れず、Docker の `cloudflared` で行います（`<ドメイン>` は Cloudflare にあるドメイン）。
+
+```bash
+mkdir -p ~/.cloudflared
+CF="docker run --rm --user $(id -u):$(id -g) -e HOME=/cf -v $HOME/.cloudflared:/cf/.cloudflared cloudflare/cloudflared:2026.10.7"
+$CF tunnel login                                   # 出てきた URL をブラウザで開き、ドメインを選んで許可する
+$CF tunnel create futamaru                         # トンネルを作る
+$CF tunnel route dns futamaru futamaru-api.<ドメイン>  # DNS に公開ホスト名を登録する
+echo "CLOUDFLARE_TUNNEL_TOKEN=$($CF tunnel token futamaru)" >> .env
+echo "RELAY_PUBLIC_HOSTNAME=futamaru-api.<ドメイン>" >> .env
+rm ~/.cloudflared/cert.pem                         # ドメインを操作できる証明書は、作り終えたら消す
+```
+
+- 公開ホスト名は、`futamaru-api.<ドメイン>` のように **1 段のサブドメイン**にします（Cloudflare の無料の証明書は、2 段のサブドメインに対応しないため）
+- どのホスト名をどのコンテナに届けるかは、`compose.yaml` の `configs` の `tunnel-ingress` に書いてあります（`RELAY_PUBLIC_HOSTNAME` → `relay:8780`）
+
+#### ダッシュボードで作る
+
+1. Cloudflare のダッシュボードで **Zero Trust → ネットワーク → Tunnels → トンネルを作成**（種類は Cloudflared）。名前は例えば `futamaru`
+2. 表示されたインストールのコマンドの中の、`eyJ` で始まる長い文字列（トークン）を `.env` の `CLOUDFLARE_TUNNEL_TOKEN` に書く。**トークンは Issue・PR・チャンネルに書かない**
+3. 同じ画面の「公開ホスト名（Public Hostname）」を足す
+   - サブドメインとドメイン: 例 `futamaru` ＋ `<チームのドメイン>` → `futamaru.<チームのドメイン>`
+   - サービス: 種類 `HTTP`、URL `relay:8780`
+
+#### 鉢のファームに書く（どちらの作り方でも）
+
+鉢のファームの `firmware/sdkconfig.secrets` に、次を書いて書き込みます（`firmware/README.md`）。
+
+- `CONFIG_FUTAMARU_RELAY_URL="wss://<公開ホスト名>/relay"`
+- `CONFIG_FUTAMARU_DEVICE_KEY` に `.env` の `RELAY_DEVICE_KEY` と同じ値
+- `CONFIG_FUTAMARU_PLANT_ID` に株の ID（例: `a1`）
+
+トンネルは `--profile tunnel` を付けて起動したときだけ動きます（4）。トークンの無い PC で、トンネルが失敗し続けないようにするためです。
+
+### Windows: WSL を止めないようにする
+
+WSL2 の Ubuntu は、開いているウィンドウ（や SSH の接続）が全部閉じると、少しして止まります。止まると Docker のコンテナもすべて止まります。デモの間ずっと動かすには、次のどちらかをします。
+
+- Ubuntu のウィンドウを 1 つ開いたままにしておく
+- Windows のタスクスケジューラーに、ログオン時に `wsl.exe -d Ubuntu -- sleep infinity` を動かすタスクを作る（管理者の PowerShell）
+
+```powershell
+$a = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -- sleep infinity"
+$t = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "futamaru WSL keepalive" -Action $a -Trigger $t -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0)
+```
 
 ## 4. 起動する
 
 ```bash
-docker compose up -d
+docker compose --profile tunnel up -d
 ```
+
+`--profile tunnel` は、Cloudflare Tunnel も一緒に起動するための指定です（3.5）。鉢をつながずに試すだけなら `docker compose up -d` でもかまいません。
 
 **初回はモデルのダウンロードで 10〜30 分ほどかかり、その間このコマンドは終わらずに待ち続けます（固まったように見えます）。** `llm-init`（Gemma 4 のダウンロード・読み込み）と `stt-init`・`tts-init` が終わると、最後に `agent` を起動してから終わります。
 
@@ -105,10 +177,11 @@ docker compose logs -f agent     # エージェントのログ
 1. `docker compose ps -a` で `llm-init`・`stt-init`・`tts-init` が `exited (0)`、ほかが `running` になっている
    - `docker compose logs llm-init` に「モデルが全部 GPU に載りました」と出ている。「注意: モデルの …% しか GPU に載っていません」と出たら、`.env` の `LLM_GPU` がメモリの大きい GPU の番号か確かめる（2 を参照）
    - `TTS_PROVIDER=aivis` なら、`docker compose logs tts-init` の最後に `準備完了` と出ている（openai なら「準備はしません」と出るだけでよい）
-2. `docker compose logs agent` に `registered worker` などの、LiveKit Cloud へ接続したログが出ている
-3. 鉢（ESP32）の電源を入れる。ESP32 がルーム `plant-<id>` に入ると、エージェントが参加する
-4. 「ふたまる」と呼びかけて、植物から話しかけてくれば成功
-5. この PC のブラウザで http://127.0.0.1:8765 を開くと、ダッシュボードが映る（並べる株は `.env` の `DASHBOARD_PLANTS`、既定 `a1,b1`）
+2. `docker compose logs agent` に `registered worker`、`docker compose logs relay` に `Running on http://0.0.0.0:8780`、`docker compose logs tunnel` に `Registered tunnel connection` が出ている
+3. ブラウザで `https://<公開ホスト名>/healthz` を開き、`ok` と出る（Cloudflare Tunnel から中継まで届いている）
+4. 鉢（ESP32）の電源を入れる。`docker compose logs relay` に `plant a1 is ready` と出れば、中継が鉢の代わりにルーム `plant-a1` に入り、エージェントが参加する
+5. 「ふたまる」と呼びかけて、植物から話しかけてくれば成功
+6. この PC のブラウザで http://127.0.0.1:8765 を開くと、ダッシュボードが映る（並べる株は `.env` の `DASHBOARD_PLANTS`、既定 `a1,b1`）
 
 ## 6. 止める・作り直す
 
@@ -159,6 +232,11 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 | `tts-init` が `exited (1)` で終わり、`agent` が起動しない | 声のモデルを用意できなかった。`docker compose logs tts-init` を見る。「入れられませんでした」ならインターネット接続か `AIVIS_MODELS` の UUID、「スタイル ID … が見つかりません」なら `AIVIS_SPEAKER` を直す（ログに入っている ID の一覧が出る）。急ぐときは `.env` を `TTS_PROVIDER=openai` にして `docker compose up -d` すれば、OpenAI の声で動く |
 | 植物の声が出ない（aivis のとき） | `docker compose logs tts` にエラーが無いか見る。CPU が足りず遅いときは、ほかのアプリを閉じる |
 | `agent` は `running` なのに、植物が返事をしない | `docker compose logs agent` に `STT` や `LLM` のエラーが無いか、`docker compose logs stt`・`docker compose logs llm` にエラーが無いかを見る。ほかのメンバーが同じ LiveKit のキーで `uv run python -m agent.main dev` を動かしていると、そちらに植物を取られることがあるので止めてもらう |
+| 鉢が中継につながらない | ブラウザで `https://<公開ホスト名>/healthz` が `ok` か見る。出なければ `docker compose logs tunnel` と、Cloudflare の公開ホスト名のサービスが `HTTP` / `relay:8780` か確かめる。`ok` なのにつながらないときは、`docker compose logs relay` に `wrong key`（鉢の `CONFIG_FUTAMARU_DEVICE_KEY` と `.env` の `RELAY_DEVICE_KEY` が違う）や `bad start`（`CONFIG_FUTAMARU_PLANT_ID` が英小文字・数字・`_`・`-` 以外）が出ていないか見る |
+| 中継の `relay` に `could not join LiveKit` | LiveKit のキーが違うか、`livekit` が動いていない。`docker compose ps` と `docker compose logs livekit` を見る |
+| しばらくすると全部止まる（Windows） | WSL が止まっている。3.5 の「WSL を止めないようにする」をする |
+| 起動直後の最初の返事だけ失敗する（`LLM error`） | GPU が温まるまで最初の 1〜2 回は LLM が遅い（2026-11-19、RTX 5060 で確認）。もう一度話しかければ返事をする |
+| `docker compose logs livekit` に `secret is too short` | `.env` の `LIVEKIT_API_SECRET` を 32 文字以上にする（3 の `openssl rand -hex 32`） |
 | `agent` がすぐ止まる | `docker compose logs agent` を見る。`環境変数 … が設定されていません` なら `.env` の書き漏れ |
 
 解決しないときは、`docker compose logs` の該当部分を Discord に貼ってください（**キーが含まれていないか確認してから**）。

@@ -36,11 +36,11 @@
 ## 仕組み
 
 ```
-[鉢: ESP32-S3 ＋ マイク・スピーカー] ──WebRTC──> [LiveKit Cloud] <── [チームの PC: エージェント]
-                                                                      ├─ 文字起こし: kotoba-whisper
-                                                                      ├─ 会話: Gemma 4 E4B
-                                                                      ├─ 声: AivisSpeech（ローカル）
-                                                                      └─ 性格・記憶: SQLite
+[鉢: ESP32-S3 ＋ マイク・スピーカー] ──WebSocket──> [Cloudflare Tunnel] ──> [チームの PC: 中継 ＋ LiveKit ＋ エージェント]
+                                                                                   ├─ 文字起こし: kotoba-whisper
+                                                                                   ├─ 会話: Gemma 4 E4B
+                                                                                   ├─ 声: AivisSpeech（ローカル）
+                                                                                   └─ 性格・記憶: SQLite
 ```
 
 - **鉢の中はマイコンとマイク・スピーカーだけ**にしています。考える処理はすべて PC 側で行います。鉢の中で LLM を動かす案（Jetson）も検討しましたが、値段と消費電力が見合わないため見送りました（[記録](docs/hardware/jetson-decision.md)）
@@ -127,7 +127,7 @@ cp .env.example .env   # LiveKit・LLM・STT・OpenAI の値を埋める
 # PC のマイク・スピーカーで試す（ESP32 不要）。.env に DEV_PLANT_ID=dev を入れておく
 uv run python -m agent.main console
 
-# LiveKit Cloud に接続して ESP32 からの接続を待つ
+# LiveKit サーバー（.env の LIVEKIT_URL）に接続して ESP32 からの接続を待つ
 uv run python -m agent.main dev     # 開発用（ホットリロード）
 uv run python -m agent.main start   # 本番
 ```

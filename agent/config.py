@@ -212,3 +212,59 @@ def load_config(env: Mapping[str, str] = os.environ) -> Config:
         plant_species=get("PLANT_SPECIES", "ポトス"),
         allow_new_people=allow_new_people,
     )
+
+
+# 中継（relay）の鍵の最短の長さ。総当たりで当てられないように、ある程度の長さを求める（仕様 §3.2.1）
+RELAY_DEVICE_KEY_MIN_LENGTH = 24
+
+
+@dataclass(frozen=True)
+class RelayConfig:
+    """中継（relay、仕様 §3.2）の設定。
+
+    中継は鉢と WebSocket で音声をやりとりし、鉢の代わりに LiveKit のルームに入る。
+    エージェント本体（Config）とは別のプロセスで動くので、設定も分けている。
+    """
+
+    livekit_url: str  # 中継がつなぐ LiveKit サーバー（Docker では ws://livekit:7880）
+    livekit_api_key: str  # 鉢の代わりにルームに入るトークンを作るためのキー
+    livekit_api_secret: str
+    device_key: str  # 鉢が中継につなぐときのキー（Authorization: Bearer <これ>）
+    port: int  # 中継が待ち受けるポート
+
+
+def load_relay_config(env: Mapping[str, str] = os.environ) -> RelayConfig:
+    """環境変数を読んで RelayConfig を作る。必須の値が無い・短すぎるときは ConfigError。
+
+    例: {"LIVEKIT_URL": "ws://livekit:7880", "LIVEKIT_API_KEY": "k", "LIVEKIT_API_SECRET": "s",
+         "RELAY_DEVICE_KEY": "24 文字以上の文字列"} → RelayConfig(port=8780, ...)
+    """
+
+    def get(name: str, default: str | None = None) -> str | None:
+        """環境変数を読む。未設定・空・空白だけなら default を返す。"""
+        value = env.get(name, "").strip()
+        return value or default
+
+    def required(name: str) -> str:
+        """必ず設定が要る環境変数を読む。無ければ ConfigError。"""
+        value = get(name)
+        if value is None:
+            raise ConfigError(f"環境変数 {name} が設定されていません")
+        return value
+
+    device_key = required("RELAY_DEVICE_KEY")
+    if len(device_key) < RELAY_DEVICE_KEY_MIN_LENGTH:
+        raise ConfigError(
+            f"RELAY_DEVICE_KEY は {RELAY_DEVICE_KEY_MIN_LENGTH} 文字以上にしてください"
+            "（例: openssl rand -hex 16 で作る）"
+        )
+    port_raw = get("RELAY_PORT", "8780")
+    if not port_raw.isdigit() or not 0 < int(port_raw) < 65536:
+        raise ConfigError(f"RELAY_PORT は 1〜65535 の数字にしてください: {port_raw}")
+    return RelayConfig(
+        livekit_url=required("LIVEKIT_URL"),
+        livekit_api_key=required("LIVEKIT_API_KEY"),
+        livekit_api_secret=required("LIVEKIT_API_SECRET"),
+        device_key=device_key,
+        port=int(port_raw),
+    )
