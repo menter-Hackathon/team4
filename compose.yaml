@@ -69,12 +69,18 @@ services:
 
   tunnel:
     # Cloudflare Tunnel 公式イメージ。版を固定する（2026-10-30 の 2026.10.7）。
-    # Cloudflare のダッシュボードで作ったトンネルのトークンを .env の CLOUDFLARE_TUNNEL_TOKEN に書く。
-    # トンネルの「公開ホスト名」のサービスは http://relay:8780 にする（手順は docs/deploy.md）
+    # トンネルのトークンを .env の CLOUDFLARE_TUNNEL_TOKEN に、公開するホスト名を RELAY_PUBLIC_HOSTNAME に書く。
+    # どのホスト名をどのコンテナに届けるか（ingress）は、下の configs の tunnel-ingress に書く。
+    # CLI（cloudflared tunnel create）で作ったトンネルは、この ingress で動く。
+    # ダッシュボードで作ったトンネル（公開ホスト名をダッシュボードで決めたもの）は、ダッシュボードの設定が優先される
+    # （手順は docs/deploy.md の 3.5）
     image: cloudflare/cloudflared:2026.10.7
-    command: ["tunnel", "--no-autoupdate", "run"]
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
     environment:
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    configs:
+      - source: tunnel-ingress
+        target: /etc/cloudflared/config.yml
     depends_on:
       relay:
         condition: service_started
@@ -262,6 +268,16 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+
+# トンネルの ingress（公開するホスト名 → 届け先のコンテナ）。ファイルを増やさず、ここに直接書く。
+# 上から順に見て、どれにも当たらなければ最後の 404 を返す（cloudflared の決まりで、最後は全部を受ける規則にする）
+configs:
+  tunnel-ingress:
+    content: |
+      ingress:
+        - hostname: ${RELAY_PUBLIC_HOSTNAME:-relay.invalid}
+          service: http://relay:8780
+        - service: http_status:404
 
 volumes:
   ollama-models:

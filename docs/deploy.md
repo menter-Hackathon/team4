@@ -98,15 +98,41 @@ openssl rand -hex 32   # LIVEKIT_API_SECRET に書く
 
 鉢は `wss://<ホスト名>/relay` につなぎます。Cloudflare Tunnel が、その URL を PC の中継（compose の `relay`、`http://relay:8780`）に届けます。PC 側でポートを開けたり、ルーターを設定したりする必要はありません。
 
+作り方は 2 通りあります。**CLI で作る方法**なら、ブラウザで「許可」を押すだけで、残りはコマンドでできます。
+
+#### CLI で作る（おすすめ）
+
+PC に何も入れず、Docker の `cloudflared` で行います（`<ドメイン>` は Cloudflare にあるドメイン）。
+
+```bash
+mkdir -p ~/.cloudflared
+CF="docker run --rm --user $(id -u):$(id -g) -e HOME=/cf -v $HOME/.cloudflared:/cf/.cloudflared cloudflare/cloudflared:2026.10.7"
+$CF tunnel login                                   # 出てきた URL をブラウザで開き、ドメインを選んで許可する
+$CF tunnel create futamaru                         # トンネルを作る
+$CF tunnel route dns futamaru futamaru-api.<ドメイン>  # DNS に公開ホスト名を登録する
+echo "CLOUDFLARE_TUNNEL_TOKEN=$($CF tunnel token futamaru)" >> .env
+echo "RELAY_PUBLIC_HOSTNAME=futamaru-api.<ドメイン>" >> .env
+rm ~/.cloudflared/cert.pem                         # ドメインを操作できる証明書は、作り終えたら消す
+```
+
+- 公開ホスト名は、`futamaru-api.<ドメイン>` のように **1 段のサブドメイン**にします（Cloudflare の無料の証明書は、2 段のサブドメインに対応しないため）
+- どのホスト名をどのコンテナに届けるかは、`compose.yaml` の `configs` の `tunnel-ingress` に書いてあります（`RELAY_PUBLIC_HOSTNAME` → `relay:8780`）
+
+#### ダッシュボードで作る
+
 1. Cloudflare のダッシュボードで **Zero Trust → ネットワーク → Tunnels → トンネルを作成**（種類は Cloudflared）。名前は例えば `futamaru`
 2. 表示されたインストールのコマンドの中の、`eyJ` で始まる長い文字列（トークン）を `.env` の `CLOUDFLARE_TUNNEL_TOKEN` に書く。**トークンは Issue・PR・チャンネルに書かない**
 3. 同じ画面の「公開ホスト名（Public Hostname）」を足す
    - サブドメインとドメイン: 例 `futamaru` ＋ `<チームのドメイン>` → `futamaru.<チームのドメイン>`
    - サービス: 種類 `HTTP`、URL `relay:8780`
-4. 鉢のファームの `firmware/sdkconfig.secrets` に、次を書いて書き込む（`firmware/README.md`）
-   - `CONFIG_FUTAMARU_RELAY_URL="wss://futamaru.<チームのドメイン>/relay"`
-   - `CONFIG_FUTAMARU_DEVICE_KEY` に `.env` の `RELAY_DEVICE_KEY` と同じ値
-   - `CONFIG_FUTAMARU_PLANT_ID` に株の ID（例: `a1`）
+
+#### 鉢のファームに書く（どちらの作り方でも）
+
+鉢のファームの `firmware/sdkconfig.secrets` に、次を書いて書き込みます（`firmware/README.md`）。
+
+- `CONFIG_FUTAMARU_RELAY_URL="wss://<公開ホスト名>/relay"`
+- `CONFIG_FUTAMARU_DEVICE_KEY` に `.env` の `RELAY_DEVICE_KEY` と同じ値
+- `CONFIG_FUTAMARU_PLANT_ID` に株の ID（例: `a1`）
 
 トンネルは `--profile tunnel` を付けて起動したときだけ動きます（4）。トークンの無い PC で、トンネルが失敗し続けないようにするためです。
 

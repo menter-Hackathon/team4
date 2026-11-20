@@ -26,6 +26,7 @@ LIVEKIT_API_KEY=testkey
 LIVEKIT_API_SECRET=testsecret
 RELAY_DEVICE_KEY=test-device-key-0123456789
 CLOUDFLARE_TUNNEL_TOKEN=test-tunnel-token
+RELAY_PUBLIC_HOSTNAME=relay.example.com
 ENV
 docker compose --profile tunnel config --format json > /tmp/compose.json
 python3 - <<'PY'
@@ -77,6 +78,19 @@ assert relay["environment"]["RELAY_PORT"] == "8780", relay["environment"]
 assert not relay.get("ports"), relay.get("ports")
 assert s["tunnel"]["environment"]["TUNNEL_TOKEN"] == "test-tunnel-token", s["tunnel"]["environment"]
 print("ok: LiveKit と中継は外に公開せず、トンネルだけが外とつながる")
+PY
+
+# 1d. トンネルの ingress: .env の RELAY_PUBLIC_HOSTNAME を中継（relay:8780）に届け、ほかは 404 にすること
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))
+tunnel = s["services"]["tunnel"]
+assert tunnel["command"][-1] == "run" and "/etc/cloudflared/config.yml" in tunnel["command"], tunnel
+assert tunnel["configs"][0]["target"] == "/etc/cloudflared/config.yml", tunnel["configs"]
+content = s["configs"]["tunnel-ingress"]["content"]
+assert "hostname: relay.example.com" in content and "service: http://relay:8780" in content, content
+assert content.rstrip().endswith("service: http_status:404"), content
+print("ok: トンネルは RELAY_PUBLIC_HOSTNAME を中継に届け、ほかは 404 にする")
 PY
 # トンネルは --profile tunnel を付けたときだけ動く（トークンの無い PC で失敗し続けないように）
 docker compose config --services | grep -qx tunnel && { echo "tunnel が profile なしで動いてしまう" >&2; exit 1; }
