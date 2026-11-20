@@ -563,9 +563,18 @@ class PlantStore:
         return True
 
     def watering_count(self, plant_id: str, person_id: int | None) -> int:
-        """その人（None ならお客さん・名乗る前）が、その株に水をあげた回数（仕様 §6.6）。"""
+        """その人（None ならお客さん）が、その株に水をあげた回数（仕様 §6.6）。
+
+        水やりの行の person_id ではなく、その水やりをした「会話の相手」で数える。
+        「お水あげたよ」と言ってから名乗ると、水やりは名乗る前（person_id が NULL）で記録され、
+        あとで会話の相手だけがその人に変わる（conversation.py）。行の person_id で数えると、
+        その人のカードに水やりが出なくなるため（最終レビューの指摘、2026-11-20）。
+        会話中の水やりは数えない（話した回数 finished_sessions と数え方をそろえる）。
+        """
+        # waterings と sessions を session_id でつなぎ、会話の相手（s.person_id）で絞る
         row = self._conn.execute(
-            "SELECT COUNT(*) FROM waterings WHERE plant_id = ? AND person_id IS ?",
+            "SELECT COUNT(*) FROM waterings w JOIN sessions s ON s.id = w.session_id"
+            " WHERE w.plant_id = ? AND s.person_id IS ? AND s.ended_at IS NOT NULL",
             (plant_id, person_id),
         ).fetchone()
         return int(row[0])
