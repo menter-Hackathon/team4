@@ -17,8 +17,10 @@ ChatGPT の Web 画面など、このファイルを自動で読まないツー�
 | `agent/main.py` | エントリーポイント（LiveKit のセッション組み立て） |
 | `agent/config.py` | 環境変数の読み込み |
 | `agent/plant/` | 植物のロジック（ウェイクワード・会話・記憶・性格・プロンプト）。LiveKit に依存させない |
-| `agent/plugins/` | LLM / STT / TTS の OpenAI 互換クライアント |
-| `scripts/` | トークン発行・成長シミュレーション |
+| `agent/plugins/` | LLM / STT / TTS の OpenAI 互換クライアントと、気象庁の天気の取得 |
+| `agent/relay/` | 中継。鉢（ESP32）と WebSocket で音声をやりとりし、鉢の代わりに LiveKit のルームに入る（`python -m agent.relay`） |
+| `firmware/` | 鉢の ESP32 のファームウェア（C、ESP-IDF）。ビルドは `firmware/README.md` |
+| `scripts/` | ダッシュボード・成長シミュレーション・人の一覧と方言の固定・LLM / STT の確認などの道具 |
 | `tests/` | `agent/` と同じ構成でテストを置く。偽物は `tests/fakes.py` |
 
 ## コマンド
