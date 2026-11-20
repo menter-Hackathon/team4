@@ -1,9 +1,18 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from agent.plant.personality import Traits
-from agent.plant.prompt import build_system_prompt, rank_memories, recency_factor
+from agent.plant.prompt import (
+    LENGTH,
+    TRAIT_TEXT,
+    WEATHER_FEELING_INSTRUCTION,
+    build_system_prompt,
+    days_between,
+    plant_status_text,
+    rank_memories,
+    recency_factor,
+)
 from agent.plant.store import Memory
 from agent.plant.timeutil import JST, iso
 
@@ -29,9 +38,11 @@ def test_base_and_tag_line():
 @pytest.mark.parametrize(
     "v,text",
     [
-        (0.2, "少し素っ気なく接する。"),
+        (0.1, "素っ気なく接し、甘えたりはしない。"),
+        (0.35, "少し素っ気なく接する。"),
         (0.5, "普通に親しく接する。"),
-        (0.8, "持ち主に甘えて親しげに話す。"),
+        (0.65, "親しげに、うれしそうに接する。"),
+        (0.9, "持ち主に甘えて、「会いたかった」など好きな気持ちをよく伝える。"),
     ],
 )
 def test_affection_levels(v, text):
@@ -44,16 +55,31 @@ def test_all_axes_present_in_order():
     )
     lines = p.split("\n\n")[2].split("\n")
     assert lines == [
-        "口数は少なめで、静かに返す。",
+        "口数はとても少なく、ひと言で静かに返す。",
         "普通に親しく接する。",
         "テンション高めで、「！」を多めに使う。",
         "ときどき持ち主に質問する。",
     ]
 
 
+def test_every_axis_has_text_for_every_level():
+    # 4 軸 × 5 段階の文がそろっていて、同じ軸の中で同じ文が無い（段階が変わると必ず話し方が変わる）
+    levels = ("very_low", "low", "mid", "high", "very_high")
+    for name in TRAIT_TEXT:
+        assert tuple(TRAIT_TEXT[name]) == levels
+        assert len(set(TRAIT_TEXT[name].values())) == len(levels)
+    assert tuple(LENGTH) == levels and len(set(LENGTH.values())) == len(levels)
+
+
 def test_talkativeness_changes_length():
-    assert "1回の返答は1文。" in build_system_prompt(
+    assert "1回の返答は短い1文。" in build_system_prompt(
         "ふたまる", Traits(talkativeness=0.1), [], None, NOW
+    )
+    assert "1回の返答は1文。" in build_system_prompt(
+        "ふたまる", Traits(talkativeness=0.35), [], None, NOW
+    )
+    assert "1回の返答は2文くらい。" in build_system_prompt(
+        "ふたまる", Traits(talkativeness=0.65), [], None, NOW
     )
     assert "1回の返答は2〜3文で、ときどき自分から話題も振る。" in build_system_prompt(
         "ふたまる", Traits(talkativeness=0.9), [], None, NOW
@@ -78,3 +104,123 @@ def test_memory_section_top10_and_summary():
     assert "覚えていること:" in p and p.count("\n- ") == 10
     assert "- 記憶0\n" not in p and "- 記憶1\n" not in p and "- 記憶11" in p
     assert p.endswith("前回の会話: テストの話をした")
+
+
+def test_prompt_mentions_dialect_and_person():
+    p = build_system_prompt(
+        "ふたまる", Traits(), [], None, NOW, dialect="kansai", person_name="たろう"
+    )
+    assert "関西弁" in p and "たろう" in p
+    assert "名前を聞" not in p
+    asking = build_system_prompt("ふたまる", Traits(), [], None, NOW, ask_name=True)
+    assert "名前を聞" in asking
+
+
+def test_prompt_defaults_add_nothing():
+    base = build_system_prompt("ふたまる", Traits(), [], None, NOW)
+    same = build_system_prompt(
+        "ふたまる", Traits(), [], None, NOW, dialect="standard", person_name=None, ask_name=False
+    )
+    assert base == same
+    assert "今話している相手" not in base
+
+
+# --- 育った日数・前回からの日数（#82、仕様 §6.7） ---
+@pytest.mark.parametrize(
+    "earlier,expected",
+    [
+        (datetime(2026, 11, 15, 9, 0, tzinfo=JST), 0),  # 同じ日
+        (datetime(2026, 11, 14, 23, 59, tzinfo=JST), 1),  # 1 分前でも日付が変われば 1 日
+        (datetime(2026, 11, 12, 11, 0, tzinfo=JST), 3),
+        (datetime(2026, 11, 14, 15, 30, tzinfo=UTC), 0),  # UTC でも JST の日付で数える
+    ],
+)
+def test_days_between_counts_jst_calendar_days(earlier, expected):
+    assert days_between(earlier, NOW) == expected
+
+
+def test_status_first_day():
+    text = plant_status_text(NOW, None, NOW)
+    assert "育ち始めて1日目" in text
+    assert "初めて" in text  # まだ誰とも話していない
+
+
+@pytest.mark.parametrize("since,phrase", [(0, "今日も"), (1, "きのうぶり"), (3, "3日ぶり")])
+def test_status_days_since_last_talk(since, phrase):
+    text = plant_status_text(NOW - timedelta(days=10), NOW - timedelta(days=since), NOW)
+    assert "育ち始めて11日目" in text and phrase in text
+
+
+@pytest.mark.parametrize(
+    "day,milestone", [(1, False), (5, True), (7, True), (30, True), (100, True), (29, False)]
+)
+def test_status_mentions_milestones(day, milestone):
+    text = plant_status_text(NOW - timedelta(days=day - 1), None, NOW)
+    assert (f"今日は{day}日目の節目" in text) is milestone
+
+
+def test_prompt_includes_plant_status_only_when_given():
+    assert "植物の状態" not in build_system_prompt("ふたまる", Traits(), [], None, NOW)
+    p = build_system_prompt(
+        "ふたまる", Traits(), [], None, NOW, plant_status="植物の状態:\n- 育ち始めて5日目。"
+    )
+    assert "育ち始めて5日目" in p
+
+
+def test_status_includes_weather_when_given():
+    text = plant_status_text(NOW, None, NOW, weather="今日の天気は晴れ。")
+    assert text.splitlines()[1].startswith("- 今日の天気は晴れ。")  # 天気を最初に置く
+    assert WEATHER_FEELING_INSTRUCTION in text  # 数字ではなく体の感じ方として話させる
+    assert "天気" not in plant_status_text(NOW, None, NOW)
+
+
+# --- 水やり（#81） ---
+def test_status_thanks_when_watered_in_this_session():
+    text = plant_status_text(
+        NOW - timedelta(days=9), None, NOW, last_watered_at=NOW, watered_now=True
+    )
+    assert "この会話で水をもらった" in text and "のどが渇いて" not in text
+
+
+@pytest.mark.parametrize(
+    "days_ago,line",
+    [
+        (0, "最後に水をもらったのは今日"),
+        (1, "最後に水をもらったのはきのう"),
+        (2, "最後に水をもらったのは2日前"),
+    ],
+)
+def test_status_last_watering(days_ago, line):
+    text = plant_status_text(
+        NOW - timedelta(days=9), None, NOW, last_watered_at=NOW - timedelta(days=days_ago)
+    )
+    assert line in text and "のどが渇いて" not in text
+
+
+def test_status_thirsty_after_remind_days():
+    text = plant_status_text(
+        NOW - timedelta(days=9), None, NOW, last_watered_at=NOW - timedelta(days=3), remind_days=3
+    )
+    assert "水をもらってから3日たって、のどが渇いている" in text
+
+
+def test_status_never_watered_is_thirsty_only_after_remind_days():
+    young = plant_status_text(NOW - timedelta(days=1), None, NOW, remind_days=3)
+    assert "水" not in young  # 育ち始めたばかりなら、まだ何も言わない
+    old = plant_status_text(NOW - timedelta(days=3), None, NOW, remind_days=3)
+    assert "まだ一度も水をもらっていなくて、のどが渇いている" in old
+
+
+# --- 植物の種類（#83） ---
+def test_status_tells_species_care():
+    text = plant_status_text(NOW, None, NOW, species="ポトス")
+    assert "あなたはポトス" in text and "寒さ" in text
+
+
+def test_status_unknown_species_only_name():
+    text = plant_status_text(NOW, None, NOW, species="ふしぎな草")
+    assert "あなたはふしぎな草。" in text
+
+
+def test_status_without_species_has_no_species_line():
+    assert "あなたは" not in plant_status_text(NOW, None, NOW)
