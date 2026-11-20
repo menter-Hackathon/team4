@@ -595,6 +595,7 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（自前の LiveKit サーバー、§3.2。Docker ではエージェントと中継の `LIVEKIT_URL` を compose が `ws://livekit:7880` にする）
 - `RELAY_DEVICE_KEY`（鉢が中継につなぐときのキー、§3.2.1）、`RELAY_PORT`（中継が待ち受けるポート、既定 8780）
 - `CLOUDFLARE_TUNNEL_TOKEN`（Docker の Cloudflare Tunnel のトークン、§3.2）
+- `DASHBOARD_PUBLIC_HOSTNAME`（Docker のトンネルでダッシュボードを公開するホスト名、§6.6。空なら公開しない）
 - `FUTAMARU_DB_PATH`（既定: `./data/futamaru.db`）
 - `WAKE_WORDS`（カンマ区切り、既定は §5.3）
 - `SLEEP_AFTER_SECONDS`（既定: 60）

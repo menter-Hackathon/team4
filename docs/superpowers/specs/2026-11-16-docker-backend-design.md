@@ -128,7 +128,7 @@ docker compose up
 - **守り方**: ダッシュボードは会話の記憶が見えるので、誰でも見られる形にはしない。DB の `accounts` テーブルに登録したアカウントで、ブラウザの Basic 認証でログインした人だけが見られる（エージェントの仕様 §6.6）
   - 候補には Cloudflare Access（Zero Trust でメールの許可リストを作る）もあった。ユーザー（ハード担当）が「アカウントの考え方を作り、サーバーの DB にアカウントを持たせたい」と決めたので、ダッシュボード側のログインにした
   - コンテナの中では `--host 0.0.0.0` で待ち受けるので、ダッシュボードは必ずログインを求める（トンネルから来たか、PC の `127.0.0.1:8765` から来たかで分けない）
-- **トンネル**: `tunnel` のトンネルの「公開ホスト名」に、`futamaru.shionkk.f5.si` → `http://dashboard:8765` を足す（中継の公開ホスト名と同じトンネル。手順は `docs/deploy.md` 3.6）。Cloudflare の無料の証明書はサブドメイン 1 段（`*.shionkk.f5.si`）だけに対応するので、2 段のホスト名にはしない
+- **トンネル**: 中継と同じトンネル（`tunnel`）を使う。compose の `configs` の `tunnel-ingress` に、`.env` の `DASHBOARD_PUBLIC_HOSTNAME`（デモでは `futamaru.shionkk.f5.si`）→ `http://dashboard:8765` の規則を、中継の規則と最後の 404 の間に足す。空のときは使われない名前（`dashboard.invalid`）にして、全部を受ける規則にならないようにする。DNS は `cloudflared tunnel route dns futamaru <ホスト名>` で登録する（手順は `docs/deploy.md` 3.6）。Cloudflare の無料の証明書はサブドメイン 1 段（`*.shionkk.f5.si`）だけに対応するので、2 段のホスト名にはしない
 - **アカウントの用意**: デプロイする人が `docker compose exec agent python -m scripts.accounts add <名前>` で作る。アカウントが無いうちは誰もログインできない
 - **DB の入れ替え**: `scripts/use_db.py` で発表用の DB に入れ替えるときは、入れ替える前の DB のアカウントを新しい DB に写す
 

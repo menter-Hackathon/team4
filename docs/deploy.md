@@ -136,21 +136,6 @@ rm ~/.cloudflared/cert.pem                         # ドメインを操作でき
 
 トンネルは `--profile tunnel` を付けて起動したときだけ動きます（4）。トークンの無い PC で、トンネルが失敗し続けないようにするためです。
 
-## 3.6 ダッシュボードを外から開けるようにする
-
-発表者やチームが、自分の PC のブラウザからダッシュボードを見られるようにします。鉢と同じトンネルで、`https://futamaru.<チームのドメイン>` をダッシュボード（compose の `dashboard`、`http://dashboard:8765`）に届けます。
-
-**ダッシュボードには会話の記憶が出るので、ログインした人だけが見られます**（仕様 §6.6）。ブラウザでページを開くと、アカウント名とパスワードを聞かれます。アカウントは 6.6 で作ります。アカウントが 1 つも無いうちは、誰も開けません。
-
-1. Cloudflare のダッシュボードで、3.5 のトンネルの「公開ホスト名（Public Hostname）」をもう 1 つ足す
-   - サブドメインとドメイン: `futamaru` ＋ `<チームのドメイン>` → `futamaru.<チームのドメイン>`（デモでは `futamaru.shionkk.f5.si`）
-   - サービス: 種類 `HTTP`、URL `dashboard:8765`
-   - **サブドメインは 1 段にします**（`dash.futamaru.<ドメイン>` のような 2 段にしない）。Cloudflare の無料の証明書は 1 段のサブドメインにしか効かず、2 段だとブラウザが開けません
-2. 6.6 でアカウントを作る
-3. 自分の PC のブラウザで `https://futamaru.<チームのドメイン>` を開き、アカウント名とパスワードを入れてダッシュボードが出れば成功。間違ったパスワードでは開けないことも確かめる
-
-この PC の `http://127.0.0.1:8765` から開くときも、同じアカウントでログインします。
-
 ### Windows: WSL を止めないようにする
 
 WSL2 の Ubuntu は、開いているウィンドウ（や SSH の接続）が全部閉じると、少しして止まります。止まると Docker のコンテナもすべて止まります。デモの間ずっと動かすには、次のどちらかをします。
@@ -163,6 +148,28 @@ $a = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-d Ubuntu -- sleep in
 $t = New-ScheduledTaskTrigger -AtLogOn
 Register-ScheduledTask -TaskName "futamaru WSL keepalive" -Action $a -Trigger $t -Settings (New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0)
 ```
+
+## 3.6 ダッシュボードを外から開けるようにする
+
+発表者やチームが、自分の PC のブラウザからダッシュボードを見られるようにします。鉢と同じトンネル（3.5）で、`https://futamaru.<ドメイン>` をダッシュボード（compose の `dashboard`、`http://dashboard:8765`）に届けます。
+
+**ダッシュボードには会話の記憶が出るので、ログインした人だけが見られます**（仕様 §6.6）。ブラウザでページを開くと、アカウント名とパスワードを聞かれます。アカウントは 6.6 で作ります。アカウントが 1 つも無いうちは、誰も開けません。
+
+1. 公開ホスト名を決めて、DNS に登録する
+   - **CLI で作ったトンネル**: 3.5 と同じ `$CF` で、DNS に登録してから `.env` に書きます（`cert.pem` を消したあとなら、先に `$CF tunnel login` をもう一度します）
+     ```bash
+     $CF tunnel route dns futamaru futamaru.<ドメイン>
+     echo "DASHBOARD_PUBLIC_HOSTNAME=futamaru.<ドメイン>" >> .env
+     rm ~/.cloudflared/cert.pem
+     ```
+     どのホスト名をどのコンテナに届けるかは、`compose.yaml` の `configs` の `tunnel-ingress` に書いてあります（`DASHBOARD_PUBLIC_HOSTNAME` → `dashboard:8765`）
+   - **ダッシュボードで作ったトンネル**: 同じトンネルの「公開ホスト名（Public Hostname）」をもう 1 つ足します。サブドメインとドメインは `futamaru` ＋ `<ドメイン>`、サービスは種類 `HTTP`・URL `dashboard:8765`
+   - **サブドメインは 1 段にします**（`dash.futamaru.<ドメイン>` のような 2 段にしない）。Cloudflare の無料の証明書は 1 段のサブドメインにしか効かず、2 段だとブラウザが開けません
+2. 6.6 でアカウントを作る
+3. トンネルを起動し直す: `docker compose --profile tunnel up -d`（`.env` を読み直して、ingress が変わったトンネルを作り直す）
+4. 自分の PC のブラウザで `https://futamaru.<ドメイン>` を開き、アカウント名とパスワードを入れてダッシュボードが出れば成功。間違ったパスワードでは開けないことも確かめる
+
+この PC の `http://127.0.0.1:8765` から開くときも、同じアカウントでログインします。
 
 ## 4. 起動する
 
@@ -272,7 +279,7 @@ docker compose exec agent python -m scripts.accounts delete chamu           # �
 | 起動直後の最初の返事だけ失敗する（`LLM error`） | GPU が温まるまで最初の 1〜2 回は LLM が遅い（2026-11-19、RTX 5060 で確認）。もう一度話しかければ返事をする |
 | `docker compose logs livekit` に `secret is too short` | `.env` の `LIVEKIT_API_SECRET` を 32 文字以上にする（3 の `openssl rand -hex 32`） |
 | ダッシュボードでログインできない | `docker compose exec agent python -m scripts.accounts list` でアカウントがあるか見る。無ければ 6.6 で作る。パスワードを忘れたら `passwd` で変える。`docker compose logs dashboard` に「ログインに失敗しました」と出ていれば、アカウント名かパスワードの間違い |
-| `https://futamaru.<ドメイン>` が `502 Bad Gateway` や Cloudflare のエラーになる | `docker compose ps` で `dashboard` と `tunnel` が `running` か見る。Cloudflare の公開ホスト名のサービスが `HTTP` / `dashboard:8765` か確かめる（3.6） |
+| `https://futamaru.<ドメイン>` が `404` や `502 Bad Gateway`、Cloudflare のエラーになる | `docker compose ps` で `dashboard` と `tunnel` が `running` か見る。`404` なら `.env` の `DASHBOARD_PUBLIC_HOSTNAME` が開いたホスト名と同じか確かめ、`docker compose --profile tunnel up -d` で起動し直す。ダッシュボードで作ったトンネルなら、公開ホスト名のサービスが `HTTP` / `dashboard:8765` か確かめる（3.6） |
 | `agent` がすぐ止まる | `docker compose logs agent` を見る。`環境変数 … が設定されていません` なら `.env` の書き漏れ |
 
 解決しないときは、`docker compose logs` の該当部分を Discord に貼ってください（**キーが含まれていないか確認してから**）。

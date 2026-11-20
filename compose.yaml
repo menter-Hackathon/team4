@@ -251,7 +251,8 @@ services:
     # DB は読むだけ。エージェントが動いている最中でも開ける（scripts/dashboard.py）
     # --host 0.0.0.0: コンテナの中では、外（PC 側と tunnel）からの接続を受け付ける。
     #   コンテナの中の 127.0.0.1 には PC のブラウザや tunnel から届かないため。
-    #   PC 側の公開は下の ports で 127.0.0.1 に絞る。外からは tunnel（http://dashboard:8765）を通ってだけ届く。
+    #   PC 側の公開は下の ports で 127.0.0.1 に絞る。外からは tunnel（.env の DASHBOARD_PUBLIC_HOSTNAME →
+    #   http://dashboard:8765、下の configs）を通ってだけ届く。
     #   127.0.0.1 以外で待ち受けるので、ダッシュボードは必ずログインを求める（会話の記憶が見えるため、仕様 §6.6）。
     #   アカウントは docker compose exec agent python -m scripts.accounts add <名前> で作る（docs/deploy.md 6.6）
     # DASHBOARD_PLANTS: 並べる株（カンマ区切り、.env で変えられる。空なら a1,b1）
@@ -273,12 +274,17 @@ services:
 
 # トンネルの ingress（公開するホスト名 → 届け先のコンテナ）。ファイルを増やさず、ここに直接書く。
 # 上から順に見て、どれにも当たらなければ最後の 404 を返す（cloudflared の決まりで、最後は全部を受ける規則にする）
+#   RELAY_PUBLIC_HOSTNAME     → relay（鉢がつなぐ中継）
+#   DASHBOARD_PUBLIC_HOSTNAME → dashboard（性格のダッシュボード。ログインが要る、仕様 §6.6）
+# .env が空のときに全部を受ける規則にならないよう、既定値は使われない名前（.invalid）にする
 configs:
   tunnel-ingress:
     content: |
       ingress:
         - hostname: ${RELAY_PUBLIC_HOSTNAME:-relay.invalid}
           service: http://relay:8780
+        - hostname: ${DASHBOARD_PUBLIC_HOSTNAME:-dashboard.invalid}
+          service: http://dashboard:8765
         - service: http_status:404
 
 volumes:
