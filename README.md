@@ -95,7 +95,7 @@
 | 名前 | 使い道 | ライセンス |
 |---|---|---|
 | [LiveKit Agents](https://github.com/livekit/agents) | 音声エージェントの土台 | Apache 2.0 |
-| [Gemma 4](https://ai.google.dev/gemma)（Google） | 会話と振り返りの LLM | [Gemma の利用条件](https://ai.google.dev/gemma/terms)に従う |
+| [Gemma 4](https://huggingface.co/google/gemma-4-E4B-it)（Google） | 会話と振り返りの LLM | Apache 2.0 |
 | [Ollama](https://github.com/ollama/ollama) | Gemma 4 を PC で動かす | MIT |
 | [kotoba-whisper v2.0](https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0)（Kotoba Technologies） | 声を文字にする | Apache 2.0 |
 | [Speaches](https://github.com/speaches-ai/speaches) | kotoba-whisper を API として動かす | MIT |
