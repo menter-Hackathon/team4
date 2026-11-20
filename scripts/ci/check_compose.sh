@@ -121,4 +121,35 @@ assert cmd[cmd.index("--plants") + 1] == "a1", cmd
 print("ok: DASHBOARD_PLANTS で並べる株を変えられる")
 PY
 
+# 6. 声（tts）は既定では CPU 版で、STT は Speaches の既定の持ち方であること（docs/deploy.md の 2.5）
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))["services"]
+assert s["tts"]["image"].endswith(":cpu-1.2.0"), s["tts"]["image"]
+assert "deploy" not in s["tts"], s["tts"].get("deploy")
+assert s["stt"]["environment"]["WHISPER__COMPUTE_TYPE"] == "default", s["stt"]["environment"]
+print("ok: 既定では声は CPU、STT は既定の持ち方")
+PY
+
+# 7. .env の COMPOSE_FILE で compose.tts-gpu.yaml を足すと、声が GPU 版になり、TTS_GPU の GPU を使うこと。
+#    DOCKER_STT_COMPUTE_TYPE で STT を 8 ビットにできること（GPU 1 枚に全部載せるとき）
+cat >> .env <<'ENV'
+COMPOSE_FILE=compose.yaml:compose.tts-gpu.yaml
+TTS_GPU=1
+DOCKER_STT_COMPUTE_TYPE=int8_float16
+ENV
+docker compose config --format json > /tmp/compose.json
+python3 - <<'PY'
+import json
+s = json.load(open("/tmp/compose.json"))["services"]
+tts = s["tts"]
+assert tts["image"].endswith(":nvidia-1.2.0"), tts["image"]
+assert "--use_gpu" in " ".join(tts["entrypoint"]), tts["entrypoint"]
+assert tts["deploy"]["resources"]["reservations"]["devices"][0]["device_ids"] == ["1"], tts["deploy"]
+# 声のモデルのボリュームは CPU 版と同じものを使う（入れた声を GPU 版でも使える）
+assert any(v["source"] == "aivis-data" for v in tts["volumes"]), tts["volumes"]
+assert s["stt"]["environment"]["WHISPER__COMPUTE_TYPE"] == "int8_float16", s["stt"]["environment"]
+print("ok: compose.tts-gpu.yaml で声が GPU 版になり、STT を 8 ビットにできる")
+PY
+
 rm -f .env

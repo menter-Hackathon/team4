@@ -52,6 +52,20 @@ STT_GPU=1
 
 書かなければ、LLM が 0 番、STT が 1 番を使います。1 の表で 0 番がメモリの小さい GPU（8GB）なら、`LLM_GPU=1`・`STT_GPU=0` と書いてください。
 
+## 2.5 植物の声（AivisSpeech）を GPU で動かす（返事を速くする）
+
+声は既定では CPU で作ります（1 文 0.7〜1.7 秒）。GPU に約 1.4GB の空きがあれば、GPU で作ると 1 文 0.2 秒ほどになり、返事が 0.5〜1.4 秒速くなります（2026-11-19、RTX 5060 で測定）。3 で作る `.env` に次を書きます。
+
+```
+COMPOSE_FILE=compose.yaml:compose.tts-gpu.yaml
+TTS_GPU=0
+```
+
+- `COMPOSE_FILE` を書くと、`docker compose` が `compose.tts-gpu.yaml` も一緒に読み、声のコンテナが GPU 版になります
+- `TTS_GPU` は声に使う GPU の番号です（空なら 0 番）。GPU が 2 枚なら、空きの多いほうにします
+- **GPU が 1 枚（8GB）で LLM・STT と一緒に載せるとき**は、STT のメモリも減らします。`DOCKER_STT_COMPUTE_TYPE=int8_float16` と書くと、STT が約 1GB 減ります（聞き取りと速さは変わりませんでした）。RTX 5060（8GB）1 枚で、3 つ合わせて 7.6〜7.8GB に収まりました
+- 起動して最初の 1 回の読み上げは、GPU の準備で 1 分以上かかります。`tts-init` が済ませてから `agent` が起動するので、そのまま待ってください
+
 ## 3. リポジトリと `.env` を用意する
 
 **Windows の場合は、WSL2 の Ubuntu の中にクローンしてください**（スタートメニューから「Ubuntu」を開き、そのターミナルで下のコマンドを実行する）。`C:\` の下に置くと、植物の記憶の DB（SQLite）が Windows と WSL2 の間のファイル共有を通るため、壊れたり「database is locked」になったりすることがあります。以降のコマンドも、すべてこの Ubuntu のターミナルで実行します。
@@ -153,7 +167,8 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 | `llm-init` が `exited (1)` で終わり、`agent` が起動しない | `docker compose logs llm-init` を見る。「ダウンロードできません」ならインターネット接続か `.env` の `DOCKER_LLM_MODEL`、「読み込めません」なら `docker compose logs llm` で GPU のエラーを見る |
 | `llm` のログに `CUDA driver version is insufficient` | ドライバが古い。1 の確認をして、ドライバを更新する（570 以上） |
 | 返事がとても遅い（10 秒以上） | `docker compose logs llm-init` で、モデルが全部 GPU に載ったか見る。一部しか載っていなければ、`LLM_GPU` を 12GB の GPU にする。ゲームやブラウザなど、GPU を使うアプリを閉じる |
-| GPU が 1 枚しかない | LLM と STT を同じ GPU に載せる必要がある。`.env` に `LLM_GPU=0`・`STT_GPU=0` と書くと試せるが、12GB の GPU 1 枚では足りないことがある。Discord で相談してください |
+| GPU が 1 枚しかない | LLM と STT を同じ GPU に載せる。`.env` に `LLM_GPU=0`・`STT_GPU=0` と書く。8GB の GPU 1 枚（RTX 5060）で、`DOCKER_STT_COMPUTE_TYPE=int8_float16` にすれば、声（2.5）まで全部載った |
+| `docker compose logs tts` に CUDA のメモリのエラー（`out of memory`） | GPU の空きが足りない。`.env` の `DOCKER_STT_COMPUTE_TYPE=int8_float16` を確かめる。それでも足りなければ `COMPOSE_FILE` の行を消して、声を CPU に戻す（2.5） |
 | `could not select device driver "nvidia"` | Docker から GPU が見えていない。1 の `nvidia-smi` の確認からやり直す（Windows は Docker Desktop の WSL2 設定、Linux は NVIDIA Container Toolkit） |
 | `stt-init` が `exited (1)` で終わり、`agent` が起動しない | STT のモデルを用意・読み込みできなかった。`docker compose logs stt-init` と `docker compose logs stt` を確認し、`.env` に `DOCKER_STT_MODEL=Systran/faster-whisper-large-v3` を書いて `docker compose up -d` |
 | `tts-init` が `exited (1)` で終わり、`agent` が起動しない | 声のモデルを用意できなかった。`docker compose logs tts-init` を見る。「入れられませんでした」ならインターネット接続か `AIVIS_MODELS` の UUID、「スタイル ID … が見つかりません」なら `AIVIS_SPEAKER` を直す（ログに入っている ID の一覧が出る）。急ぐときは `.env` を `TTS_PROVIDER=openai` にして `docker compose up -d` すれば、OpenAI の声で動く |

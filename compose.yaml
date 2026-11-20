@@ -82,6 +82,10 @@ services:
     environment:
       # モデルを使い終わっても外さない（外すと次の発話の文字起こしが遅くなる）
       STT_MODEL_TTL: "-1"
+      # モデルの数の持ち方（.env の DOCKER_STT_COMPUTE_TYPE。空なら Speaches の既定 = GPU では 16 ビット）。
+      # int8_float16 にすると GPU のメモリが約 1GB 減る。聞き取りと速さは変わらなかった
+      # （2026-11-19、ohsawa: 7.5GB → 6.5GB、「二丸、こんにちは」0.34 秒）。GPU 1 枚に AivisSpeech も載せるとき用（#39）
+      WHISPER__COMPUTE_TYPE: ${DOCKER_STT_COMPUTE_TYPE:-default}
     volumes:
       - speaches-cache:/home/ubuntu/.cache/huggingface/hub
     restart: unless-stopped
@@ -106,7 +110,7 @@ services:
   tts:
     # AivisSpeech Engine 公式イメージ（CPU 版）。版を固定する。
     # CPU にするのは、GPU のメモリを llm（8 割）と stt で使い切るため。短い文なら CPU でも 1 秒前後で声になる
-    # （2026-11-18、M5 の Mac で 11 字 0.7 秒）
+    # （2026-11-18、M5 の Mac で 11 字 0.7 秒）。GPU に空きがあれば compose.tts-gpu.yaml で GPU 版にできる（#39）
     image: ghcr.io/aivis-project/aivisspeech-engine:cpu-1.2.0
     # 声のモデルを置くフォルダ（ボリューム）は、最初は root の持ち物として作られる。
     # AivisSpeech は user というユーザーで動くので、そのままだとモデルを保存できない。
