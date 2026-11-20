@@ -28,7 +28,7 @@ LiveKit には中継（サーバー側）が入るので、この端末は LiveK
 |---|---|
 | `main/main.c` | 入り口。設定の確認 → 音まわり → Wi-Fi → 中継の順に始める |
 | `main/board.c` | I2C・I2S・アンプ・音声チップ ES8311 の初期化。**ピンの割り当てはここ** |
-| `main/media.c` | マイクの音（エコーキャンセルつき）を 20ms ずつ取り出す。届いた声をためて鳴らす（届かないあいだは無音） |
+| `main/media.c` | マイクの音を 20ms ずつ取り出す（植物が話している間は無音にする）。届いた声をためて鳴らす（届かないあいだは無音） |
 | `main/relay.c` | 中継との WebSocket。start → ready → 音の送り受け。切れたら間を空けてつなぎ直す |
 | `main/status_led.c` | XIAO の LED で状態を見せる |
 | `main/Kconfig.projbuild` | 設定項目（中継の URL・合言葉・株の ID・音量・マイクの増幅・AEC の有無） |
@@ -116,14 +116,21 @@ I (...) futamaru: This device is plant "a1"
 I (...) board: I2C device found at 0x18        ← ES8311（音声チップ）
 I (...) board: I2C device found at 0x43        ← アンプの ON/OFF 用のチップ
 I (...) board: Speaker amp enabled
-I (...) media: Media ready (AEC: on, 16000 Hz, 640 bytes per frame)
+I (...) media: Media ready (AEC: off, 16000 Hz, 640 bytes per frame)
 I (...) futamaru: Connecting to Wi-Fi "..."
 I (...) relay: Connecting to wss://.../relay
 I (...) relay: WebSocket connected
 I (...) relay: Sent start (plant_id "a1"), waiting for ready
 I (...) relay: Relay is ready. Streaming the microphone
-I (...) relay: Mic frames sent: 1500, voice received: 0 bytes   ← 30 秒ごと。送った数が増えていれば音は届いている
+I (...) relay: Mic frames sent: 500 (muted 0), mic peak: 273, voice received: 0 bytes   ← 10 秒ごと
 ```
+
+最後の行は 10 秒ごとに出ます。
+
+- `Mic frames sent`: 送ったマイクのフレームの数（起動してからの合計）。増えていれば音は届いている
+- `muted`: 植物が話していたので無音にしたフレームの数（起動してからの合計）
+- `mic peak`: その 10 秒でいちばん大きかったマイクの音（0〜32767）。静かな部屋でも 50 以上あるのがふつう。**0 が続くならマイクの線（G7 → D3）がつながっていない**
+- `voice received`: 中継から届いた声の量（起動してからの合計）
 
 | 出たログ | 疑うこと |
 |---|---|
@@ -154,7 +161,7 @@ LED が逆に光る（点灯と消灯が入れ替わる）ときは、`main/stat
 1. **I2C に 0x18 と 0x43 が見えるか**（配線の確認）
 2. **声が鳴るか・音量は足りるか。** 小さければ `CONFIG_FUTAMARU_SPEAKER_VOLUME` を上げる（`idf.py menuconfig` の「Futamaru」）
 3. **マイクの音が届くか。** サーバーのログで文字起こしが出るか（または上の偽物の中継で自分の声が返るか）。小さければ `CONFIG_FUTAMARU_MIC_GAIN_DB` を上げる
-4. **エコーキャンセルが効くか。** 植物が話している間に話しかけ、植物が自分の声を拾って返事をし直したりしないか
+4. **植物が自分の声を拾わないか。** 植物が返事をしたあと、自分の声に返事をし直したりしないか。植物が話すたびに、ログの `muted` の数が増えていればマイクは止まっている
 
 ### 手元の PC だけで試す（偽物の中継）
 
@@ -193,9 +200,17 @@ asyncio.run(main())
 ```
 
 `sdkconfig.secrets` の `CONFIG_FUTAMARU_RELAY_URL` を `ws://<PC の IP>:8765/relay` にし、合言葉は何か入れて書き込みます（PC と XIAO は同じ Wi-Fi に）。
-AEC が効いていれば、自分の声は 1 回だけ返ってきます。何度も繰り返して聞こえる（ハウリングする）なら AEC が効いていません。音量に気をつけてください。
+返ってきた声を鳴らしている間はマイクを止めるので、自分の声は 1 回だけ返ってきます。何度も繰り返して聞こえる（ハウリングする）なら、マイクが止まっていません。音量に気をつけてください。
 
-### エコーキャンセル（AEC）がうまく動かないとき
+### 植物が自分の声を拾わないようにする仕組み（エコー対策）
 
-ES8311 の「スピーカーに出した音を録音の右チャンネルに入れる」機能と、esp_capture（esp-sr）の AEC を使っていますが、この部品の組み合わせで動くかは実機で未確認です（[parts-selection.md](../docs/hardware/parts-selection.md)）。
-だめなときは `sdkconfig.secrets` か `sdkconfig.defaults` に `CONFIG_FUTAMARU_USE_AEC=n` を書いてビルドし直し、サーバー側で割り込みを止めます（`agent/main.py` の `interruption={"enabled": False}`。エージェント担当と相談）。
+既定では、**植物が話している間と、話し終えてから 0.3 秒の間は、マイクの音を無音にして送ります**（半二重。`main/media.c`、仕様 §9 の 4 の補足）。
+植物が自分の声に返事をし直すことはありませんが、植物が話している途中で割り込むことはできません。
+
+はじめはエコーキャンセル（AEC）を使う作りでした。ES8311 の「スピーカーに出した音を録音の右チャンネルに入れる」機能と、esp_capture（esp-sr）の AEC を組み合わせるものです。
+ところが 2026-11-20 の実機では、AEC を通すと話しかけた人の声まで消えて、サーバーに何も届きませんでした。
+AEC を通す前の音は正常でした（静かな部屋でマイクの大きさが 80 くらい、参照の音はスピーカーが無音のとき 0）。AEC の中で消えています。
+そのため、今は AEC を使わないのが既定です（`sdkconfig.defaults` の `CONFIG_FUTAMARU_USE_AEC=n`）。
+
+AEC を試すときは、`sdkconfig.secrets` に `CONFIG_FUTAMARU_USE_AEC=y` を書いてビルドし直します（`sdkconfig` を消してから）。
+y のときはマイクを止めないので、AEC が効かないと植物が自分の声を拾います。

@@ -33,12 +33,14 @@ menu "Futamaru"
 
     config FUTAMARU_USE_AEC
         bool "Use echo cancellation (AEC)"
-        default y
+        default n
         help
-            ES8311 がスピーカーに出した音（参照）をマイクの音と一緒に録り、
+            y にすると、ES8311 がスピーカーに出した音（参照）をマイクの音と一緒に録り、
             植物自身の声をマイクの音から消す（仕様 §9 の 4）。
-            うまく動かないときは n にして、サーバー側で割り込みを止める
-            （docs/hardware/parts-selection.md）。
+            既定は n。2026-11-20 の実機（XIAO ESP32S3 ＋ Atomic Voice Base）では、
+            AEC を通すと話しかけた人の声まで消えてしまったため。
+            n のときは、植物が話している間（と話し終えてから 0.3 秒）マイクの音を無音にする
+            （半二重。仕様 §9 の 4 の補足、main/media.c）。
 
     config FUTAMARU_SPEAKER_VOLUME
         int "Speaker volume (0-100)"

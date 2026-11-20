@@ -19,6 +19,12 @@
 //   esp_capture は本来「音を圧縮して取り出す」部品だが、出口（sink）の形式を PCM にすれば、生の音がそのまま取れる。
 //
 //   AEC を使わない（CONFIG_FUTAMARU_USE_AEC=n）ときは esp_capture を通さず、ES8311 から直接読んで左（マイク）だけ使う。
+//
+// AEC を使わないときのエコー対策（半二重。仕様 §9 の 4 の補足）:
+//   植物が話している間と、話し終えてから MIC_MUTE_TAIL_MS の間は、マイクの音を無音（全部 0）にする。
+//   植物は自分の声を拾わなくなるが、植物が話している途中で割り込むことはできない。
+//   2026-11-20 の実機では、AEC を通すと話しかけた人の声まで消えてしまったので、今はこちらが既定。
+//   （AEC を通す前のマイクの音と参照の音は正常だった。AEC の中で消えている）
 
 #include "media.h"
 
@@ -53,8 +59,20 @@ static const char *TAG = "media";
 #define PLAY_PREBUFFER_MAX_WAIT 3
 // 待ち行列がいっぱいのとき、空くのを待つ最長の時間
 #define PLAY_PUSH_TIMEOUT_MS 500
+// AEC を使わないとき、植物が話し終えてからもマイクを無音にしておく時間。
+// 話し終えた直後も、まだ植物の声がマイクに入ってくるので、少し長めに止める:
+//   - I2S の送り出しの待ち行列（6 × 240 サンプル = 約 90ms）に残っている声が、あとから鳴る
+//   - マイク側の I2S の待ち行列にも同じくらいの遅れがある
+//   - 部屋の響きが 100ms くらい残る
+// 合わせて 300ms。長くしすぎると、植物の返事の直後に話した言葉の頭が欠ける
+#define MIC_MUTE_TAIL_MS 300
 
 static bool s_use_aec;
+// 再生のタスクが最後に声（無音ではない、中継から届いた音）を鳴らした時刻。
+// 再生のタスクが書き、マイクのタスクが読むので volatile にする
+static volatile TickType_t s_last_voice_tick;
+static volatile bool s_voice_played; // 起動してから一度でも声を鳴らしたか
+static volatile uint32_t s_mic_muted_frames;
 
 // --- 録音（AEC あり）: esp_capture ---
 static esp_capture_handle_t s_capture;
@@ -238,6 +256,9 @@ static void playback_task(void *arg)
         // 2. 1 フレームそろっていれば取り出す。足りなければ無音（待ち行列が空 = 声が途切れた）
         if (playing && available >= MEDIA_FRAME_BYTES) {
             xStreamBufferReceive(s_play_buffer, mono, MEDIA_FRAME_BYTES, 0);
+            // 声を鳴らした時刻を覚えておく（AEC を使わないとき、マイクを止める目安。plant_is_speaking()）
+            s_last_voice_tick = xTaskGetTickCount();
+            s_voice_played = true;
         } else {
             if (playing) {
                 playing = false;
@@ -307,9 +328,43 @@ bool media_init(bool use_aec)
     return true;
 }
 
+/// 植物が話している途中か（話し終えてから MIC_MUTE_TAIL_MS の間も含む）。
+///
+/// 次のどちらかなら true:
+///   - 再生の待ち行列に、これから鳴らす声が残っている
+///   - 最後に声を鳴らしてから MIC_MUTE_TAIL_MS たっていない
+static bool plant_is_speaking(void)
+{
+    if (xStreamBufferBytesAvailable(s_play_buffer) > 0) {
+        return true;
+    }
+    // TickType_t の引き算は、時刻の数字が一周しても正しい差になる
+    return s_voice_played && (xTaskGetTickCount() - s_last_voice_tick) < pdMS_TO_TICKS(MIC_MUTE_TAIL_MS);
+}
+
 bool media_read_mic_frame(uint8_t *frame)
 {
-    return s_use_aec ? read_mic_frame_with_aec(frame) : read_mic_frame_plain(frame);
+    // 1. AEC を使うときは、AEC を通した音をそのまま渡す（植物自身の声は AEC が消す）
+    if (s_use_aec) {
+        return read_mic_frame_with_aec(frame);
+    }
+    // 2. AEC を使わないときは、まず読む（読まないと I2S の待ち行列があふれる）
+    if (!read_mic_frame_plain(frame)) {
+        return false;
+    }
+    // 3. 植物が話している間は、植物自身の声が入っているので無音にする（半二重）。
+    //    フレームを送らないのではなく無音を送るのは、中継とのやりとりの形を変えないため
+    //    （中継は無音に近いフレームを LiveKit に流さない。仕様 §3.2.1）
+    if (plant_is_speaking()) {
+        memset(frame, 0, MEDIA_FRAME_BYTES);
+        s_mic_muted_frames++;
+    }
+    return true;
+}
+
+uint32_t media_mic_muted_frames(void)
+{
+    return s_mic_muted_frames;
 }
 
 void media_play(const uint8_t *data, size_t len)

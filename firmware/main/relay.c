@@ -438,8 +438,10 @@ static bool run_session(void)
         }
         if (xTaskGetTickCount() - last_stats >= pdMS_TO_TICKS(STATS_INTERVAL_MS)) {
             last_stats = xTaskGetTickCount();
-            ESP_LOGI(TAG, "Mic frames sent: %lu, mic peak: %ld, voice received: %lu bytes",
-                     (unsigned long)s_mic_frames_sent, (long)s_mic_peak, (unsigned long)s_voice_bytes_received);
+            // muted = 植物が話していたので無音にしたマイクのフレーム数（AEC を使わないとき。media.c）
+            ESP_LOGI(TAG, "Mic frames sent: %lu (muted %lu), mic peak: %ld, voice received: %lu bytes",
+                     (unsigned long)s_mic_frames_sent, (unsigned long)media_mic_muted_frames(), (long)s_mic_peak,
+                     (unsigned long)s_voice_bytes_received);
             s_mic_peak = 0;
         }
     }

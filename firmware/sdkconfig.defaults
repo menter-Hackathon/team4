@@ -4,7 +4,8 @@ CONFIG_IDF_TARGET="esp32s3"
 #
 # ふたまる（main/Kconfig.projbuild）
 #
-CONFIG_FUTAMARU_USE_AEC=y
+# AEC を通すと話しかけた人の声まで消えたので、使わない（代わりに植物が話す間はマイクを止める。main/media.c）
+CONFIG_FUTAMARU_USE_AEC=n
 CONFIG_FUTAMARU_SPEAKER_VOLUME=85
 CONFIG_FUTAMARU_MIC_GAIN_DB=30
 CONFIG_FUTAMARU_STATUS_LED=y
