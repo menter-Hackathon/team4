@@ -421,6 +421,21 @@ class PlantStore:
             r["owner_dialect"],
         )
 
+    def finished_sessions(self, plant_id: str, person_id: int | None) -> list[Session]:
+        """その人（None ならお客さん）との、終わった会話を始まった順に全部返す（仕様 §6.6）。
+
+        ダッシュボードの「こんなふうに育てられた」（話した回数・時間帯・間隔・会話の長さ）に使う。
+        会話中（ended_at が NULL）のものは入れない。エージェントが動いている最中に開いても、
+        数が途中で揺れないようにするため。
+        """
+        # 「person_id IS ?」は、? が None なら「NULL である」（お客さん）という意味になる
+        rows = self._conn.execute(
+            "SELECT id FROM sessions WHERE plant_id = ? AND person_id IS ?"
+            " AND ended_at IS NOT NULL ORDER BY started_at, id",
+            (plant_id, person_id),
+        ).fetchall()
+        return [self.get_session(r["id"]) for r in rows]
+
     def set_session_person(self, session_id: int, person_id: int) -> None:
         """セッションの話し相手が誰か分かったときに記録する（始めはお客さん = NULL）。"""
         with self._conn:
@@ -546,6 +561,23 @@ class PlantStore:
                 (plant_id, person_id, session_id, iso(now)),
             )
         return True
+
+    def watering_count(self, plant_id: str, person_id: int | None) -> int:
+        """その人（None ならお客さん）が、その株に水をあげた回数（仕様 §6.6）。
+
+        水やりの行の person_id ではなく、その水やりをした「会話の相手」で数える。
+        「お水あげたよ」と言ってから名乗ると、水やりは名乗る前（person_id が NULL）で記録され、
+        あとで会話の相手だけがその人に変わる（conversation.py）。行の person_id で数えると、
+        その人のカードに水やりが出なくなるため（最終レビューの指摘、2026-11-20）。
+        会話中の水やりは数えない（話した回数 finished_sessions と数え方をそろえる）。
+        """
+        # waterings と sessions を session_id でつなぎ、会話の相手（s.person_id）で絞る
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM waterings w JOIN sessions s ON s.id = w.session_id"
+            " WHERE w.plant_id = ? AND s.person_id IS ? AND s.ended_at IS NOT NULL",
+            (plant_id, person_id),
+        ).fetchone()
+        return int(row[0])
 
     def watered_in_session(self, session_id: int) -> bool:
         """その会話（session_id）で水やりを記録済みなら True。

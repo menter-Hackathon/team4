@@ -219,3 +219,98 @@ def test_server_serves_type_images_only_for_known_types(db, monkeypatch, tmp_pat
     finally:
         server.shutdown()
         server.server_close()
+
+
+# --- こんなふうに育てられた（育て方の記録、仕様 §6.6） ---
+def test_growth_counts_talks_waterings_and_time_band(tmp_path):
+    path = str(tmp_path / "g.db")
+    store = PlantStore(path)
+    store.get_or_create_plant("a1", T0)
+    taro = store.add_person("a1", "たろう", T0)
+    # たろうと 3 回。どれも 22:30 に始まり（深夜）、2 日おき。持ち主の発話は 2・4・6 回
+    for i, turns in enumerate((2, 4, 6)):
+        start = datetime(2026, 11, 15 + 2 * i, 22, 30, tzinfo=JST)
+        sid = store.start_session("a1", start)
+        store.set_session_person(sid, taro.id)
+        for _ in range(turns):
+            store.add_utterance(sid, "user", "ねえ", start)
+        if i == 0:
+            store.add_watering("a1", taro.id, sid, start)
+        store.end_session(sid, start + timedelta(minutes=5))
+    view = plant_state(store, "a1", datetime(2026, 11, 20, 12, 0, tzinfo=JST))["views"][1]
+    store.close()
+    growth = view["growth"]
+    assert growth["talks"] == 3
+    assert growth["waterings"] == 1
+    assert growth["time_band"] == "深夜"
+    assert growth["interval_days"] == 2.0
+    assert growth["avg_turns"] == 4.0
+
+
+def test_growth_for_a_person_without_talks_is_empty(tmp_path):
+    path = str(tmp_path / "g.db")
+    store = PlantStore(path)
+    store.get_or_create_plant("a1", T0)
+    store.add_person("a1", "はなこ", T0)  # 登録しただけで、まだ話していない
+    view = plant_state(store, "a1", T0 + timedelta(hours=1))["views"][1]
+    store.close()
+    assert view["growth"] == {
+        "talks": 0,
+        "waterings": 0,
+        "time_band": None,
+        "interval_days": None,
+        "avg_turns": None,
+        "biggest_change": None,
+    }
+
+
+def test_guest_growth_does_not_count_named_people(db):
+    store = PlantStore(db, readonly=True)
+    guest, taro = plant_state(store, "a1", T0 + timedelta(hours=4))["views"]
+    store.close()
+    assert guest["growth"]["talks"] == 2  # たろうとの 1 回は混ぜない
+    assert taro["growth"]["talks"] == 1
+
+
+def test_biggest_change_is_the_axis_that_moved_most(db):
+    store = PlantStore(db, readonly=True)
+    guest = plant_state(store, "a1", T0 + timedelta(hours=4))["views"][0]
+    store.close()
+    # 初期 0.5 → (0.55, 0.5, 0.5, 0.5) → (0.6, 0.45, 0.5, 0.5)。おしゃべり度が +0.1 でいちばん動いた
+    assert guest["growth"]["biggest_change"] == {"trait": "talkativeness", "delta": 0.1}
+
+
+def test_biggest_change_keeps_the_sign_when_a_trait_went_down(tmp_path):
+    path = str(tmp_path / "g.db")
+    store = PlantStore(path)
+    store.get_or_create_plant("a1", T0)
+    _reflect(store, "a1", Traits(0.5, 0.2, 0.55, 0.5), T0 + timedelta(hours=1))
+    guest = plant_state(store, "a1", T0 + timedelta(hours=2))["views"][0]
+    store.close()
+    assert guest["growth"]["biggest_change"] == {"trait": "affection", "delta": -0.3}
+
+
+def test_type_json_has_detail_and_view_has_days(db):
+    store = PlantStore(db, readonly=True)
+    plant = plant_state(store, "a1", T0 + timedelta(days=2))
+    store.close()
+    guest = plant["views"][0]
+    assert guest["type"]["detail"]
+    assert guest["days"] == 3  # 株を作った日が 1 日目
+
+
+def test_html_has_the_result_screen_sections():
+    html = dashboard.HTML_PATH.read_text(encoding="utf-8")
+    for label in ("育てた結果", "せいかく", "こんなふうに育てられた", "くわしく"):
+        assert label in html
+    # 記憶・要約は LLM が作った文なので、HTML として入れない（textContent で入れる）
+    assert "innerHTML" not in html
+
+
+def test_days_is_at_least_one_when_the_plant_is_dated_in_the_future(db):
+    # 発表用の DB は日付をずらして作るので、株を作った時刻が今より先になることがある。
+    # そのときも「-1 日育てた」ではなく 1 日目と出す
+    store = PlantStore(db, readonly=True)
+    plant = plant_state(store, "a1", T0 - timedelta(days=3))
+    store.close()
+    assert plant["views"][0]["days"] == 1

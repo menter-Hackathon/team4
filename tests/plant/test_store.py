@@ -382,3 +382,55 @@ def test_last_talk_and_watering_before_a_time(store):
     assert store.last_talk_at("a", before=before) == T0 + timedelta(minutes=5)
     assert store.last_watered_at("a", before=before) == T0
     assert store.last_talk_at("a", before=T0) is None
+
+
+def _talk(store, start, *, person_id=None, end=True):
+    """start に始まる会話を 1 つ作る（end=False なら会話中のまま）。"""
+    sid = store.start_session("a", start)
+    if person_id is not None:
+        store.set_session_person(sid, person_id)
+    if end:
+        store.end_session(sid, start + timedelta(minutes=5))
+    return sid
+
+
+def test_finished_sessions_are_per_person_and_skip_open_ones(store):
+    store.get_or_create_plant("a", T0)
+    taro = store.add_person("a", "たろう", T0)
+    guest = _talk(store, T0)
+    later = _talk(store, T0 + timedelta(days=2), person_id=taro.id)
+    earlier = _talk(store, T0 + timedelta(days=1), person_id=taro.id)
+    _talk(store, T0 + timedelta(days=3), person_id=taro.id, end=False)  # 会話中は数えない
+    assert [s.id for s in store.finished_sessions("a", taro.id)] == [earlier, later]
+    assert [s.id for s in store.finished_sessions("a", None)] == [guest]
+
+
+def test_watering_count_is_per_person(store):
+    store.get_or_create_plant("a", T0)
+    taro = store.add_person("a", "たろう", T0)
+    store.add_watering("a", None, _talk(store, T0), T0)
+    for day in (1, 2):
+        sid = _talk(store, T0 + timedelta(days=day), person_id=taro.id)
+        store.add_watering("a", taro.id, sid, T0 + timedelta(days=day))
+    assert store.watering_count("a", None) == 1
+    assert store.watering_count("a", taro.id) == 2
+
+
+def test_watering_before_giving_a_name_counts_for_that_person(store):
+    # 「お水あげたよ」と言ってから名乗った → 水やりはその人のぶんとして数える（会話の相手で数える）
+    store.get_or_create_plant("a", T0)
+    taro = store.add_person("a", "たろう", T0)
+    sid = store.start_session("a", T0)
+    store.add_watering("a", None, sid, T0)  # まだ名乗っていないので person_id は NULL で記録される
+    store.set_session_person(sid, taro.id)  # そのあと名乗った
+    store.end_session(sid, T0 + timedelta(minutes=5))
+    assert store.watering_count("a", taro.id) == 1
+    assert store.watering_count("a", None) == 0
+
+
+def test_watering_count_skips_conversations_in_progress(store):
+    # 会話中の水やりは、話した回数（finished_sessions）と同じく、会話が終わるまで数えない
+    store.get_or_create_plant("a", T0)
+    sid = store.start_session("a", T0)
+    store.add_watering("a", None, sid, T0)
+    assert store.watering_count("a", None) == 0
