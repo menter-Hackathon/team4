@@ -6,7 +6,7 @@
 
 このリポジトリは、植物の「脳」にあたるサーバー側の音声 AI エージェントです。
 
-> **メンターの方へ:** 下の「[FB をいただきたいこと](#fb-をいただきたいこと)」に、チームで迷っている点をまとめています。どれか1つでもご意見をいただけると助かります。
+> **審査員の方へ:** コードを読むときは「[コードの読み方](#コードの読み方)」から始めてください。どのファイルから読めばよいかと、見てほしいところをまとめています。
 
 ## なぜ植物に話しかけるのか
 
@@ -54,11 +54,59 @@
 | 文字起こし | kotoba-whisper v2.0（日本語向けの Whisper） |
 | 声 | AivisSpeech Engine（声のモデル「らせつん」）。`.env` で OpenAI `gpt-4o-mini-tts` にも切り替えられる |
 | 鉢のハード | Seeed XIAO ESP32S3 ＋ M5Stack Atomic Voice Base（[部品の選び方](docs/hardware/parts-selection.md)） |
-| 鉢のファームウェア | ESP-IDF v5.4.2 ＋ LiveKit ESP32 SDK 0.3.12（[firmware/](firmware/README.md)） |
+| 鉢のファームウェア | ESP-IDF v5.4.2。PC の中継（relay）に WebSocket でつなぐ（[firmware/](firmware/README.md)） |
 
 詳しい設計は [仕様書](docs/superpowers/specs/2026-11-13-futamaru-agent-design.md) にあります。
 
-## 今どこまでできているか（2026-11-19）
+## コードの読み方
+
+### どこに何があるか
+
+| 場所 | 中身 |
+|---|---|
+| [`agent/plant/`](agent/plant/) | **植物のロジックの本体**（起きる・眠る・性格・記憶・プロンプト・天気・水やり）。LiveKit に依存しない |
+| [`agent/main.py`](agent/main.py) | LiveKit の出来事（話した・退出した など）を `agent/plant/` につなぐだけの配線 |
+| [`agent/plugins/`](agent/plugins/) | LLM・文字起こし・声・気象庁の天気とつなぐ部分 |
+| [`agent/relay/`](agent/relay/) | 鉢（ESP32）と WebSocket で音声をやりとりし、鉢の代わりに LiveKit のルームに入る中継 |
+| [`firmware/`](firmware/) | 鉢の ESP32 のプログラム（C、ESP-IDF） |
+| [`scripts/`](scripts/) | ダッシュボード・成長の早送りデモ・動作確認の道具 |
+| [`tests/`](tests/) | `agent/`・`scripts/` と同じ構成のテスト（外部サービスは呼ばず、[`tests/fakes.py`](tests/fakes.py) の偽物を使う） |
+| [`docs/superpowers/specs/`](docs/superpowers/specs/) | 仕様書。コードの docstring にある「仕様 §6.3」などはここの節番号 |
+
+各ファイルの先頭の docstring に「何をするファイルか」「なぜそうしたか」を日本語で書いています。
+
+### おすすめの読む順番
+
+会話 1 回ぶんの流れに沿って読むと、全体がつかめます。
+
+1. [`agent/plant/conversation.py`](agent/plant/conversation.py) — 1 株の会話の進行。起きる → 相手を見分ける → 話す → 眠る → 振り返る、の流れが docstring にまとまっています
+2. [`agent/plant/wake.py`](agent/plant/wake.py) — 「ふたまる」で起き、しばらく黙ると眠る
+3. [`agent/plant/prompt.py`](agent/plant/prompt.py) — 性格・記憶・前回の要約・植物の状態（天気・水やり・育った日数）から、LLM への指示文を作る（`build_system_prompt`）
+4. [`agent/plant/reflection.py`](agent/plant/reflection.py) — 眠るたびに会話を LLM で振り返り、記憶と性格の変化量を JSON で受け取る
+5. [`agent/plant/personality.py`](agent/plant/personality.py) — 性格 4 軸の数値と、変化量の反映ルール
+6. [`agent/plant/store.py`](agent/plant/store.py) — SQLite への読み書き（SQL はこのファイルにだけ書いています）
+
+### 見てほしいところ
+
+#### 作品の核
+
+- **育て方で、少しずつ性格が育つ。** 植物が眠るたびに、その会話を LLM が振り返り、性格 4 軸（おしゃべり・甘え・元気・好奇心）をどれだけ動かすかを決めます（[`reflection.py`](agent/plant/reflection.py) の `reflect_session`）。振り返りには会話の中身だけでなく、世話の様子もコードで判断して添えます（同じファイルの `_care_lines`）
+  - 毎日のように話しかけると甘えん坊に、3 日以上あくとすねる
+  - 水をもらうと元気に、3 日以上もらえないと元気がなくなる
+  - 朝によく話しかけると元気に、深夜が多いとまったり育つ（#119）
+
+  1 回で動くのは 1 軸あたり ±0.05 まで（[`personality.py`](agent/plant/personality.py) の `MAX_DELTA`）。小さな LLM の 1 回の判断で性格が急に変わらず、「育った」と感じられる速さにするためです。4 軸の高い・低いの組み合わせで 16 タイプ（「〇〇ふたまる」）に分けて見せます（[`plant_type.py`](agent/plant/plant_type.py)）
+- **AI は本物の植物の通訳として話す。** 天気（[`weather.py`](agent/plant/weather.py)・[`plugins/jma_weather.py`](agent/plugins/jma_weather.py)）、声での水やり記録（[`watering.py`](agent/plant/watering.py)）、育った日数や前回からの日数を、プロンプトの「植物の状態」の段落に入れます（[`prompt.py`](agent/plant/prompt.py) の `plant_status_text`）。性格の数値は 5 段階の言葉に直して入れるので、同じ LLM でも株ごとに話し方が変わります（同じファイルの `build_system_prompt`）
+- **育てる人ごとに、違う子に育つ。** 名乗った相手ごとに性格・記憶・方言を持ち、ある人の話をほかの人には話しません（[`people.py`](agent/plant/people.py)・[`dialect.py`](agent/plant/dialect.py)、[設計](docs/superpowers/specs/2026-11-17-people-and-dialect-design.md)）
+
+#### 作るときの工夫
+
+- **小さな LLM の出力をそのまま信用しない。** 振り返りや人の見分けの JSON は、壊れていたり範囲外だったりしたら捨てるか直してから使います（[`reflection.py`](agent/plant/reflection.py) の `parse_reflection`、[`people.py`](agent/plant/people.py)）。無音や雑音から文字起こしが作る「ご視聴ありがとうございました」なども発話として扱いません（[`stt_noise.py`](agent/plant/stt_noise.py)）
+- **返事を速くする。** 返事を日本語の文ごとに区切り、1 文目ができた時点で声にし始めます（[`plugins/sentence_stream.py`](agent/plugins/sentence_stream.py)）。水やりの判定は LLM を呼ばず正規表現で行い、返事を遅らせません（[`watering.py`](agent/plant/watering.py)）
+- **テストしやすい作り。** 植物のロジック（[`agent/plant/`](agent/plant/)）は LiveKit に依存させず、時計や LLM は引数で受け取ります。テストでは偽物に差し替えて、起きてから眠って振り返るまでの会話の流れをまるごと確かめています（[`tests/plant/test_conversation.py`](tests/plant/test_conversation.py)）
+- **鉢と PC のつなぎ方。** 鉢は Cloudflare Tunnel 越しに PC の中継へ WebSocket でつなぐので、鉢と PC が別のネットワークにあっても、PC 側でポートを開けずに話せます。音は μ-law で圧縮して、やりとりする量を半分にしています（[`agent/relay/`](agent/relay/)・[`firmware/`](firmware/README.md)、[手順](docs/deploy.md)）
+
+## 今どこまでできているか（2026-11-20）
 
 | 状態 | 内容 |
 |---|---|
@@ -66,26 +114,18 @@
 | ✅ できた | 人の見分け（名乗り）、人ごとの性格・記憶、方言（4種類）の判定と反映 |
 | ✅ できた | 植物の状態を話す: 天気（気温・湿度）、声での水やり記録、育った日数・前回からの日数、世話のしかたを性格に反映、植物の種類の育て方（仕様 §6.7、#80〜#83） |
 | ✅ できた | 性格を5段階にして、変化が話し方に出やすくした（#57） |
-| ✅ できた | 2株の性格・成長曲線・記憶を並べて見せる Web 画面（ダッシュボード、#59） |
+| ✅ できた | 話しかけた時間帯を性格に反映する。朝によく話しかけると元気に、深夜が多いとまったり育つ（#119） |
+| ✅ できた | 2株の性格のタイプ・育て方の記録・成長曲線・記憶を並べて見せる Web 画面（ダッシュボード、#59・#118） |
 | ✅ できた | 成長の早送りデモと、発表用の「1日目・5日目・30日目」の株（#77） |
 | ✅ できた | 声をローカルの AivisSpeech で作る（明るい女の子の声「らせつん」、#56・#106） |
 | ✅ できた | Gemma 4 を PC で動かし、エージェントから使えることを確かめた（#1） |
-| ✅ できた | GPU 2 枚（12GB と 8GB）の PC で、LLM・文字起こし・声・ダッシュボードをまとめて動かす Docker 構成（#37。本番の PC で動かすのはリハーサルで確かめる） |
+| ✅ できた | GPU 2 枚（12GB と 8GB）の PC で、LLM・文字起こし・声・ダッシュボードをまとめて動かす Docker 構成（#37） |
+| ✅ できた | 鉢の ESP32 のファームウェアと、鉢を Cloudflare Tunnel 越しに PC へつなぐ中継（#94・#95・#107・#108） |
+| ✅ できた | 本番と同じ形での通しのリハーサル（ショーンさんの PC、#105）と、ESP32 の実機との通し確認（#3・#94） |
+| ✅ できた | 鉢の筐体の設計（#16） |
 | 🔧 作業中 | kotoba-whisper の確認（#2）。録音で「ふたまる」を聞き取れることは確かめた。本番の PC での速さはこれから |
-| 🔧 作業中 | 本番と同じ形での通しのリハーサル（ショーンさんの PC、#105）、ESP32 の実機との通し確認（#3・#94） |
 | 🔧 作業中 | 返事の速さ。今は話し終えてから約4〜5秒かかっていて、3秒くらいが目標（植物なので少し間があってよい、#39） |
-| 🔧 作業中 | 鉢の筐体の設計（#16） |
 | ⏸ 見送り | 土の水分センサーで「のど渇いた」と言わせる（印刷済みの筐体を作り直す必要があるため、#58）。代わりに声で水やりを記録する（仕様 §6.7、#81） |
-
-## FB をいただきたいこと
-
-1. **「育っている」と感じてもらえるか。** 性格は少しずつ変わるようにしているので、変化に気づきにくいおそれがあります。発表の短い時間で「育てた結果」を伝えるには、どう見せるのがよいでしょうか（今は、2株の性格と成長曲線をグラフで並べる画面を用意しています）
-2. **植物らしさ。** 今は「育て方」が会話だけです。土の水分センサーで水やりを反映する案は、筐体の都合で今回は見送りました。ほかに「ただの AI スピーカーではない」と感じてもらえる工夫はあるでしょうか
-3. **返事の速さ。** 今は約4〜5秒かかっています。どこまで速ければ会話として気にならないか、遅いときの間のつなぎ方（「んー…」と先に言うなど）について、ご意見をいただきたいです
-4. **人の見分け方。** 今は毎回名乗ってもらう方式です。体験として不自然でないか、声で見分ける必要があるか迷っています
-5. **誰に届けるか。** 一人暮らしの人、子ども、高齢の家族の見守りなど、どの人に向けると一番価値が伝わるでしょうか
-
-ご意見は Issue でも、チームのチャンネルでも大丈夫です。
 
 ---
 
@@ -128,12 +168,17 @@ cp .env.example .env   # LiveKit・LLM・STT・OpenAI の値を埋める
 # PC のマイク・スピーカーで試す（ESP32 不要）。.env に DEV_PLANT_ID=dev を入れておく
 uv run python -m agent.main console
 
-# LiveKit サーバー（.env の LIVEKIT_URL）に接続して ESP32 からの接続を待つ
+# LiveKit サーバー（.env の LIVEKIT_URL）に接続して、鉢が来るのを待つ
 uv run python -m agent.main dev     # 開発用（ホットリロード）
 uv run python -m agent.main start   # 本番
+
+# 中継（鉢と WebSocket でつながり、鉢の代わりに LiveKit のルームに入る）
+uv run python -m agent.relay
 ```
 
-NVIDIA の GPU がある PC では、エージェント・LLM・STT をまとめて Docker で動かせます（`docker compose up -d`）。手順は [docs/deploy.md](docs/deploy.md) を見てください。
+鉢（ESP32）は LiveKit に直接はつながず、中継に WebSocket でつなぎます。中継が鉢の代わりにルーム `plant-<株の ID>` に入ると、エージェントが呼ばれます。
+
+本番は、NVIDIA の GPU がある PC で、LiveKit サーバー・中継・Cloudflare Tunnel・エージェント・LLM・STT・声をまとめて Docker で動かします（`docker compose up -d`）。手順は [docs/deploy.md](docs/deploy.md) を見てください。
 
 会話・記憶・性格は `data/futamaru.db` に保存されます。
 
@@ -162,18 +207,19 @@ AIVIS_BASE_URL=http://127.0.0.1:10101   # AivisSpeech の URL（空ならこの�
 - [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine)（音声合成エンジン、LGPL v3）
 - 音声合成モデル「らせつん」（制作: こずかた学園プロジェクト / Aivis Project、声: 上戸恵里さん、Aivis Common Model License (ACML) 1.0）
 
-### ESP32 用トークンの発行
+### 鉢（ESP32）の設定
 
-```bash
-uv run python -m scripts.issue_token --plant-id a1
-```
+鉢のファームウェアの設定（`firmware/sdkconfig.secrets`）には、次の 3 つを書きます。書き方とビルドの手順は [firmware/README.md](firmware/README.md)、中継の公開のしかたは [docs/deploy.md](docs/deploy.md) の「3.5」にあります。
 
-identity `device-a1`、ルーム `plant-a1`、有効期限 30 日のトークンを1行で出力します。
+| 鉢の設定 | 書く値 |
+|---|---|
+| `CONFIG_FUTAMARU_RELAY_URL` | 中継の URL。`wss://<.env の RELAY_PUBLIC_HOSTNAME>/relay` |
+| `CONFIG_FUTAMARU_DEVICE_KEY` | 中継の合言葉。`.env` の `RELAY_DEVICE_KEY` と同じ値 |
+| `CONFIG_FUTAMARU_PLANT_ID` | どの株として話すか。1 台目は `a1`、2 台目は `b1` など。同じ ID を 2 台に入れると、同じ株として扱われる |
 
-- **ESP32 の担当者に渡し、ファームウェアの設定（`firmware/sdkconfig.secrets`）に書き込んでもらいます。** 一緒に渡すのはサーバーの URL（`.env` の `LIVEKIT_URL`）だけです。`LIVEKIT_API_KEY` と `LIVEKIT_API_SECRET` は渡しません。
-- **株ごとに別のトークンを使います。** 2台目には `--plant-id b1` などで発行してください。同じトークンを2台に入れると、同じ株として扱われます。
-- **期限が切れたら、同じコマンドで発行し直して書き込み直します。**
-- **トークンは秘密情報です。** 持っている人は誰でもその株のルームに入れて、マイクの音を聞けます。Issue・PR・チャンネルには貼らず、DM で渡してください。
+- **合言葉は秘密情報です。** 持っている人は誰でも中継につなげます。Issue・PR・チャンネルには貼らず、DM で渡してください。
+- LiveKit のトークンは、中継が鉢の代わりに作ります（[`agent/relay/bridge.py`](agent/relay/bridge.py)）。鉢には書きません。
+- `uv run python -m scripts.issue_token --plant-id a1` で、ルーム `plant-a1` に入れるトークンを手で作ることもできます（中継を通さずにルームへ入って試すとき用）。
 
 ### 成長の早送りデモ
 
