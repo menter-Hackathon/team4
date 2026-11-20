@@ -421,6 +421,21 @@ class PlantStore:
             r["owner_dialect"],
         )
 
+    def finished_sessions(self, plant_id: str, person_id: int | None) -> list[Session]:
+        """その人（None ならお客さん）との、終わった会話を始まった順に全部返す（仕様 §6.6）。
+
+        ダッシュボードの「こんなふうに育てられた」（話した回数・時間帯・間隔・会話の長さ）に使う。
+        会話中（ended_at が NULL）のものは入れない。エージェントが動いている最中に開いても、
+        数が途中で揺れないようにするため。
+        """
+        # 「person_id IS ?」は、? が None なら「NULL である」（お客さん）という意味になる
+        rows = self._conn.execute(
+            "SELECT id FROM sessions WHERE plant_id = ? AND person_id IS ?"
+            " AND ended_at IS NOT NULL ORDER BY started_at, id",
+            (plant_id, person_id),
+        ).fetchall()
+        return [self.get_session(r["id"]) for r in rows]
+
     def set_session_person(self, session_id: int, person_id: int) -> None:
         """セッションの話し相手が誰か分かったときに記録する（始めはお客さん = NULL）。"""
         with self._conn:
@@ -546,6 +561,14 @@ class PlantStore:
                 (plant_id, person_id, session_id, iso(now)),
             )
         return True
+
+    def watering_count(self, plant_id: str, person_id: int | None) -> int:
+        """その人（None ならお客さん・名乗る前）が、その株に水をあげた回数（仕様 §6.6）。"""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM waterings WHERE plant_id = ? AND person_id IS ?",
+            (plant_id, person_id),
+        ).fetchone()
+        return int(row[0])
 
     def watered_in_session(self, session_id: int) -> bool:
         """その会話（session_id）で水やりを記録済みなら True。
