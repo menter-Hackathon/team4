@@ -132,6 +132,20 @@ I (...) relay: Mic frames sent: 500 (muted 0), mic peak: 273, voice received: 0 
 - `mic peak`: その 10 秒でいちばん大きかったマイクの音（0〜32767）。静かな部屋でも 50 以上あるのがふつう。**0 が続くならマイクの線（G7 → D3）がつながっていない**
 - `voice received`: 中継から届いた声の量（起動してからの合計）
 
+この行だけを見やすく出すツールがあります。配線を直しながら見るときに使います（リポジトリの一番上で実行。`idf.py monitor` は先に閉じる）。
+
+```bash
+uv run --with pyserial python -m scripts.mic_peak_monitor
+```
+
+```text
+mic peak:    148  muted: 0
+mic peak:  32767  muted: 0  ← 雑音（どこかの線の接触が悪い）
+  E (3635) futamaru: Stopped: audio board not ready (check wiring)
+```
+
+USB が一瞬切れても止まらず、つながり直すのを待って読み続けます。線を 1 本ずつ指で押さえて、雑音の目印が消える線を探すと、接触の悪い線が見つかります。
+
 | 出たログ | 疑うこと |
 |---|---|
 | `ES8311 (0x18) not found` | SDA と SCL の入れ違い、GND・5V のつなぎ忘れ |
