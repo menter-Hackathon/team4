@@ -27,6 +27,7 @@ LIVEKIT_API_SECRET=testsecret
 RELAY_DEVICE_KEY=test-device-key-0123456789
 CLOUDFLARE_TUNNEL_TOKEN=test-tunnel-token
 RELAY_PUBLIC_HOSTNAME=relay.example.com
+DASHBOARD_PUBLIC_HOSTNAME=dashboard.example.com
 ENV
 docker compose --profile tunnel config --format json > /tmp/compose.json
 python3 - <<'PY'
@@ -91,6 +92,11 @@ content = s["configs"]["tunnel-ingress"]["content"]
 assert "hostname: relay.example.com" in content and "service: http://relay:8780" in content, content
 assert content.rstrip().endswith("service: http_status:404"), content
 print("ok: トンネルは RELAY_PUBLIC_HOSTNAME を中継に届け、ほかは 404 にする")
+# ダッシュボード（仕様 §6.6）: DASHBOARD_PUBLIC_HOSTNAME をダッシュボードに届ける。最後の 404 より前に置く
+dash = "- hostname: dashboard.example.com\n    service: http://dashboard:8765"
+assert dash in content, content
+assert content.index(dash) < content.index("service: http_status:404"), content
+print("ok: トンネルは DASHBOARD_PUBLIC_HOSTNAME をダッシュボードに届ける")
 PY
 # トンネルは --profile tunnel を付けたときだけ動く（トークンの無い PC で失敗し続けないように）
 docker compose config --services | grep -qx tunnel && { echo "tunnel が profile なしで動いてしまう" >&2; exit 1; }
@@ -146,7 +152,7 @@ assert env["AIVIS_SPEAKER"] == "888753762", env
 print("ok: 声の設定が空なら tts-init は既定の値で動く")
 PY
 
-# 5. ダッシュボードは、この PC（127.0.0.1）にだけ公開され、既定で a1,b1 を並べること。
+# 5. ダッシュボードは、PC 側では 127.0.0.1 にだけ公開され（外からはトンネルだけ、1d）、既定で a1,b1 を並べること。
 #    DASHBOARD_PLANTS で株を変えられること
 python3 - <<'PY'
 import json
@@ -154,7 +160,7 @@ d = json.load(open("/tmp/compose.json"))["services"]["dashboard"]
 ports = d["ports"]
 assert len(ports) == 1 and ports[0]["host_ip"] == "127.0.0.1" and str(ports[0]["published"]) == "8765", ports
 assert "a1,b1" in d["command"], d["command"]
-print("ok: ダッシュボードはこの PC からだけ開ける")
+print("ok: ダッシュボードは PC 側では 127.0.0.1 にだけ公開される（外からはトンネルだけ）")
 PY
 echo "DASHBOARD_PLANTS=a1" >> .env
 docker compose config --format json > /tmp/compose.json

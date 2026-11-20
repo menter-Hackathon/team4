@@ -9,6 +9,7 @@
 - 更新: 2026-11-17 「共通の記憶」をやめ、名乗った人にはその人の記憶だけを見せる（§6.3〜§6.6、#70）
 - 更新: 2026-11-18 登録済みの人だけにする設定を足した（§6.5、#72）
 - 更新: 2026-11-18 植物の状態（天気・湿度・水やり・日数・種類）を話すようにする方針を足した（§1、§6.7、§7.2）。返事の速さの目標を 3 秒くらいにした（§11）
+- 更新: 2026-11-20 ダッシュボードを Cloudflare Tunnel で外から開けるようにし、DB に登録したアカウントでログインするようにした（§6.2、§6.6）
 - 対象: サーバー側の音声AIエージェントの骨組み（Python / LiveKit Agents）
 - 企画: 「ふたまる」— 育て方によって個性が変わる、話せる観葉植物
 
@@ -132,7 +133,8 @@ agent/
     aivis_tts.py       TTS: ローカルの AivisSpeech Engine を呼ぶ小さな TTS（§8.3）
     llm.py             会話用 LLM の生成と、reflection 用の JSON 補完関数（OpenAI 互換クライアント）
   plant/
-    store.py           SQLite の読み書き（plants / memories / sessions / utterances / trait_history）
+    store.py           SQLite の読み書き（plants / memories / sessions / utterances / trait_history / accounts など）
+    account.py         ダッシュボードのアカウント: 名前・パスワードの決まりと、パスワードのハッシュ（§6.6）
     personality.py     性格パラメータの定義・クランプ・更新ルール
     prompt.py          性格 + 記憶 + 前回要約 → システムプロンプト
     reflection.py      会話終了時の記憶抽出・性格変化量の判定（LLM 呼び出し）
@@ -145,6 +147,7 @@ scripts/
   simulate.py          会話ログを流し込んで成長を早送りするデモ用スクリプト
   aivis_voices.py      AivisSpeech の声の一覧とサンプル作り（声を選ぶ用、§8.3）
   dashboard.py         性格・成長・記憶を見せるダッシュボード（§6.6）。dashboard.html と組
+  accounts.py          ダッシュボードにログインするアカウントを作る・消す（§6.6）
 tests/
 ```
 
@@ -277,6 +280,13 @@ CREATE TABLE trait_history (
   curiosity      REAL NOT NULL,
   recorded_at    TEXT NOT NULL
 );
+
+CREATE TABLE accounts (          -- ダッシュボードにログインできるアカウント（§6.6）。株とは関係しない
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  name           TEXT NOT NULL UNIQUE,  -- ログインに使う名前（英小文字・数字・_・-、32 文字まで）
+  password_hash  TEXT NOT NULL,         -- scrypt のハッシュ。パスワードそのものは保存しない
+  created_at     TEXT NOT NULL
+);
 ```
 
 - 会話ログは `AWAKE` 中の発話ごとに `utterances` へ即時保存する。
@@ -395,6 +405,7 @@ CREATE TABLE trait_history (
 
 ### 6.6 ダッシュボード（`scripts/dashboard.py`）
 2株の個性の違いと成長を、グラフで見せる Web ページ。エージェントを動かす PC で開き、発表では画面共有で見せる（#59）。
+2026-11-20 から、Docker で動かすときは Cloudflare Tunnel を通して `https://futamaru.shionkk.f5.si` でも開ける。会話の記憶が見えるので、DB に登録したアカウントでログインした人だけが見られる（下の「ログイン」）。
 
 **表示するもの**（株ごとにカードを作り、左右に並べる）
 - 性格のタイプ: 今の性格の 16 タイプ（「〇〇ふたまる」）のイラスト・名前・ひとこと説明（下の「性格の 16 タイプ」）
@@ -409,8 +420,24 @@ CREATE TABLE trait_history (
 - 起動: `uv run python -m scripts.dashboard --db <DB のパス> --plants <plant_id をカンマ区切り>`（既定の DB は `data/futamaru.db`、ポートは 8765）。`simulate.py` の結果は `--db data/sim.db --plants sample-a,sample-b` で見る
 - ページは 3 秒ごとに `/api/state`（JSON）を読み直す。会話して眠らせると、振り返りが終わった数秒後に成長曲線へ点が増える
 - DB は読み取り専用（SQLite の `mode=ro`）でリクエストごとに開き直し、書き込まない。エージェントが動いている最中でも開ける
-- 会話の記憶が見えるので、`127.0.0.1` でだけ待ち受ける（`0.0.0.0` にはしない）
+- 会話の記憶が見えるので、`uv run` で動かすときは `127.0.0.1` でだけ待ち受ける（この PC からだけ開ける）。`127.0.0.1` 以外で待ち受けるとき（Docker）は、必ずログインを求める（下の「ログイン」）
 - グラフは Chart.js（CDN から版を固定して読む）。Python 側は標準ライブラリ（`http.server`・`sqlite3`）だけで、依存は増やさない
+
+**ログイン（アカウント、2026-11-20）**
+- 目的: 脳の PC（ohsawa）は大学のネットワークの中にあり、発表者やチームの PC から直接は開けない。そこで Cloudflare Tunnel で `https://futamaru.shionkk.f5.si` に公開する。ただし会話の記憶が見えるので、誰でも見られる形にはしない
+- アカウントは DB（`data/futamaru.db`）の `accounts` テーブルに置く（§6.2）。アカウントは株や話し相手（`people`）とは関係せず、ログインできる人の一覧として使う
+- ログインのしかたはブラウザの Basic 認証。ページを開くと、ブラウザがアカウント名とパスワードを聞く。ブラウザと Cloudflare の間は HTTPS、Cloudflare と PC の間はトンネルで暗号化されるので、パスワードがそのままネットに流れることはない
+- ログインを求めるのは、`127.0.0.1` 以外で待ち受けるとき（Docker のコンテナの中の `--host 0.0.0.0`）。トンネルから開くときも、PC の `http://127.0.0.1:8765` から開くときも、同じアカウントでログインする。`uv run` で `127.0.0.1` だけで待ち受けるとき（`simulate.py` の DB を見るときなど）は、今までどおりログインなし
+- `/`・`/api/state`・`/types/<英語名>.png` のすべてでログインを確かめる。ログインしていないと 401 を返し、中身は返さない
+- アカウントが 1 つも無い・DB を開けない・`accounts` テーブルが無い（古い DB）ときは、誰もログインできない。開いたままにはしない
+- パスワードは標準ライブラリの scrypt（`hashlib.scrypt`）でハッシュにして保存する。アカウントごとにランダムなソルトを付ける。比べるときは `hmac.compare_digest` を使い、無いアカウント名でも同じだけ計算して、名前があるかどうかを応答の速さで知られないようにする。ページは 3 秒ごとに読みに来て、そのたびに計算するので、1 回数十ミリ秒の強さ（n=2^14、r=8、p=1）にする
+- パスワードの計算（scrypt、1 回 16MB・約 30ms）は、同時に 2 つまでにする。外から大量にログインを試されても、同じ PC で動く LLM・STT を重くしないため。空きを 5 秒待っても計算できなければ、503（混み合っています）を返す。ログインに成功した Authorization ヘッダーは、60 秒だけ覚えておき（ヘッダーそのものではなく HMAC を覚える）、その間は計算し直さない。3 秒ごとの読み込みで毎回計算しないためで、パスワードを変えても、前のパスワードは最大 60 秒使える（2026-11-20、#117 のレビュー）
+- Authorization ヘッダーの形がおかしいとき（base64 でない・ASCII 以外の文字を含む・「:」が無い）は、ログインしていないのと同じく 401 を返す
+- 決まり: アカウント名は英小文字・数字・`_`・`-` の 32 文字まで（Basic 認証では「名前:パスワード」で送るので `:` は使えない。日本語はブラウザによって送り方が違うので使わない）。パスワードは 12 文字以上
+- 作り方・消し方は `scripts/accounts.py`（`add` / `passwd` / `delete` / `list`）。Docker では `docker compose exec agent python -m scripts.accounts add <名前>`。パスワードは画面に出さずに 2 回入力する。`--generate` を付けると、ランダムなパスワードを作って 1 回だけ表示する
+- `scripts/use_db.py` で DB を発表用のものに入れ替えても、アカウントは入れ替える前の DB から引き継ぐ（入れ替えた途端に誰もログインできなくなるのを防ぐ）
+- ログインに失敗したときは、アカウント名をログに出す（パスワードは出さない）
+- やらないこと: ログアウトのボタン（Basic 認証のしくみ上、ブラウザを閉じるまでログインしたまま）、ログインのフォーム画面、アカウントごとに見られる株を分けること、何回も間違えた人の締め出し
 
 **性格の 16 タイプ**（`agent/plant/plant_type.py`、#64）
 - 4 軸それぞれの「高い／低い」の組み合わせ（2×2×2×2 = 16 通り）に、植物の名前を付けたタイプ。話しかけ方によって、ふたまるにどんな花が咲いたかとして見せる（例: 🌻 ひまわりふたまる、🌵 サボテンふたまる）
@@ -570,6 +597,7 @@ LiveKit 公式の OpenAI プラグイン（`livekit-plugins-openai` の `openai.
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`（自前の LiveKit サーバー、§3.2。Docker ではエージェントと中継の `LIVEKIT_URL` を compose が `ws://livekit:7880` にする）
 - `RELAY_DEVICE_KEY`（鉢が中継につなぐときのキー、§3.2.1）、`RELAY_PORT`（中継が待ち受けるポート、既定 8780）
 - `CLOUDFLARE_TUNNEL_TOKEN`（Docker の Cloudflare Tunnel のトークン、§3.2）
+- `DASHBOARD_PUBLIC_HOSTNAME`（Docker のトンネルでダッシュボードを公開するホスト名、§6.6。空なら公開しない）
 - `FUTAMARU_DB_PATH`（既定: `./data/futamaru.db`）
 - `WAKE_WORDS`（カンマ区切り、既定は §5.3）
 - `SLEEP_AFTER_SECONDS`（既定: 60）

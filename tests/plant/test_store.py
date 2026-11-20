@@ -382,3 +382,57 @@ def test_last_talk_and_watering_before_a_time(store):
     assert store.last_talk_at("a", before=before) == T0 + timedelta(minutes=5)
     assert store.last_watered_at("a", before=before) == T0
     assert store.last_talk_at("a", before=T0) is None
+
+
+# --- accounts（ダッシュボードのログイン、仕様 §6.6） ---
+
+
+def test_accounts_can_be_added_listed_changed_and_deleted(store):
+    shion = store.add_account("shion", "hash-1", T0)
+    assert shion.name == "shion" and shion.password_hash == "hash-1"
+    assert shion.created_at == iso(T0)
+    store.add_account("chamu", "hash-2", T0)
+    assert [a.name for a in store.list_accounts()] == ["shion", "chamu"]  # 作った順
+    assert store.set_account_password("shion", "hash-3")
+    assert store.get_account("shion").password_hash == "hash-3"
+    assert store.delete_account("chamu")
+    assert store.get_account("chamu") is None
+    # 無いアカウントを変える・消すと False（エラーにはしない）
+    assert not store.set_account_password("chamu", "x")
+    assert not store.delete_account("chamu")
+
+
+def test_adding_the_same_account_name_twice_fails(store):
+    store.add_account("shion", "hash-1", T0)
+    with pytest.raises(ValueError):
+        store.add_account("shion", "hash-2", T0)
+    assert store.get_account("shion").password_hash == "hash-1"
+
+
+def test_import_accounts_adds_new_names_and_overwrites_the_same_name(store, tmp_path):
+    store.add_account("shion", "new-db-hash", T0)
+    other = PlantStore(str(tmp_path / "other.db"))
+    other.add_account("shion", "old-db-hash", T0)
+    other.add_account("chamu", "chamu-hash", T0)
+    store.import_accounts(other.list_accounts())
+    other.close()
+    assert store.get_account("shion").password_hash == "old-db-hash"
+    assert store.get_account("chamu").password_hash == "chamu-hash"
+
+
+def test_an_old_database_gets_the_accounts_table(tmp_path):
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(OLD_SCHEMA)  # accounts テーブルの無い DB
+    conn.close()
+    readonly = PlantStore(path, readonly=True)  # 読むだけで開くと、テーブルは足されない
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            readonly.get_account("shion")
+    finally:
+        readonly.close()
+    s = PlantStore(path)  # 書けるように開くと、無いテーブルが足される
+    try:
+        assert s.list_accounts() == []
+    finally:
+        s.close()

@@ -21,7 +21,11 @@
    - デモでは登録したショーンさん・ちゃむさんだけを話し相手にするので、#96 がマージされたら `ALLOW_NEW_PEOPLE=false` も書く
 3. 発表用に育てた株の DB（`demo-day1.db`・`demo-day5.db`・`demo-day30.db`）を Discord の DM で受け取り、`team4/data/` に置く
    - Windows のエクスプローラーからは、アドレス欄に `\\wsl$\Ubuntu\home\<ユーザー名>\team4\data` と入れると開ける
-4. 下の「当日」の 1〜4 を一度通して、植物が返事をし、ダッシュボードが映ることを確かめる（リハーサル）
+4. ダッシュボードにログインするアカウントを作る（[`deploy.md`](deploy.md) の 6.6）。発表で画面を映す人の分を作り、パスワードは DM で渡す
+   ```bash
+   docker compose exec agent python -m scripts.accounts add <名前>
+   ```
+5. 下の「当日」の 1〜4 を一度通して、植物が返事をし、ダッシュボードが映ることを確かめる（リハーサル）
 
 ## 当日
 
@@ -49,8 +53,8 @@ docker compose up -d
 
 ### 3. ダッシュボードを開く
 
-この PC のブラウザで **http://127.0.0.1:8765** を開きます。株の性格のタイプ・レーダーチャート・成長曲線・覚えていることが並びます。
-会話の記憶が見えるので、ほかの PC からは開けないようにしてあります。画面共有で見せてください。
+この PC のブラウザで **http://127.0.0.1:8765** を開きます（ほかの PC からは `https://futamaru.<チームのドメイン>`。[`deploy.md`](deploy.md) の 3.6）。アカウント名とパスワードを聞かれるので、前の日に作ったアカウントでログインします。株の性格のタイプ・レーダーチャート・成長曲線・覚えていることが並びます。
+会話の記憶が見えるので、ログインした人しか開けないようにしてあります。画面共有で見せてください。
 
 ### 4. 話しかける
 
@@ -72,5 +76,6 @@ docker compose down
 | 植物が返事をしない | `docker compose logs --tail 50 agent` を見て、エラーの行を Discord に貼る（**キーが含まれていないか確認してから**） |
 | 声が出ない | `docker compose logs --tail 50 tts` を見る。急ぐときは `.env` を `TTS_PROVIDER=openai` に変えて `docker compose up -d`（OpenAI の声になる） |
 | ダッシュボードが開かない | `docker compose ps -a` で `dashboard` が `running` か見る。止まっていれば `docker compose up -d` |
+| ダッシュボードにログインできない | `docker compose exec agent python -m scripts.accounts list` でアカウントがあるか見る。パスワードを忘れたら `docker compose exec agent python -m scripts.accounts passwd <名前>` で変える |
 | ダッシュボードに株が出ない | 2 の入れ替えをしたか確かめる。並べる株を変えるなら `.env` の `DASHBOARD_PLANTS`（既定 `a1,b1`） |
 | どうしても動かない | `docker compose down` → `docker compose up -d` でやり直す。それでもだめなら [`deploy.md`](deploy.md) の「困ったとき」 |

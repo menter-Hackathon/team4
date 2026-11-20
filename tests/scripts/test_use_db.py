@@ -3,6 +3,7 @@ from datetime import datetime
 
 import pytest
 
+from agent.plant.store import PlantStore
 from agent.plant.timeutil import JST
 from scripts.use_db import use_db
 
@@ -87,3 +88,22 @@ def test_same_file_is_an_error(tmp_path):
     make_db(dst, "ふだん")
     with pytest.raises(ValueError):
         use_db(dst, dst, tmp_path / "backup", NOW)
+
+
+def test_dashboard_accounts_carry_over_to_the_new_db(tmp_path):
+    # 今の DB にはアカウントがあり、発表用の DB（scripts.simulate で作る）には無い
+    src, dst = tmp_path / "demo-day30.db", tmp_path / "futamaru.db"
+    make_db(src, "30日目")
+    current = PlantStore(str(dst))
+    current.add_account("shion", "hash-of-shion", NOW)
+    current.close()
+    use_db(src, dst, tmp_path / "backup", NOW)
+    assert read(dst) == ["30日目"]
+    store = PlantStore(str(dst), readonly=True)
+    try:
+        # 入れ替えたあとも、同じアカウントでダッシュボードにログインできる
+        assert [(a.name, a.password_hash) for a in store.list_accounts()] == [
+            ("shion", "hash-of-shion")
+        ]
+    finally:
+        store.close()
