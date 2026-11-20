@@ -155,7 +155,19 @@ Register-ScheduledTask -TaskName "futamaru WSL keepalive" -Action $a -Trigger $t
 
 **ダッシュボードには会話の記憶が出るので、ログインした人だけが見られます**（仕様 §6.6）。ブラウザでページを開くと、アカウント名とパスワードを聞かれます。アカウントは 6.6 で作ります。アカウントが 1 つも無いうちは、誰も開けません。
 
-1. 公開ホスト名を決めて、DNS に登録する
+**順番を守ってください。** ログインの付いたダッシュボードに作り直す（1）前に `DASHBOARD_PUBLIC_HOSTNAME` を書いてトンネルを動かすと、古い（ログインの無い）ダッシュボードが、作り直すまでのあいだ誰にでも見えてしまいます（2026-11-20 に ohsawa で 17 秒そうなった）。
+
+1. ダッシュボードを、ログインの付いた版に作り直す（`git pull` したあと）
+   ```bash
+   docker compose build               # このリポジトリのイメージ（agent・relay・dashboard）を新しいコードで作る
+   docker compose up -d dashboard     # ダッシュボードだけ、新しいイメージで起動し直す（agent・relay は止めない）
+   docker compose logs dashboard      # 「ログインが必要です」と出ていれば、ログインの付いた版
+   ```
+2. アカウントを作る（6.6）。agent が古いイメージのまま動いているので、ここでは `exec` ではなく、新しいイメージで動かす `run` を使います
+   ```bash
+   docker compose run --rm --no-deps agent python -m scripts.accounts add <名前>
+   ```
+3. 公開ホスト名を決めて、DNS に登録する
    - **CLI で作ったトンネル**: 3.5 と同じ `$CF` で、DNS に登録してから `.env` に書きます（`cert.pem` を消したあとなら、先に `$CF tunnel login` をもう一度します）
      ```bash
      $CF tunnel route dns futamaru futamaru.<ドメイン>
@@ -165,9 +177,10 @@ Register-ScheduledTask -TaskName "futamaru WSL keepalive" -Action $a -Trigger $t
      どのホスト名をどのコンテナに届けるかは、`compose.yaml` の `configs` の `tunnel-ingress` に書いてあります（`DASHBOARD_PUBLIC_HOSTNAME` → `dashboard:8765`）
    - **ダッシュボードで作ったトンネル**: 同じトンネルの「公開ホスト名（Public Hostname）」をもう 1 つ足します。サブドメインとドメインは `futamaru` ＋ `<ドメイン>`、サービスは種類 `HTTP`・URL `dashboard:8765`
    - **サブドメインは 1 段にします**（`dash.futamaru.<ドメイン>` のような 2 段にしない）。Cloudflare の無料の証明書は 1 段のサブドメインにしか効かず、2 段だとブラウザが開けません
-2. 6.6 でアカウントを作る
-3. トンネルを起動し直す: `docker compose --profile tunnel up -d`（`.env` を読み直して、ingress が変わったトンネルを作り直す）
-4. 自分の PC のブラウザで `https://futamaru.<ドメイン>` を開き、アカウント名とパスワードを入れてダッシュボードが出れば成功。間違ったパスワードでは開けないことも確かめる
+4. トンネルを起動し直す: `docker compose --profile tunnel up -d tunnel`（`.env` を読み直して、ingress が変わったトンネルを作り直す）
+5. 確かめる
+   - 自分の PC のブラウザで `https://futamaru.<ドメイン>` を開き、アカウント名とパスワードを入れてダッシュボードが出れば成功
+   - ログインせずに開くと中身が出ないこと（ログインの画面でキャンセルすると「ログインが必要です」だけが出る）、間違ったパスワードでは開けないことも確かめる
 
 この PC の `http://127.0.0.1:8765` から開くときも、同じアカウントでログインします。
 
