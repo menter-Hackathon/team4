@@ -1,6 +1,12 @@
 import pytest
 
-from agent.config import TTS_INSTRUCTIONS, ConfigError, load_config
+from agent.config import (
+    TTS_INSTRUCTIONS,
+    ConfigError,
+    aivis_base_url_from_env,
+    db_path_from_env,
+    load_config,
+)
 
 BASE = {
     "LLM_BASE_URL": "http://gpu:8000/v1",
@@ -16,9 +22,12 @@ def test_defaults():
     assert c.tts_model == "gpt-4o-mini-tts" and c.tts_voice == "coral" and c.tts_base_url is None
     assert c.tts_api_key == "sk-test" and c.llm_api_key == "EMPTY" and c.stt_api_key == "EMPTY"
     assert c.db_path == "./data/futamaru.db"
-    assert c.wake_words == ("ふたまる", "二丸", "ふた丸", "2丸")
+    assert c.wake_words == ("ふたまる", "二丸", "ふた丸", "2丸", "下丸")
     assert (c.sleep_after, c.llm_timeout, c.stt_timeout, c.tts_timeout) == (60.0, 15.0, 10.0, 10.0)
     assert c.tts_instructions == TTS_INSTRUCTIONS and c.dev_plant_id is None
+    # 話し終わりの判定は、LiveKit の既定と同じ値から始める（#39）
+    assert (c.vad_min_silence, c.endpointing_delay) == (0.55, 0.5)
+    assert c.llm_reasoning_effort is None
 
 
 def test_overrides():
@@ -29,8 +38,13 @@ def test_overrides():
             "SLEEP_AFTER_SECONDS": "30",
             "TTS_BASE_URL": "http://gpu:8002/v1",
             "DEV_PLANT_ID": "dev",
+            "VAD_MIN_SILENCE_SECONDS": "0.35",
+            "ENDPOINTING_DELAY_SECONDS": "0.2",
+            "LLM_REASONING_EFFORT": "none",
         }
     )
+    assert (c.vad_min_silence, c.endpointing_delay) == (0.35, 0.2)
+    assert c.llm_reasoning_effort == "none"
     assert c.wake_words == ("ふたまる", "ふーちゃん") and c.sleep_after == 30.0
     assert c.tts_base_url == "http://gpu:8002/v1" and c.dev_plant_id == "dev"
 
@@ -54,3 +68,109 @@ def test_openai_key_required_only_without_tts_base_url():
     with pytest.raises(ConfigError, match="OPENAI_API_KEY"):
         load_config(env)
     assert load_config({**env, "TTS_BASE_URL": "http://gpu:8002/v1"}).tts_api_key == "EMPTY"
+
+
+def test_db_path_from_env_needs_no_other_variables():
+    assert db_path_from_env({}) == "./data/futamaru.db"
+    assert db_path_from_env({"FUTAMARU_DB_PATH": "  "}) == "./data/futamaru.db"
+    assert db_path_from_env({"FUTAMARU_DB_PATH": "/data/x.db"}) == "/data/x.db"
+    assert load_config({**BASE, "FUTAMARU_DB_PATH": "/data/x.db"}).db_path == "/data/x.db"
+
+
+# --- TTS の種類と AivisSpeech（仕様 §8.3、#56） ---
+def test_tts_provider_defaults_to_openai_with_aivis_defaults():
+    c = load_config(BASE)
+    assert c.tts_provider == "openai" and c.aivis_speaker == 893625030  # らせつん / 標準２
+    assert (c.aivis_base_url, c.aivis_speed, c.aivis_pitch) == ("http://127.0.0.1:10101", 1.0, 0.0)
+
+
+def test_aivis_reads_its_settings_and_needs_no_openai_key():
+    env = {k: v for k, v in BASE.items() if k != "OPENAI_API_KEY"}
+    c = load_config(
+        {
+            **env,
+            "TTS_PROVIDER": "Aivis",
+            "AIVIS_BASE_URL": "http://gpu:10101",
+            "AIVIS_SPEAKER": "888753760",
+            "AIVIS_SPEED": "1.1",
+            "AIVIS_PITCH": "0.05",
+        }
+    )
+    assert c.tts_provider == "aivis" and c.tts_api_key == "EMPTY"
+    assert (c.aivis_base_url, c.aivis_speaker) == ("http://gpu:10101", 888753760)
+    assert (c.aivis_speed, c.aivis_pitch) == (1.1, 0.05)
+
+
+def test_aivis_speaker_must_be_numeric():
+    assert load_config({**BASE, "TTS_PROVIDER": "aivis"}).aivis_speaker == 893625030
+    with pytest.raises(ConfigError, match="AIVIS_SPEAKER"):
+        load_config({**BASE, "TTS_PROVIDER": "aivis", "AIVIS_SPEAKER": "anneli"})
+
+
+def test_unknown_tts_provider_is_rejected():
+    with pytest.raises(ConfigError, match="TTS_PROVIDER"):
+        load_config({**BASE, "TTS_PROVIDER": "voicevox"})
+
+
+def test_aivis_base_url_from_env_needs_no_other_variables():
+    assert aivis_base_url_from_env({}) == "http://127.0.0.1:10101"
+    assert aivis_base_url_from_env({"AIVIS_BASE_URL": "http://gpu:10101"}) == "http://gpu:10101"
+
+
+# --- 天気を取る場所（仕様 §6.7、#80） ---
+def test_weather_is_off_by_default():
+    c = load_config(BASE)
+    assert (c.jma_amedas_station, c.jma_forecast_area, c.weather_dry_humidity) == (None, None, 40.0)
+
+
+def test_weather_station_area_and_dry_humidity():
+    c = load_config(
+        BASE
+        | {
+            "JMA_AMEDAS_STATION": "44132",
+            "JMA_FORECAST_AREA": "130000",
+            "WEATHER_DRY_HUMIDITY": "35",
+        }
+    )
+    assert (c.jma_amedas_station, c.jma_forecast_area, c.weather_dry_humidity) == (
+        "44132",
+        "130000",
+        35.0,
+    )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"JMA_AMEDAS_STATION": "東京"},
+        {"JMA_AMEDAS_STATION": "4413"},
+        {"JMA_FORECAST_AREA": "13000"},
+        {"JMA_FORECAST_AREA": "tokyo!"},
+    ],
+)
+def test_weather_codes_must_be_digits_of_the_right_length(extra):
+    with pytest.raises(ConfigError):
+        load_config(BASE | extra)
+
+
+def test_water_remind_days():
+    assert load_config(BASE).water_remind_days == 3
+    assert load_config(BASE | {"WATER_REMIND_DAYS": "5"}).water_remind_days == 5
+
+
+def test_plant_species():
+    assert load_config(BASE).plant_species == "ポトス"
+    assert load_config(BASE | {"PLANT_SPECIES": "モンステラ"}).plant_species == "モンステラ"
+
+
+@pytest.mark.parametrize(
+    "value,expected", [(None, True), ("true", True), ("false", False), ("0", False), ("no", False)]
+)
+def test_allow_new_people(value, expected):
+    env = BASE if value is None else BASE | {"ALLOW_NEW_PEOPLE": value}
+    assert load_config(env).allow_new_people is expected
+
+
+def test_allow_new_people_rejects_typos():
+    with pytest.raises(ConfigError):
+        load_config(BASE | {"ALLOW_NEW_PEOPLE": "flase"})

@@ -43,8 +43,8 @@
 
 | リソース | 決めごと |
 |---|---|
-| GPU サーバー | ポートは LLM（vLLM）が `8000`、STT（Speaches）が `8001`、自前 TTS を使う場合は `8002`。起動・停止・モデル変更をしたらチームの Discord で一言伝える |
-| GPU メモリ | LLM と STT で分け合う。`--gpu-memory-utilization` を変えるときは相手の担当に相談する |
+| モデルを動かす PC | 共有の GPU サーバーは無く、LLM・STT は誰かの PC で動かす（#23）。ポートは LLM（vLLM）が `8000`、STT（Speaches）が `8001`、自前 TTS を使う場合は `8002`。起動・停止・モデル変更をしたらチームの Discord で一言伝える |
+| GPU メモリ | 同じ PC で LLM と STT を動かすときは分け合う。`--gpu-memory-utilization` を変えるときは相手の担当に相談する |
 | LiveKit Cloud | プロジェクトは1つを共有。株ごとのルームは `plant-<id>` |
 | OpenAI | キーは1つを共有。使いすぎに注意（目安は仕様書 §8.3） |
 
