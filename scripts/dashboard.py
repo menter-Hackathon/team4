@@ -182,8 +182,9 @@ def view_state(
         "last_summary": store.latest_summary(plant_id, person_id),
         "dialect": dialect,
         "type": _type_json(plant_type(traits)),
-        # 株を作った日を 1 日目として、今日が何日目か（結果画面の「N 日育てた結果…」）
-        "days": days_between(store.plant_created_at(plant_id), now) + 1,
+        # 株を作った日を 1 日目として、今日が何日目か（結果画面の「N 日育てた結果…」）。
+        # 発表用の DB は日付をずらして作るので、作った日が今日より先のこともある。そのときも 1 日目にする
+        "days": max(1, days_between(store.plant_created_at(plant_id), now) + 1),
         "growth": growth_json(store, plant_id, person_id, snapshots),
     }
 

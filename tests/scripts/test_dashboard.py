@@ -297,3 +297,20 @@ def test_type_json_has_detail_and_view_has_days(db):
     guest = plant["views"][0]
     assert guest["type"]["detail"]
     assert guest["days"] == 3  # 株を作った日が 1 日目
+
+
+def test_html_has_the_result_screen_sections():
+    html = dashboard.HTML_PATH.read_text(encoding="utf-8")
+    for label in ("育てた結果", "せいかく", "こんなふうに育てられた", "くわしく"):
+        assert label in html
+    # 記憶・要約は LLM が作った文なので、HTML として入れない（textContent で入れる）
+    assert "innerHTML" not in html
+
+
+def test_days_is_at_least_one_when_the_plant_is_dated_in_the_future(db):
+    # 発表用の DB は日付をずらして作るので、株を作った時刻が今より先になることがある。
+    # そのときも「-1 日育てた」ではなく 1 日目と出す
+    store = PlantStore(db, readonly=True)
+    plant = plant_state(store, "a1", T0 - timedelta(days=3))
+    store.close()
+    assert plant["views"][0]["days"] == 1
