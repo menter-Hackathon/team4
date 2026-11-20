@@ -6,7 +6,7 @@
 
 このリポジトリは、植物の「脳」にあたるサーバー側の音声 AI エージェントです。
 
-> **メンターの方へ:** 下の「[FB をいただきたいこと](#fb-をいただきたいこと)」に、チームで迷っている点をまとめています。どれか1つでもご意見をいただけると助かります。
+> **審査員の方へ:** コードを読むときは「[コードの読み方](#コードの読み方)」から始めてください。どのファイルから読めばよいかと、見てほしいところをまとめています。
 
 ## なぜ植物に話しかけるのか
 
@@ -58,6 +58,43 @@
 
 詳しい設計は [仕様書](docs/superpowers/specs/2026-11-13-futamaru-agent-design.md) にあります。
 
+## コードの読み方
+
+### どこに何があるか
+
+| 場所 | 中身 |
+|---|---|
+| [`agent/plant/`](agent/plant/) | **植物のロジックの本体**（起きる・眠る・性格・記憶・プロンプト・天気・水やり）。LiveKit に依存しない |
+| [`agent/main.py`](agent/main.py) | LiveKit の出来事（話した・退出した など）を `agent/plant/` につなぐだけの配線 |
+| [`agent/plugins/`](agent/plugins/) | LLM・文字起こし・声・気象庁の天気とつなぐ部分 |
+| [`agent/relay/`](agent/relay/) | 鉢（ESP32）と WebSocket で音声をやりとりし、鉢の代わりに LiveKit のルームに入る中継 |
+| [`firmware/`](firmware/) | 鉢の ESP32 のプログラム（C、ESP-IDF） |
+| [`scripts/`](scripts/) | ダッシュボード・成長の早送りデモ・動作確認の道具 |
+| [`tests/`](tests/) | `agent/`・`scripts/` と同じ構成のテスト（外部サービスは呼ばず、[`tests/fakes.py`](tests/fakes.py) の偽物を使う） |
+| [`docs/superpowers/specs/`](docs/superpowers/specs/) | 仕様書。コードの docstring にある「仕様 §6.3」などはここの節番号 |
+
+各ファイルの先頭の docstring に「何をするファイルか」「なぜそうしたか」を日本語で書いています。
+
+### おすすめの読む順番
+
+会話 1 回ぶんの流れに沿って読むと、全体がつかめます。
+
+1. [`agent/plant/conversation.py`](agent/plant/conversation.py) — 1 株の会話の進行。起きる → 相手を見分ける → 話す → 眠る → 振り返る、の流れが docstring にまとまっています
+2. [`agent/plant/wake.py`](agent/plant/wake.py) — 「ふたまる」で起き、しばらく黙ると眠る
+3. [`agent/plant/prompt.py`](agent/plant/prompt.py) — 性格・記憶・前回の要約・植物の状態（天気・水やり・育った日数）から、LLM への指示文を作る（`build_system_prompt`）
+4. [`agent/plant/reflection.py`](agent/plant/reflection.py) — 眠るたびに会話を LLM で振り返り、記憶と性格の変化量を JSON で受け取る
+5. [`agent/plant/personality.py`](agent/plant/personality.py) — 性格 4 軸の数値と、変化量の反映ルール
+6. [`agent/plant/store.py`](agent/plant/store.py) — SQLite への読み書き（SQL はこのファイルにだけ書いています）
+
+### 見てほしいところ
+
+- **AI が話す理由を、目の前の植物に結びつけた。** 天気（[`weather.py`](agent/plant/weather.py)・[`plugins/jma_weather.py`](agent/plugins/jma_weather.py)）、声での水やり記録（[`watering.py`](agent/plant/watering.py)）、育った日数や前回からの日数を、プロンプトの「植物の状態」の段落に入れています（[`prompt.py`](agent/plant/prompt.py) の `plant_status_text`）
+- **性格は数値で持ち、少しずつしか動かない。** 振り返り 1 回で動くのは 1 軸あたり ±0.05 まで（[`personality.py`](agent/plant/personality.py) の `MAX_DELTA`）。数値は 5 段階の言葉に直してプロンプトに入れるので、同じ LLM でも株ごとに話し方が変わります。4 軸の高い・低いの組み合わせで 16 タイプ（「〇〇ふたまる」）に分けて見せます（[`plant_type.py`](agent/plant/plant_type.py)）
+- **小さな LLM の出力を信用しすぎない。** 振り返りや人の見分けの JSON は、壊れていたり範囲外だったりしたら捨てるか直してから使います（[`reflection.py`](agent/plant/reflection.py) の `parse_reflection`、[`people.py`](agent/plant/people.py)）。無音や雑音から文字起こしが作る「ご視聴ありがとうございました」なども発話として扱いません（[`stt_noise.py`](agent/plant/stt_noise.py)）
+- **返事を速くする工夫。** 返事を日本語の文ごとに区切り、1 文目ができた時点で声にし始めます（[`plugins/sentence_stream.py`](agent/plugins/sentence_stream.py)）。水やりの判定は LLM を呼ばず正規表現で行い、返事を遅らせません（[`watering.py`](agent/plant/watering.py)）
+- **植物のロジックを LiveKit から切り離し、テストできるようにした。** 時計や LLM は引数で受け取るので、テストでは偽物に差し替えて会話の流れをまるごと確かめられます（`uv run pytest` で 590 件、2026-11-20 時点）
+- **人ごとに性格・記憶・方言を持つ。** 名乗った相手ごとに別の性格として育ち、ある人の話をほかの人には話しません（[`people.py`](agent/plant/people.py)・[`dialect.py`](agent/plant/dialect.py)、[設計](docs/superpowers/specs/2026-11-17-people-and-dialect-design.md)）
+
 ## 今どこまでできているか（2026-11-19）
 
 | 状態 | 内容 |
@@ -76,16 +113,6 @@
 | 🔧 作業中 | 返事の速さ。今は話し終えてから約4〜5秒かかっていて、3秒くらいが目標（植物なので少し間があってよい、#39） |
 | 🔧 作業中 | 鉢の筐体の設計（#16） |
 | ⏸ 見送り | 土の水分センサーで「のど渇いた」と言わせる（印刷済みの筐体を作り直す必要があるため、#58）。代わりに声で水やりを記録する（仕様 §6.7、#81） |
-
-## FB をいただきたいこと
-
-1. **「育っている」と感じてもらえるか。** 性格は少しずつ変わるようにしているので、変化に気づきにくいおそれがあります。発表の短い時間で「育てた結果」を伝えるには、どう見せるのがよいでしょうか（今は、2株の性格と成長曲線をグラフで並べる画面を用意しています）
-2. **植物らしさ。** 今は「育て方」が会話だけです。土の水分センサーで水やりを反映する案は、筐体の都合で今回は見送りました。ほかに「ただの AI スピーカーではない」と感じてもらえる工夫はあるでしょうか
-3. **返事の速さ。** 今は約4〜5秒かかっています。どこまで速ければ会話として気にならないか、遅いときの間のつなぎ方（「んー…」と先に言うなど）について、ご意見をいただきたいです
-4. **人の見分け方。** 今は毎回名乗ってもらう方式です。体験として不自然でないか、声で見分ける必要があるか迷っています
-5. **誰に届けるか。** 一人暮らしの人、子ども、高齢の家族の見守りなど、どの人に向けると一番価値が伝わるでしょうか
-
-ご意見は Issue でも、チームのチャンネルでも大丈夫です。
 
 ---
 
