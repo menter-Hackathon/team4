@@ -63,3 +63,17 @@ def test_there_are_sixteen_types_plus_the_sprout_with_unique_names():
     # 英語名はファイル名に使うので、小文字の英字だけ
     assert all(t.key.isascii() and t.key.isalpha() and t.key.islower() for t in ALL_TYPES)
     assert all(t.emoji and t.description for t in ALL_TYPES)
+
+
+def test_every_type_has_a_detail_of_two_or_three_sentences():
+    # ダッシュボードの結果画面に出す長めの説明（仕様 §6.6）。短すぎず長すぎず
+    for t in ALL_TYPES:
+        assert 40 <= len(t.detail) <= 140, t.key
+        assert 2 <= t.detail.count("。") <= 3, t.key
+
+
+def test_type_texts_do_not_borrow_other_test_names():
+    # 名前も説明もオリジナル（ほかの性格診断の名前を使わない、#64）
+    for t in ALL_TYPES:
+        for word in ("MBTI", "ラブタイプ", "16Personalities"):
+            assert word not in t.name + t.description + t.detail
