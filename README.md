@@ -88,6 +88,26 @@
 
 ---
 
+## クレジット
+
+### 使っている技術
+
+| 名前 | 使い道 | ライセンス |
+|---|---|---|
+| [LiveKit Agents](https://github.com/livekit/agents) | 音声エージェントの土台 | Apache 2.0 |
+| [Gemma 4](https://huggingface.co/google/gemma-4-E4B-it)（Google） | 会話と振り返りの LLM | Apache 2.0 |
+| [Ollama](https://github.com/ollama/ollama) | Gemma 4 を PC で動かす | MIT |
+| [kotoba-whisper v2.0](https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0)（Kotoba Technologies） | 声を文字にする | Apache 2.0 |
+| [Speaches](https://github.com/speaches-ai/speaches) | kotoba-whisper を API として動かす | MIT |
+| [AivisSpeech Engine](https://github.com/Aivis-Project/AivisSpeech-Engine) | 返事を声にする | LGPL v3 |
+| [Chart.js](https://www.chartjs.org/) | ダッシュボードのグラフ | MIT |
+
+### 素材・データ
+
+- **声**: 音声合成モデル「らせつん」（制作: こずかた学園プロジェクト / Aivis Project、声: 上戸恵里さん、Aivis Common Model License (ACML) 1.0）
+- **天気**: 出典: 気象庁ホームページ（アメダスの観測値と天気予報の JSON）。植物が話す言葉にするため、値を加工して使っています
+- **性格タイプのイラスト**（`scripts/dashboard_assets/types/`）: ChatGPT（OpenAI）で生成しました
+
 ## 開発者向け
 
 チーム開発のルール（ブランチ・レビュー・秘密情報など）は [`CONTRIBUTING.md`](CONTRIBUTING.md)、コードの書き方は [`AGENTS.md`](AGENTS.md) にあります。
