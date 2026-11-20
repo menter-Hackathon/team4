@@ -94,3 +94,18 @@ class FakeBridgeFactory:
         bridge = FakeBridge(plant_id)
         self.bridges.append(bridge)
         return bridge
+
+
+class FakePasswordPrompt:
+    """getpass.getpass の偽物（scripts/accounts.py のテスト用）。
+
+    呼ばれるたびに answers の次の要素を「打たれたパスワード」として返し、聞いた文を prompts に覚える。
+    """
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.prompts: list[str] = []
+
+    def __call__(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.answers.pop(0)

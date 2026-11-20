@@ -12,7 +12,12 @@
         1. 今の DB を、data/backup/ に日時付きで丸ごと保存する（-wal の中身も含めて 1 つのファイルにする）
         2. 今の DB と -wal・-shm を消す
         3. 入れ替え先の DB を、SQLite の backup 機能で 1 つのファイルとして書き出す
+        4. 今の DB にあったダッシュボードのアカウントを、新しい DB に写す
     の順で入れ替える。
+
+なぜアカウントを写すのか（仕様 §6.6、2026-11-20）:
+    ダッシュボードにログインするアカウントは、植物の記憶と同じ DB（accounts テーブル）に入っている。
+    写さないと、発表用の DB に入れ替えた途端に、誰もダッシュボードにログインできなくなる。
 
 使い方（Docker。エージェントとダッシュボードは止めてから）:
     docker compose stop agent dashboard
@@ -33,6 +38,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from agent.config import db_path_from_env
+from agent.plant.store import Account, PlantStore
 from agent.plant.timeutil import JST
 
 # WAL 方式の SQLite が DB 本体の横に作るファイルの末尾
@@ -55,6 +61,22 @@ def _copy_db(src: Path, dst: Path) -> None:
     target.close()
 
 
+def _read_accounts(path: Path) -> list[Account]:
+    """DB からダッシュボードのアカウントを全部読む。DB が無い・accounts テーブルが無い（古い DB）なら空。"""
+    if not path.exists():
+        return []
+    try:
+        store = PlantStore(str(path), readonly=True)
+    except sqlite3.OperationalError:
+        return []
+    try:
+        return store.list_accounts()
+    except sqlite3.OperationalError:
+        return []  # accounts テーブルがまだ無い古い DB
+    finally:
+        store.close()
+
+
 def use_db(src: Path, dst: Path, backup_dir: Path, now: datetime) -> Path | None:
     """dst（今の DB）を src の中身に入れ替える。
 
@@ -74,6 +96,9 @@ def use_db(src: Path, dst: Path, backup_dir: Path, now: datetime) -> Path | None
     if src.resolve() == dst.resolve():
         raise ValueError("入れ替え先と今の DB が同じファイルです")
 
+    # 0. 今の DB のアカウントを覚えておく（4 で新しい DB に写す）
+    accounts = _read_accounts(dst)
+
     # 1. 今の DB があれば、日時付きで保存する（発表のあとで元に戻せるように）
     saved = None
     if dst.exists():
@@ -88,6 +113,15 @@ def use_db(src: Path, dst: Path, backup_dir: Path, now: datetime) -> Path | None
     # 3. 入れ替え先の DB を書き出す
     dst.parent.mkdir(parents=True, exist_ok=True)
     _copy_db(src, dst)
+
+    # 4. アカウントを写す。PlantStore で開くと、古い DB でも accounts テーブルが作られる。
+    #    同じ名前のアカウントが新しい DB にもあれば、今まで使っていたほう（今の DB）のパスワードにする
+    if accounts:
+        store = PlantStore(str(dst))
+        try:
+            store.import_accounts(accounts)
+        finally:
+            store.close()
     return saved
 
 
@@ -104,9 +138,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     load_dotenv()  # Docker を使わない PC では、.env の FUTAMARU_DB_PATH を読む
     dst = Path(args.db or db_path_from_env())
+    accounts = [a.name for a in _read_accounts(dst)]
     saved = use_db(Path(args.src), dst, dst.parent / "backup", datetime.now(JST))
     if saved:
         print(f"今の DB を保存しました: {saved}")
+    if accounts:
+        print(f"ダッシュボードのアカウントを引き継ぎました: {', '.join(accounts)}")
     print(f"{dst} を {args.src} の中身に入れ替えました。エージェントを起動し直してください")
 
 

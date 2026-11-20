@@ -11,14 +11,21 @@ uv run python -m scripts.dashboard --db data/futamaru.db --plants a1,b1
     5. 性格の 16 タイプ（「〇〇ふたまる」、#64）のイラストは /types/<英語名>.png で返す
 
 DB には書き込まない。エージェントが動いている最中に開いても大丈夫なようにするため。
-会話の記憶が見えるので、この PC からだけ開けるよう 127.0.0.1 で待ち受ける（0.0.0.0 にはしない）。
-Docker で動かすときだけ、コンテナの中では --host 0.0.0.0 で待ち受け、PC 側の公開を 127.0.0.1 に絞る
-（compose.yaml の dashboard。コンテナの中の 127.0.0.1 には、PC のブラウザから届かないため）。
+会話の記憶が見えるので、uv run で動かすときは、この PC からだけ開けるよう 127.0.0.1 で待ち受ける。
+
+Docker で動かすときは、コンテナの中では --host 0.0.0.0 で待ち受ける（コンテナの中の 127.0.0.1 には、
+PC のブラウザや Cloudflare Tunnel から届かないため）。2026-11-20 からは Cloudflare Tunnel で
+https://futamaru.shionkk.f5.si にも公開するので、127.0.0.1 以外で待ち受けるときは必ずログインを求める
+（仕様 §6.6「ログイン」）。ログインはブラウザの Basic 認証で、DB の accounts テーブルのアカウントと照らし合わせる。
+アカウントは scripts/accounts.py で作る。
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import ipaddress
 import json
 import logging
 import sqlite3
@@ -26,6 +33,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from agent.plant.account import verify_login
 from agent.plant.dialect import resolve_dialect
 from agent.plant.personality import Traits
 from agent.plant.plant_type import ALL_TYPES, PlantType, plant_type
@@ -33,8 +41,13 @@ from agent.plant.prompt import PROMPT_MEMORY_LIMIT, rank_memories, recency_facto
 from agent.plant.store import Person, PlantStore
 from agent.plant.timeutil import iso, jst_now
 
+logger = logging.getLogger(__name__)
+
 # 待ち受けるアドレス。この PC の中からしか開けない（記憶をほかの人に見せないため、#59）
 HOST = "127.0.0.1"
+# ログインを求めるときに返すヘッダー。ブラウザはこれを見て、アカウント名とパスワードを聞く画面を出す。
+# realm はその画面に出る名前。charset="UTF-8" は、パスワードを UTF-8 で送ってほしいという合図
+LOGIN_CHALLENGE = 'Basic realm="futamaru dashboard", charset="UTF-8"'
 DEFAULT_PORT = 8765
 # ブラウザに返す HTML。このファイルと同じフォルダに置いてある
 HTML_PATH = Path(__file__).with_name("dashboard.html")
@@ -155,15 +168,101 @@ def dashboard_state(db_path: str, plant_ids: list[str], now: datetime) -> dict:
     return {"generated_at": iso(now), "plants": plants}
 
 
-def make_handler(db_path: str, plant_ids: list[str]) -> type[BaseHTTPRequestHandler]:
+def needs_login(host: str) -> bool:
+    """host で待ち受けるときに、ログインを求めるか。127.0.0.1（この PC の中だけ）以外なら True。
+
+    例: needs_login("127.0.0.1") → False、needs_login("0.0.0.0") → True（Docker。外から届く）
+    名前（"localhost" 以外）や読めない値は、外から届くかもしれないので True にする（開いたままにしない）。
+    """
+    if host == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True
+
+
+def parse_basic_auth(header: str | None) -> tuple[str, str] | None:
+    """Authorization ヘッダーから、Basic 認証のアカウント名とパスワードを取り出す。
+
+    ブラウザは「Basic <"名前:パスワード" を base64 にしたもの>」を送ってくる。
+    例: "Basic c2hpb246cGFzcw==" → ("shion", "pass")
+    ヘッダーが無い・Basic でない・形がおかしいときは None。
+    """
+    if not header:
+        return None
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic":
+        return None
+    try:
+        decoded = base64.b64decode(encoded.strip(), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    # パスワードには「:」が入っていてもよいので、最初の「:」だけで分ける
+    name, sep, password = decoded.partition(":")
+    if not sep:
+        return None
+    return name, password
+
+
+def check_login(db_path: str, header: str | None) -> str | None:
+    """Authorization ヘッダーのアカウント名とパスワードを、DB の accounts と照らし合わせる。
+
+    合っていればアカウント名、合っていなければ None を返す。
+    1. ヘッダーから名前とパスワードを取り出す（無ければ None）
+    2. DB を読むだけで開き、その名前のアカウントを探す
+       DB が無い・開けない・accounts テーブルが無い（古い DB）ときは、誰もログインできない（None）
+    3. パスワードを確かめる。アカウントが無くても同じだけ計算する（agent/plant/account.verify_login）
+    """
+    # 1. ヘッダーから取り出す
+    credentials = parse_basic_auth(header)
+    if credentials is None:
+        return None
+    name, password = credentials
+    # 2. アカウントを探す。リクエストのたびに開き直すのは、scripts.accounts で足したアカウントをすぐに使えるようにするため
+    try:
+        store = PlantStore(db_path, readonly=True)
+    except sqlite3.OperationalError:
+        logger.warning("ログインを確かめられません。DB を開けません: %s", db_path)
+        return None
+    try:
+        account = store.get_account(name)
+    except sqlite3.Error:
+        logger.warning("ログインを確かめられません。DB に accounts がありません（古い DB）")
+        return None
+    finally:
+        store.close()
+    # 3. パスワードを確かめる
+    if verify_login(password, account.password_hash if account else None):
+        return name
+    # 名前は %r で出す（改行などを含む名前で、ログに偽の行を書かれないように）。パスワードは出さない
+    logger.warning("ダッシュボードのログインに失敗しました: アカウント名 %r", name)
+    return None
+
+
+def make_handler(
+    db_path: str, plant_ids: list[str], require_login: bool = False
+) -> type[BaseHTTPRequestHandler]:
     """DB のパスと株を覚えた、リクエストの受け付け役（ハンドラ）のクラスを作る。
 
+    require_login=True なら、どのページでも先にログインを確かめ、ログインしていなければ 401 を返す。
     http.server はクラスを渡す決まりなので、引数を閉じ込めたクラスをその場で作って返す。
     """
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # 名前は http.server の決まり（GET を受けると呼ばれる）
-            """GET を受け付ける。/ → HTML、/api/state → JSON、/types/<名前>.png → イラスト、それ以外 → 404。"""
+            """GET を受け付ける。/ → HTML、/api/state → JSON、/types/<名前>.png → イラスト、それ以外 → 404。
+
+            require_login なら、どのパスでも中身を返す前にログインを確かめる（404 かどうかも教えない）。
+            """
+            if require_login and check_login(db_path, self.headers.get("Authorization")) is None:
+                self._send(
+                    401,
+                    "text/plain; charset=utf-8",
+                    "ログインが必要です".encode(),
+                    {"WWW-Authenticate": LOGIN_CHALLENGE},
+                )
+                return
             path = self.path.split("?", 1)[0]
             if path.startswith("/types/"):
                 self._send_type_image(path.removeprefix("/types/"))
@@ -185,8 +284,17 @@ def make_handler(db_path: str, plant_ids: list[str]) -> type[BaseHTTPRequestHand
                 return
             self._send(200, "image/png", file.read_bytes())
 
-        def _send(self, status: int, content_type: str, body: bytes) -> None:
+        def _send(
+            self,
+            status: int,
+            content_type: str,
+            body: bytes,
+            headers: dict[str, str] | None = None,
+        ) -> None:
+            """status と body を返す。headers があれば、それもヘッダーに足す（ログインの 401 など）。"""
             self.send_response(status)
+            for key, value in (headers or {}).items():
+                self.send_header(key, value)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")  # 自動更新で古い内容を見せない
@@ -195,20 +303,44 @@ def make_handler(db_path: str, plant_ids: list[str]) -> type[BaseHTTPRequestHand
 
         def log_message(self, format: str, *args: object) -> None:
             # 数秒ごとのアクセスが標準出力を埋めないよう、ログは DEBUG に回す
-            logging.getLogger(__name__).debug(format, *args)
+            logger.debug(format, *args)
 
     return Handler
 
 
 def make_server(
-    db_path: str, plant_ids: list[str], port: int, host: str = HOST
+    db_path: str,
+    plant_ids: list[str],
+    port: int,
+    host: str = HOST,
+    require_login: bool | None = None,
 ) -> ThreadingHTTPServer:
     """host の port で待ち受けるサーバーを作る（port=0 なら空いている番号。テスト用）。
 
     host は既定の 127.0.0.1（この PC からだけ開ける）のままにする。
-    0.0.0.0 にするのは Docker のコンテナの中だけ（PC 側の公開は compose.yaml で 127.0.0.1 に絞る）。
+    0.0.0.0 にするのは Docker のコンテナの中だけ（compose.yaml。トンネルからも届く）。
+    require_login: ログインを求めるか。None なら host で決める（127.0.0.1 以外なら求める、needs_login）
     """
-    return ThreadingHTTPServer((host, port), make_handler(db_path, plant_ids))
+    if require_login is None:
+        require_login = needs_login(host)
+    return ThreadingHTTPServer((host, port), make_handler(db_path, plant_ids, require_login))
+
+
+def _warn_if_no_accounts(db_path: str) -> None:
+    """アカウントが 1 つも無ければ、誰もログインできないことを知らせる（起動は止めない）。"""
+    try:
+        store = PlantStore(db_path, readonly=True)
+    except sqlite3.OperationalError:
+        return  # DB がまだ無いことは、main の最初に知らせている
+    try:
+        has_accounts = bool(store.list_accounts())
+    except sqlite3.Error:
+        has_accounts = False  # accounts テーブルがまだ無い古い DB
+    finally:
+        store.close()
+    if not has_accounts:
+        print("注意: アカウントがまだ無いので、誰もログインできません。")
+        print("  Docker なら: docker compose exec agent python -m scripts.accounts add <名前>")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -227,7 +359,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--host",
         default=HOST,
-        help=f"待ち受けるアドレス（既定: {HOST}。Docker のコンテナの中でだけ 0.0.0.0 にする）",
+        help=f"待ち受けるアドレス（既定: {HOST}。Docker のコンテナの中でだけ 0.0.0.0 にする。"
+        f"{HOST} 以外ではログインを求める）",
     )
     args = parser.parse_args(argv)
     plant_ids = [p.strip() for p in args.plants.split(",") if p.strip()]
@@ -239,6 +372,9 @@ def main(argv: list[str] | None = None) -> None:
     server = make_server(args.db, plant_ids, args.port, args.host)
     # ブラウザで開く URL は、どちらの待ち受けでも 127.0.0.1（Docker でも PC 側は 127.0.0.1 に公開する）
     print(f"ダッシュボード: http://{HOST}:{server.server_address[1]}  （Ctrl+C で終了）")
+    if needs_login(args.host):
+        print("ログインが必要です（アカウントは python -m scripts.accounts add <名前> で作る）")
+        _warn_if_no_accounts(args.db)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

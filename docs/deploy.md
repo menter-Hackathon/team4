@@ -13,7 +13,7 @@ NVIDIA の GPU が 2 枚ある PC で、ふたまるの脳（エージェント�
                                                       ├─ llm（Gemma 4 E4B の圧縮版、Ollama。GPU 1 枚目）
                                                       ├─ stt（kotoba-whisper。GPU 2 枚目）
                                                       ├─ tts（AivisSpeech。TTS_PROVIDER=aivis のとき）
-                                                      └─ dashboard（http://127.0.0.1:8765）
+                                                      └─ dashboard（http://127.0.0.1:8765。外からは https://futamaru.<ドメイン>。ログインが要る）
                                    TTS_PROVIDER=openai（既定）のときは、声に OpenAI を使う
 ```
 
@@ -136,6 +136,21 @@ rm ~/.cloudflared/cert.pem                         # ドメインを操作でき
 
 トンネルは `--profile tunnel` を付けて起動したときだけ動きます（4）。トークンの無い PC で、トンネルが失敗し続けないようにするためです。
 
+## 3.6 ダッシュボードを外から開けるようにする
+
+発表者やチームが、自分の PC のブラウザからダッシュボードを見られるようにします。鉢と同じトンネルで、`https://futamaru.<チームのドメイン>` をダッシュボード（compose の `dashboard`、`http://dashboard:8765`）に届けます。
+
+**ダッシュボードには会話の記憶が出るので、ログインした人だけが見られます**（仕様 §6.6）。ブラウザでページを開くと、アカウント名とパスワードを聞かれます。アカウントは 6.6 で作ります。アカウントが 1 つも無いうちは、誰も開けません。
+
+1. Cloudflare のダッシュボードで、3.5 のトンネルの「公開ホスト名（Public Hostname）」をもう 1 つ足す
+   - サブドメインとドメイン: `futamaru` ＋ `<チームのドメイン>` → `futamaru.<チームのドメイン>`（デモでは `futamaru.shionkk.f5.si`）
+   - サービス: 種類 `HTTP`、URL `dashboard:8765`
+   - **サブドメインは 1 段にします**（`dash.futamaru.<ドメイン>` のような 2 段にしない）。Cloudflare の無料の証明書は 1 段のサブドメインにしか効かず、2 段だとブラウザが開けません
+2. 6.6 でアカウントを作る
+3. 自分の PC のブラウザで `https://futamaru.<チームのドメイン>` を開き、アカウント名とパスワードを入れてダッシュボードが出れば成功。間違ったパスワードでは開けないことも確かめる
+
+この PC の `http://127.0.0.1:8765` から開くときも、同じアカウントでログインします。
+
 ### Windows: WSL を止めないようにする
 
 WSL2 の Ubuntu は、開いているウィンドウ（や SSH の接続）が全部閉じると、少しして止まります。止まると Docker のコンテナもすべて止まります。デモの間ずっと動かすには、次のどちらかをします。
@@ -181,7 +196,7 @@ docker compose logs -f agent     # エージェントのログ
 3. ブラウザで `https://<公開ホスト名>/healthz` を開き、`ok` と出る（Cloudflare Tunnel から中継まで届いている）
 4. 鉢（ESP32）の電源を入れる。`docker compose logs relay` に `plant a1 is ready` と出れば、中継が鉢の代わりにルーム `plant-a1` に入り、エージェントが参加する
 5. 「ふたまる」と呼びかけて、植物から話しかけてくれば成功
-6. この PC のブラウザで http://127.0.0.1:8765 を開くと、ダッシュボードが映る（並べる株は `.env` の `DASHBOARD_PLANTS`、既定 `a1,b1`）
+6. この PC のブラウザで http://127.0.0.1:8765（外からは `https://futamaru.<チームのドメイン>`、3.6）を開き、6.6 のアカウントでログインすると、ダッシュボードが映る（並べる株は `.env` の `DASHBOARD_PLANTS`、既定 `a1,b1`）
 
 ## 6. 止める・作り直す
 
@@ -206,6 +221,7 @@ docker compose up -d
 ```
 
 - `data/futamaru.db` を、指定した DB の中身に入れ替えます。入れ替える前の DB は `data/backup/` に日時付きで残ります
+- ダッシュボードのアカウント（6.6）は、入れ替える前の DB から新しい DB に写します。入れ替えたあとも同じアカウントでログインできます
 - ファイルを直接コピーして上書きしないでください。SQLite の `-wal` ファイルが残っていると、DB が壊れることがあります（`scripts/use_db.py` はそれを避けて入れ替えます）
 
 ## 6.5 デモ用：人の一覧と方言の固定
@@ -218,6 +234,24 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 
 - 一覧には名前・性格 4 軸・今の方言（固定か自動か）が出ます。名前はひらがな・カタカナの違いを無視して照合します
 - 人を替えるには、植物を一度眠らせる必要があります。デモでは `.env` の `SLEEP_AFTER_SECONDS` を短く（例: `20`）して `docker compose up -d` し直してください
+
+## 6.6 ダッシュボードのアカウント
+
+ダッシュボードにログインするアカウントは、植物の記憶と同じ DB（`data/futamaru.db` の `accounts`）に入ります。パスワードそのものは保存せず、元に戻せない形（ハッシュ）だけを保存します。
+
+```bash
+docker compose exec agent python -m scripts.accounts add shion              # 作る（パスワードを 2 回聞かれる。打った文字は出ない）
+docker compose exec agent python -m scripts.accounts add chamu --generate   # パスワードをランダムに作って 1 回だけ表示する
+docker compose exec agent python -m scripts.accounts list                   # 一覧
+docker compose exec agent python -m scripts.accounts passwd shion           # パスワードを変える
+docker compose exec agent python -m scripts.accounts delete chamu           # 消す
+```
+
+- アカウント名は英小文字・数字・`_`・`-` の 32 文字まで、パスワードは 12 文字以上です
+- 人に渡すパスワードは、Discord の DM で渡してください。Issue・PR・チャンネルには書かない
+- 作ったり消したりしたアカウントは、ダッシュボードを起動し直さなくても、すぐに効きます
+- ログアウトのボタンはありません。ブラウザを閉じるまでログインしたままです（共用の PC では、使い終わったらブラウザを閉じる）
+- `agent` が止まっているときは、`exec` の代わりに `docker compose run --rm --no-deps agent python -m scripts.accounts …` を使います
 
 ## 7. 困ったとき
 
@@ -237,6 +271,8 @@ docker compose exec agent python -m scripts.people --plant-id a1 --person タロ
 | しばらくすると全部止まる（Windows） | WSL が止まっている。3.5 の「WSL を止めないようにする」をする |
 | 起動直後の最初の返事だけ失敗する（`LLM error`） | GPU が温まるまで最初の 1〜2 回は LLM が遅い（2026-11-19、RTX 5060 で確認）。もう一度話しかければ返事をする |
 | `docker compose logs livekit` に `secret is too short` | `.env` の `LIVEKIT_API_SECRET` を 32 文字以上にする（3 の `openssl rand -hex 32`） |
+| ダッシュボードでログインできない | `docker compose exec agent python -m scripts.accounts list` でアカウントがあるか見る。無ければ 6.6 で作る。パスワードを忘れたら `passwd` で変える。`docker compose logs dashboard` に「ログインに失敗しました」と出ていれば、アカウント名かパスワードの間違い |
+| `https://futamaru.<ドメイン>` が `502 Bad Gateway` や Cloudflare のエラーになる | `docker compose ps` で `dashboard` と `tunnel` が `running` か見る。Cloudflare の公開ホスト名のサービスが `HTTP` / `dashboard:8765` か確かめる（3.6） |
 | `agent` がすぐ止まる | `docker compose logs agent` を見る。`環境変数 … が設定されていません` なら `.env` の書き漏れ |
 
 解決しないときは、`docker compose logs` の該当部分を Discord に貼ってください（**キーが含まれていないか確認してから**）。

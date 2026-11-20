@@ -2,13 +2,15 @@
 
 時刻はすべて JST の ISO 8601 文字列で保存するため、文字列比較で時刻順になる。
 
-DB は 1 つの SQLite ファイル（既定は data/futamaru.db）。テーブルは 6 つ:
+DB は 1 つの SQLite ファイル（既定は data/futamaru.db）。テーブルは 8 つ:
     plants:        株ごとの名前と、お客さん（まだ誰か分からない相手）用の性格（4 軸）
     people:        株が知っている人。人ごとの性格（4 軸）と、手で固定した方言
     memories:      株が覚えていること。person_id があればその人の記憶、NULL ならお客さんの記憶（#70）
     sessions:      起きてから眠るまでの 1 回の会話。振り返りの要約・相手の人・判定した方言もここに入る
     utterances:    会話の発話 1 つずつ（持ち主・植物）
     trait_history: 性格の移り変わりの記録（成長グラフ用）。person_id が NULL なら株（お客さん）の分
+    waterings:     声で記録した水やり（仕様 §6.7、#81）
+    accounts:      ダッシュボードにログインできるアカウント（仕様 §6.6）。株とは関係しない
 
 SQL を書くのはこのファイルだけにして、他のファイルは PlantStore のメソッドを呼ぶ。
 """
@@ -95,6 +97,16 @@ CREATE TABLE IF NOT EXISTS waterings (
   person_id   INTEGER REFERENCES people(id),              -- 誰が（NULL = お客さん・名乗る前）
   session_id  INTEGER REFERENCES sessions(id),            -- どの会話で
   watered_at  TEXT NOT NULL                               -- いつ（JST の ISO 8601 文字列）
+);
+
+-- ダッシュボードにログインできるアカウント（仕様 §6.6、2026-11-20）。株や話し相手（people）とは関係しない。
+-- パスワードそのものは保存せず、agent/plant/account.py の scrypt のハッシュだけを保存する。
+-- 新しいテーブルなので、古い DB でも起動時の CREATE TABLE IF NOT EXISTS で作られる
+CREATE TABLE IF NOT EXISTS accounts (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  name           TEXT NOT NULL UNIQUE,  -- ログインに使う名前（英小文字・数字・_・-）。同じ名前は 2 つ作れない
+  password_hash  TEXT NOT NULL,         -- 例: "scrypt$16384$8$1$<ソルト>$<ハッシュ>"
+  created_at     TEXT NOT NULL
 );
 """
 
@@ -190,6 +202,19 @@ class MemoryUpdate:
 
 
 @dataclass
+class Account:
+    """accounts テーブルの 1 行（ダッシュボードにログインできるアカウント 1 つ、仕様 §6.6）。
+
+    password_hash はハッシュ（agent/plant/account.py）。パスワードそのものではない。
+    """
+
+    id: int
+    name: str
+    password_hash: str
+    created_at: str
+
+
+@dataclass
 class TraitSnapshot:
     """trait_history テーブルの 1 行（ある時点の性格）。株を作った直後の 1 行は session_id が None。"""
 
@@ -206,6 +231,11 @@ def _traits(row: sqlite3.Row) -> Traits:
 def _person(row: sqlite3.Row) -> Person:
     """DB の people の行から Person を作る。"""
     return Person(row["id"], row["plant_id"], row["name"], _traits(row), row["dialect_override"])
+
+
+def _account(row: sqlite3.Row) -> Account:
+    """DB の accounts の行から Account を作る。"""
+    return Account(row["id"], row["name"], row["password_hash"], row["created_at"])
 
 
 class PlantStore:
@@ -661,3 +691,64 @@ class PlantStore:
                 "UPDATE sessions SET summary = ?, owner_dialect = ?, reflected = 1 WHERE id = ?",
                 (summary, owner_dialect, session_id),
             )
+
+    # --- accounts（ダッシュボードのログイン、仕様 §6.6） ---
+    # 名前・パスワードの決まりを確かめるのは呼ぶ側（scripts/accounts.py）。ここは読み書きだけをする
+
+    def add_account(self, name: str, password_hash: str, now: datetime) -> Account:
+        """アカウントを足して返す。同じ名前がもうあれば ValueError。"""
+        try:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO accounts (name, password_hash, created_at) VALUES (?, ?, ?)",
+                    (name, password_hash, iso(now)),
+                )
+        except sqlite3.IntegrityError as e:
+            # name に UNIQUE を付けているので、同じ名前を入れようとすると IntegrityError になる
+            raise ValueError(f"アカウント {name} はもうあります") from e
+        account = self.get_account(name)
+        assert account is not None  # 今足したので必ずある
+        return account
+
+    def get_account(self, name: str) -> Account | None:
+        """名前でアカウントを探す。無ければ None。
+
+        古い DB を読むだけで開いたとき（accounts テーブルがまだ無い）は sqlite3.OperationalError になる。
+        ダッシュボードはそれを「誰もログインできない」として扱う。
+        """
+        row = self._conn.execute("SELECT * FROM accounts WHERE name = ?", (name,)).fetchone()
+        return _account(row) if row else None
+
+    def list_accounts(self) -> list[Account]:
+        """アカウントを全部、作った順に返す。"""
+        rows = self._conn.execute("SELECT * FROM accounts ORDER BY id").fetchall()
+        return [_account(r) for r in rows]
+
+    def set_account_password(self, name: str, password_hash: str) -> bool:
+        """アカウントのパスワード（のハッシュ）を変える。そのアカウントが無ければ False。"""
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE accounts SET password_hash = ? WHERE name = ?", (password_hash, name)
+            )
+        return cur.rowcount == 1
+
+    def delete_account(self, name: str) -> bool:
+        """アカウントを消す。そのアカウントが無ければ False。"""
+        with self._conn:
+            cur = self._conn.execute("DELETE FROM accounts WHERE name = ?", (name,))
+        return cur.rowcount == 1
+
+    def import_accounts(self, accounts: list[Account]) -> None:
+        """別の DB から読んだアカウントを、名前ごとにこの DB へ写す（scripts/use_db.py 用）。
+
+        同じ名前のアカウントがこの DB にもあれば、写すほう（accounts）のパスワードで上書きする。
+        id は写さない（この DB の中で新しく振られる）。
+        """
+        with self._conn:
+            for a in accounts:
+                # ON CONFLICT(name) DO UPDATE: 同じ名前があればエラーにせず、パスワードだけ書き換える
+                self._conn.execute(
+                    "INSERT INTO accounts (name, password_hash, created_at) VALUES (?, ?, ?)"
+                    " ON CONFLICT(name) DO UPDATE SET password_hash = excluded.password_hash",
+                    (a.name, a.password_hash, a.created_at),
+                )
