@@ -415,7 +415,7 @@ CREATE TABLE trait_history (
 - 最初に開くタブ: 登録されている人が 1 人だけの株は、その人のタブを開く。それ以外（0 人・2 人以上）はお客さんのタブ。デモでは 1 株に 1 人（a1 はショーン、b1 はちゃむ）が育てるので、開いた直後からその人が育てた結果を見せるため。タブを押したあとは、自動では切り替えない
 
 **動き**
-- 起動: `uv run python -m scripts.dashboard --db <DB のパス> --plants <plant_id をカンマ区切り>`（既定の DB は `data/futamaru.db`、ポートは 8765）。`simulate.py` の結果は `--db data/sim.db --plants sample-a,sample-b` で見る
+- 起動: `uv run futamaru-dashboard --db <DB のパス> --plants <plant_id をカンマ区切り>`（`uv run python -m scripts.dashboard` と同じ。既定の DB は `data/futamaru.db`、株は `a1,b1`、ポートは 8765）。`--day 1|5|30` で発表用のデモ DB（`data/demo-day<日数>.db`）を選べ、`--open` でブラウザも開く（WSL では Windows の `explorer.exe` で開く）。ポートが使われていたら、短い説明を出して終わる。`./scripts/dashboard.sh [1|5|30|live]` は、これを `--open` 付きで呼ぶだけのもの。`simulate.py` の結果は `--db data/sim.db --plants sample-a,sample-b` で見る
 - ページは 3 秒ごとに `/api/state`（JSON）を読み直す。会話して眠らせると、振り返りが終わった数秒後に成長曲線へ点が増える
 - DB は読み取り専用（SQLite の `mode=ro`）でリクエストごとに開き直し、書き込まない。エージェントが動いている最中でも開ける
 - 会話の記憶が見えるので、`127.0.0.1` でだけ待ち受ける（`0.0.0.0` にはしない）
