@@ -1,0 +1,11 @@
+# 使う部品の版を固定する（版が上がって API が変わり、締め切り前に壊れるのを防ぐため。仕様 §9）
+dependencies:
+  idf: ">=5.4"
+  # サーバーの中継（relay）との WebSocket（仕様 §3.2.1）。IDF 5.4.2 でビルドできた版
+  espressif/esp_websocket_client: "~1.8.0"
+  # マイクの音のエコーキャンセル（AEC）。中で esp-sr の AEC を使う（media.c）
+  espressif/esp_capture: "0.7.11"
+  # Wi-Fi への接続（LiveKit SDK のサンプル用の小さな部品。LiveKit 本体には依存しない）
+  livekit/example_utils: "~0.2.0"
+  # 音声チップ ES8311 のドライバ
+  espressif/esp_codec_dev: "~1.4"

@@ -1,6 +1,6 @@
 # ハードウェアの調査と決定の記録
 
-ハード担当（syon.oba・cham.dohi）が調べたこと・決めたことを残す場所です。筐体の CAD は `hardware/enclosure/`（#16）、買うものは #35 にあります。
+ハード担当（syon.oba・cham.dohi）が調べたこと・決めたことを残す場所です。ESP32 のファームウェアは [`firmware/`](../../firmware/README.md) にあります。筐体の CAD は `hardware/enclosure/`（#16）、買うものは #35 にあります。
 
 | ファイル | 中身 |
 |---|---|

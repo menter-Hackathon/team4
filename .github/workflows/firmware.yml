@@ -1,0 +1,26 @@
+name: firmware
+
+# ESP32 のファームウェア（firmware/）がビルドできるかを確かめる。
+# 実機への書き込みや音の確認はできないので、それは firmware/README.md の手順で人が行う。
+on:
+  pull_request:
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware.yml"
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - ".github/workflows/firmware.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ESP-IDF v5.4.2
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.2
+          target: esp32s3
+          path: firmware

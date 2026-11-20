@@ -1,0 +1,61 @@
+menu "Futamaru"
+
+    config FUTAMARU_RELAY_URL
+        string "Relay WebSocket URL"
+        default ""
+        help
+            サーバーの中継（relay）の URL（仕様 §3.2.1）。
+            例: wss://<ホスト>/relay（Cloudflare Tunnel 経由）。手元の試験では ws://<PC の IP>:<ポート>/relay も使える。
+            sdkconfig.secrets に書く。
+
+    config FUTAMARU_DEVICE_KEY
+        string "Device key for the relay"
+        default ""
+        help
+            中継につなぐときの合言葉。HTTP ヘッダ「Authorization: Bearer <この値>」で送る。
+            秘密情報なので sdkconfig.secrets に書く。
+
+    config FUTAMARU_PLANT_ID
+        string "Plant ID"
+        default "a1"
+        help
+            どの株として話すか（start メッセージの plant_id）。
+            英小文字・数字・_・- だけで 1〜32 文字。2 台目は b1 などに変える。
+
+    config FUTAMARU_MULAW
+        bool "Compress audio to the relay with mu-law"
+        default y
+        help
+            中継との間の音を μ-law（G.711）で圧縮する（仕様 §3.2.1 の codec "mulaw"）。
+            送る量が半分（32KB/秒 → 16KB/秒）になる。テザリングなど上りの細い回線でも途切れにくい
+            （2026-11-19、iPhone のテザリングでは 16 ビットの PCM のままだと 1 割しか送れなかった）。
+            n にすると 16 ビットの PCM のまま送る。
+
+    config FUTAMARU_USE_AEC
+        bool "Use echo cancellation (AEC)"
+        default n
+        help
+            y にすると、ES8311 がスピーカーに出した音（参照）をマイクの音と一緒に録り、
+            植物自身の声をマイクの音から消す（仕様 §9 の 4）。
+            既定は n。2026-11-20 の実機（XIAO ESP32S3 ＋ Atomic Voice Base）では、
+            AEC を通すと話しかけた人の声まで消えてしまったため。
+            n のときは、植物が話している間（と話し終えてから 0.3 秒）マイクの音を無音にする
+            （半二重。仕様 §9 の 4 の補足、main/media.c）。
+
+    config FUTAMARU_SPEAKER_VOLUME
+        int "Speaker volume (0-100)"
+        default 85
+        range 0 100
+
+    config FUTAMARU_MIC_GAIN_DB
+        int "Microphone gain (dB)"
+        default 30
+        range 0 42
+        help
+            マイクの増幅。声が小さく聞き取られないときは上げ、割れるときは下げる。
+
+    config FUTAMARU_STATUS_LED
+        bool "Show status on the XIAO user LED (GPIO21)"
+        default y
+
+endmenu
