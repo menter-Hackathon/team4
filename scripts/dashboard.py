@@ -27,11 +27,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from agent.plant.dialect import resolve_dialect
-from agent.plant.personality import Traits
+from agent.plant.personality import TRAIT_NAMES, Traits
 from agent.plant.plant_type import ALL_TYPES, PlantType, plant_type
-from agent.plant.prompt import PROMPT_MEMORY_LIMIT, rank_memories, recency_factor
-from agent.plant.store import Person, PlantStore
-from agent.plant.timeutil import iso, jst_now
+from agent.plant.prompt import PROMPT_MEMORY_LIMIT, days_between, rank_memories, recency_factor
+from agent.plant.store import Person, PlantStore, TraitSnapshot
+from agent.plant.timeutil import TIME_BANDS, iso, jst_now, parse_iso, time_band
 
 # 待ち受けるアドレス。この PC の中からしか開けない（記憶をほかの人に見せないため、#59）
 HOST = "127.0.0.1"
@@ -55,7 +55,8 @@ def _type_json(t: PlantType) -> dict:
     """タイプを JSON にする。イラストのファイルがあれば、その URL も入れる（無ければ None）。
 
     例: {"key": "mint", "name": "ミントふたまる", "emoji": "🌿", "description": "…",
-         "image": "/types/mint.png"}
+         "detail": "…", "image": "/types/mint.png"}
+    description はキャッチコピー（1 行）、detail は結果画面に出す 2〜3 文の説明
     """
     has_image = (TYPE_IMAGE_DIR / f"{t.key}.png").is_file()
     return {
@@ -63,8 +64,73 @@ def _type_json(t: PlantType) -> dict:
         "name": t.name,
         "emoji": t.emoji,
         "description": t.description,
+        "detail": t.detail,
         "image": f"/types/{t.key}.png" if has_image else None,
     }
+
+
+def growth_json(
+    store: PlantStore, plant_id: str, person_id: int | None, history: list[TraitSnapshot]
+) -> dict:
+    """「こんなふうに育てられた」に出す、育て方の記録を作る（仕様 §6.6）。
+
+    DB にある事実だけを数える。性格の原因のように見せる文は画面側でも作らない
+    （話しかけた時刻はまだ性格に反映していないため。設計メモ 2026-11-20）。
+
+    引数:
+        person_id: その人（None ならお客さん）の会話・水やりだけを数える
+        history: その人の性格の移り変わり（古い順）。いちばん動いた軸を探すのに使う
+    戻り値の例（2 日おきに深夜 3 回話し、水を 1 回あげた人）:
+        {"talks": 3, "waterings": 1, "time_band": "深夜", "interval_days": 2.0,
+         "avg_turns": 4.0, "biggest_change": {"trait": "affection", "delta": 0.15}}
+    会話が 0 回なら time_band・avg_turns は None、2 回未満なら interval_days は None。
+    """
+    sessions = store.finished_sessions(plant_id, person_id)
+    starts = [parse_iso(s.started_at) for s in sessions]
+
+    # 1. いちばん多い時間帯。同じ回数なら TIME_BANDS の順（朝→深夜）で先のものにする
+    band = None
+    if starts:
+        bands = [time_band(t) for t in starts]
+        band = max(TIME_BANDS, key=lambda b: (bands.count(b), -TIME_BANDS.index(b)))
+
+    # 2. 会いに来てくれた間隔。隣り合う会話の始まりの差（日）の平均
+    interval = None
+    if len(starts) >= 2:
+        gaps = [(b - a).total_seconds() / 86400 for a, b in zip(starts, starts[1:], strict=False)]
+        interval = round(sum(gaps) / len(gaps), 1)
+
+    # 3. 1 回の会話で、持ち主が話しかけた回数の平均
+    avg_turns = round(sum(s.user_turns for s in sessions) / len(sessions), 1) if sessions else None
+
+    return {
+        "talks": len(sessions),
+        "waterings": store.watering_count(plant_id, person_id),
+        "time_band": band,
+        "interval_days": interval,
+        "avg_turns": avg_turns,
+        "biggest_change": _biggest_change(history),
+    }
+
+
+def _biggest_change(history: list[TraitSnapshot]) -> dict | None:
+    """最初と今の性格を比べて、いちばん大きく動いた軸を返す。
+
+    例: 初期 (0.5, 0.5, 0.5, 0.5) → 今 (0.6, 0.2, 0.5, 0.5) なら {"trait": "affection", "delta": -0.3}
+    delta は符号付き（下がったならマイナス）。同じ大きさなら TRAIT_NAMES の順で先の軸。
+    履歴が 1 行しかない・どの軸も動いていないなら None（「いちばん伸びた」を出さない）。
+    """
+    if len(history) < 2:
+        return None
+    first, last = history[0].traits.as_dict(), history[-1].traits.as_dict()
+    # 小数の誤差（0.1 が 0.09999… になるなど）を消すため、比べる前に小数 3 桁に丸める
+    deltas = {name: round(last[name] - first[name], 3) for name in TRAIT_NAMES}
+    trait = max(
+        TRAIT_NAMES, key=lambda n: abs(deltas[n])
+    )  # 同じ大きさなら先の軸（max は最初を返す）
+    if deltas[trait] == 0:
+        return None
+    return {"trait": trait, "delta": deltas[trait]}
 
 
 def view_state(
@@ -79,12 +145,15 @@ def view_state(
         last_summary: 前回の会話の要約（無ければ None）
         dialect:      その人に使う方言（お客さんは標準語）
         type:         今の性格の 16 タイプ（「〇〇ふたまる」、#64）。人ごとに違う
+        days:         株を育て始めてから何日目か（作った日が 1 日目）
+        growth:       こんなふうに育てられた（growth_json、仕様 §6.6）
     """
     person_id = person.id if person else None
     # 1. 成長曲線。株を作った時点（または人を登録した時点）の初期値から、振り返りのたびに 1 行ずつある
+    snapshots = store.trait_history(plant_id, person_id)
     history = [
         {"recorded_at": h.recorded_at, "session_id": h.session_id, "traits": _traits_json(h.traits)}
-        for h in store.trait_history(plant_id, person_id)
+        for h in snapshots
     ]
     # 2. 覚えていること。並べ方は prompt.rank_memories と同じにする（プロンプトに入るものと同じものが見える）。
     #    get_memories はその人の記憶だけを返す（お客さんならお客さんの記憶だけ、#70）
@@ -113,6 +182,9 @@ def view_state(
         "last_summary": store.latest_summary(plant_id, person_id),
         "dialect": dialect,
         "type": _type_json(plant_type(traits)),
+        # 株を作った日を 1 日目として、今日が何日目か（結果画面の「N 日育てた結果…」）
+        "days": days_between(store.plant_created_at(plant_id), now) + 1,
+        "growth": growth_json(store, plant_id, person_id, snapshots),
     }
 
 
