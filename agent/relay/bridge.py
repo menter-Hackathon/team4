@@ -68,28 +68,90 @@ def device_token(plant_id: str, api_key: str, api_secret: str) -> str:
     )
 
 
-class LiveKitBridge:
-    """LiveKit のルームに入り、鉢の音とエージェントの声を受け渡す（DeviceBridge の本物）。"""
+class AgentWatch:
+    """ルームにエージェントがいない時間を数え、ルームを作り直すべきかを決める（時計は外から渡す）。
 
-    def __init__(self, plant_id: str):
+    なぜ要るか（2026-11-19 の ohsawa で 2 回起きた）:
+      LiveKit は、新しいルームができたときにだけエージェントを呼ぶ（自動ディスパッチ）。
+      エージェントを起動し直したあと、中継が先に古いルームへ入り直すと、ルームは「新しく」ならず、
+      エージェントが呼ばれないまま、鉢が誰もいないルームで話し続けてしまう。
+      エージェントが会話の途中で落ちたときも同じ。
+    決め方:
+      エージェントがいない状態が wait 秒続いたら「作り直す」と答える。ただし作り直しは cooldown 秒に
+      1 回まで（エージェント自体が止まっているときに、作り直しをくり返さないため）。
+    例: wait=8 なら、いない状態が 8 秒続いた時点で update(False) が True を返す
+    """
+
+    def __init__(
+        self, clock: Callable[[], float], wait: float = 8.0, cooldown: float = 30.0
+    ) -> None:
+        self._clock = clock
+        self._wait = wait
+        self._cooldown = cooldown
+        self._absent_since: float | None = clock()  # 入った直後は、まだいない
+        self._last_recreate: float | None = None
+
+    def update(self, agent_present: bool) -> bool:
+        """今エージェントがいるかを渡す。ルームを作り直すべきなら True。"""
+        now = self._clock()
+        if agent_present:
+            self._absent_since = None
+            return False
+        if self._absent_since is None:
+            self._absent_since = now  # 今いなくなった
+        if now - self._absent_since < self._wait:
+            return False
+        if self._last_recreate is not None and now - self._last_recreate < self._cooldown:
+            return False
+        # 作り直す。作り直したあとも、また wait 秒は待つ
+        self._last_recreate = now
+        self._absent_since = now
+        return True
+
+
+class LiveKitBridge:
+    """LiveKit のルームに入り、鉢の音とエージェントの声を受け渡す（DeviceBridge の本物）。
+
+    入ったあとは、エージェントがルームにいるかを 1 秒ごとに見て、いない状態が続いたら
+    ルームを作り直す（AgentWatch）。作り直している間も、鉢との WebSocket はそのまま続ける。
+    """
+
+    def __init__(self, plant_id: str, url: str, api_key: str, api_secret: str):
         self.plant_id = plant_id
+        self._url = url
+        self._api_key = api_key
+        self._api_secret = api_secret
         self._room = rtc.Room()
         self._source = rtc.AudioSource(SAMPLE_RATE, NUM_CHANNELS)
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=PLANT_AUDIO_QUEUE_FRAMES)
         self._readers: set[asyncio.Task[None]] = set()
+        self._watch_task: asyncio.Task[None] | None = None
+        self._rejoining = False  # ルームを作り直している最中か（その間の鉢の音は捨てる）
         self._closed = False
 
-    async def connect(self, url: str, token: str) -> None:
-        """ルームに入り、マイクのトラックを publish する。
+    @property
+    def room_name(self) -> str:
+        return f"plant-{self.plant_id}"
+
+    async def connect(self) -> None:
+        """ルームに入り、エージェントを見張るタスクを始める。"""
+        await self._join()
+        loop = asyncio.get_running_loop()
+        self._watch_task = asyncio.create_task(self._watch_agent(AgentWatch(loop.time)))
+
+    async def _join(self) -> None:
+        """新しい rtc.Room でルームに入り、マイクのトラックを publish する。
 
         手順:
           1. エージェントの声のトラックが届いたら読み始めるように、出来事を登録する
           2. ルームに入る（auto_subscribe なので、エージェントの声は自動で subscribe される）
           3. 鉢のマイクの音を流すトラックを publish する
         """
+        room = rtc.Room()
+        self._room = room
 
         # 1. 音声のトラックを subscribe したら、20ms ずつ読むタスクを始める
-        @self._room.on("track_subscribed")
+        @room.on("track_subscribed")
         def _on_track(
             track: rtc.Track, _pub: rtc.RemoteTrackPublication, who: rtc.RemoteParticipant
         ) -> None:
@@ -101,14 +163,53 @@ class LiveKitBridge:
             task.add_done_callback(self._readers.discard)
 
         # 2. ルームに入る
-        await self._room.connect(url, token)
+        await room.connect(self._url, device_token(self.plant_id, self._api_key, self._api_secret))
 
         # 3. マイクのトラックを publish する（エージェントは SOURCE_MICROPHONE の音を聞く）
         track = rtc.LocalAudioTrack.create_audio_track("microphone", self._source)
         options = rtc.TrackPublishOptions()
         options.source = rtc.TrackSource.SOURCE_MICROPHONE
-        await self._room.local_participant.publish_track(track, options)
-        logger.info("plant %s: joined room %s", self.plant_id, self._room.name)
+        await room.local_participant.publish_track(track, options)
+        logger.info("plant %s: joined room %s", self.plant_id, room.name)
+
+    def _agent_present(self) -> bool:
+        """ルームにエージェントがいるか。"""
+        return any(
+            p.kind == rtc.ParticipantKind.PARTICIPANT_KIND_AGENT
+            for p in self._room.remote_participants.values()
+        )
+
+    async def _watch_agent(self, watch: AgentWatch) -> None:
+        """1 秒ごとにエージェントがいるかを見て、いない状態が続いたらルームを作り直す。"""
+        while not self._closed:
+            await asyncio.sleep(1.0)
+            if not watch.update(self._agent_present()):
+                continue
+            logger.warning(
+                "plant %s: no agent in %s; recreating the room so LiveKit dispatches one",
+                self.plant_id,
+                self.room_name,
+            )
+            try:
+                await self._recreate_room()
+            except Exception:
+                logger.exception("plant %s: could not recreate the room", self.plant_id)
+            finally:
+                self._rejoining = False
+
+    async def _recreate_room(self) -> None:
+        """ルームを消して入り直す。新しいルームになるので、LiveKit がエージェントを呼ぶ。
+
+        手順:
+          1. 今のルームから出る（その間の鉢の音は push_mic で捨てる）
+          2. LiveKit の API でルームを消す（空になるのを待たずに、すぐ閉じるため）
+          3. 新しい rtc.Room で入り直す
+        """
+        self._rejoining = True
+        await self._room.disconnect()
+        async with api.LiveKitAPI(self._url, self._api_key, self._api_secret) as lk:
+            await lk.room.delete_room(api.DeleteRoomRequest(room=self.room_name))
+        await self._join()
 
     async def _read_track(self, track: rtc.Track) -> None:
         """エージェントの声を 20ms（640 バイト）ずつ読み、キューに入れる。"""
@@ -127,8 +228,8 @@ class LiveKitBridge:
             await stream.aclose()
 
     async def push_mic(self, frame: bytes) -> None:
-        """鉢のマイクの音（640 バイト）を AudioSource に渡す。"""
-        if self._closed:
+        """鉢のマイクの音（640 バイト）を AudioSource に渡す。ルームを作り直している間は捨てる。"""
+        if self._closed or self._rejoining:
             return
         audio = rtc.AudioFrame(frame, SAMPLE_RATE, NUM_CHANNELS, SAMPLES_PER_FRAME)
         await self._source.capture_frame(audio)
@@ -142,10 +243,12 @@ class LiveKitBridge:
             yield frame
 
     async def close(self) -> None:
-        """読むタスクを止め、ルームから出る。plant_audio() にも終わりを知らせる。"""
+        """見張りと読むタスクを止め、ルームから出る。plant_audio() にも終わりを知らせる。"""
         if self._closed:
             return
         self._closed = True
+        if self._watch_task is not None:
+            self._watch_task.cancel()
         for task in list(self._readers):
             task.cancel()
         with contextlib.suppress(Exception):
@@ -161,9 +264,9 @@ def livekit_bridge_factory(url: str, api_key: str, api_secret: str) -> BridgeFac
     """設定を覚えた BridgeFactory を作る。server.py はこれを呼ぶだけでルームに入れる。"""
 
     async def connect(plant_id: str) -> DeviceBridge:
-        bridge = LiveKitBridge(plant_id)
+        bridge = LiveKitBridge(plant_id, url, api_key, api_secret)
         try:
-            await bridge.connect(url, device_token(plant_id, api_key, api_secret))
+            await bridge.connect()
         except BaseException:
             # 入れなかったときも、作りかけの接続を片付けてから例外を伝える
             await bridge.close()

@@ -116,3 +116,41 @@ def test_device_token_joins_the_plant_room_as_the_device():
     assert claims.identity == "device-a1"
     assert claims.video.room == "plant-a1"
     assert claims.video.room_join and claims.video.can_publish and claims.video.can_subscribe
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_agent_watch_recreates_after_the_agent_is_missing_for_a_while():
+    from agent.relay.bridge import AgentWatch
+
+    clock = _Clock()
+    watch = AgentWatch(clock, wait=8, cooldown=30)
+    clock.now = 7
+    assert not watch.update(False)  # まだ 7 秒
+    clock.now = 8
+    assert watch.update(False)  # 8 秒いない → 作り直す
+    clock.now = 20
+    assert not watch.update(False)  # 作り直してから 30 秒たつまでは、もう作り直さない
+    clock.now = 38
+    assert watch.update(False)
+
+
+def test_agent_watch_resets_when_the_agent_is_there():
+    from agent.relay.bridge import AgentWatch
+
+    clock = _Clock()
+    watch = AgentWatch(clock, wait=8, cooldown=30)
+    clock.now = 5
+    assert not watch.update(True)  # エージェントが来た
+    clock.now = 10
+    assert not watch.update(False)  # 今いなくなった（ここから数え直す）
+    clock.now = 17
+    assert not watch.update(False)
+    clock.now = 18
+    assert watch.update(False)
