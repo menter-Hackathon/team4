@@ -88,12 +88,23 @@
 
 ### 見てほしいところ
 
-- **AI が話す理由を、目の前の植物に結びつけた。** 天気（[`weather.py`](agent/plant/weather.py)・[`plugins/jma_weather.py`](agent/plugins/jma_weather.py)）、声での水やり記録（[`watering.py`](agent/plant/watering.py)）、育った日数や前回からの日数を、プロンプトの「植物の状態」の段落に入れています（[`prompt.py`](agent/plant/prompt.py) の `plant_status_text`）
-- **性格は数値で持ち、少しずつしか動かない。** 振り返り 1 回で動くのは 1 軸あたり ±0.05 まで（[`personality.py`](agent/plant/personality.py) の `MAX_DELTA`）。数値は 5 段階の言葉に直してプロンプトに入れるので、同じ LLM でも株ごとに話し方が変わります。4 軸の高い・低いの組み合わせで 16 タイプ（「〇〇ふたまる」）に分けて見せます（[`plant_type.py`](agent/plant/plant_type.py)）
-- **小さな LLM の出力を信用しすぎない。** 振り返りや人の見分けの JSON は、壊れていたり範囲外だったりしたら捨てるか直してから使います（[`reflection.py`](agent/plant/reflection.py) の `parse_reflection`、[`people.py`](agent/plant/people.py)）。無音や雑音から文字起こしが作る「ご視聴ありがとうございました」なども発話として扱いません（[`stt_noise.py`](agent/plant/stt_noise.py)）
-- **返事を速くする工夫。** 返事を日本語の文ごとに区切り、1 文目ができた時点で声にし始めます（[`plugins/sentence_stream.py`](agent/plugins/sentence_stream.py)）。水やりの判定は LLM を呼ばず正規表現で行い、返事を遅らせません（[`watering.py`](agent/plant/watering.py)）
-- **植物のロジックを LiveKit から切り離し、テストできるようにした。** 時計や LLM は引数で受け取るので、テストでは偽物に差し替えて会話の流れをまるごと確かめられます（`uv run pytest` で 590 件、2026-11-20 時点）
-- **人ごとに性格・記憶・方言を持つ。** 名乗った相手ごとに別の性格として育ち、ある人の話をほかの人には話しません（[`people.py`](agent/plant/people.py)・[`dialect.py`](agent/plant/dialect.py)、[設計](docs/superpowers/specs/2026-11-17-people-and-dialect-design.md)）
+#### 作品の核
+
+- **育て方で、少しずつ性格が育つ。** 植物が眠るたびに、その会話を LLM が振り返り、性格 4 軸（おしゃべり・甘え・元気・好奇心）をどれだけ動かすかを決めます（[`reflection.py`](agent/plant/reflection.py) の `reflect_session`）。振り返りには会話の中身だけでなく、世話の様子もコードで判断して添えます（同じファイルの `_care_lines`）
+  - 毎日のように話しかけると甘えん坊に、3 日以上あくとすねる
+  - 水をもらうと元気に、3 日以上もらえないと元気がなくなる
+  - 朝によく話しかけると元気に、深夜が多いとまったり育つ（#119）
+
+  1 回で動くのは 1 軸あたり ±0.05 まで（[`personality.py`](agent/plant/personality.py) の `MAX_DELTA`）。小さな LLM の 1 回の判断で性格が急に変わらず、「育った」と感じられる速さにするためです。4 軸の高い・低いの組み合わせで 16 タイプ（「〇〇ふたまる」）に分けて見せます（[`plant_type.py`](agent/plant/plant_type.py)）
+- **AI は本物の植物の通訳として話す。** 天気（[`weather.py`](agent/plant/weather.py)・[`plugins/jma_weather.py`](agent/plugins/jma_weather.py)）、声での水やり記録（[`watering.py`](agent/plant/watering.py)）、育った日数や前回からの日数を、プロンプトの「植物の状態」の段落に入れます（[`prompt.py`](agent/plant/prompt.py) の `plant_status_text`）。性格の数値は 5 段階の言葉に直して入れるので、同じ LLM でも株ごとに話し方が変わります（同じファイルの `build_system_prompt`）
+- **育てる人ごとに、違う子に育つ。** 名乗った相手ごとに性格・記憶・方言を持ち、ある人の話をほかの人には話しません（[`people.py`](agent/plant/people.py)・[`dialect.py`](agent/plant/dialect.py)、[設計](docs/superpowers/specs/2026-11-17-people-and-dialect-design.md)）
+
+#### 作るときの工夫
+
+- **小さな LLM の出力をそのまま信用しない。** 振り返りや人の見分けの JSON は、壊れていたり範囲外だったりしたら捨てるか直してから使います（[`reflection.py`](agent/plant/reflection.py) の `parse_reflection`、[`people.py`](agent/plant/people.py)）。無音や雑音から文字起こしが作る「ご視聴ありがとうございました」なども発話として扱いません（[`stt_noise.py`](agent/plant/stt_noise.py)）
+- **返事を速くする。** 返事を日本語の文ごとに区切り、1 文目ができた時点で声にし始めます（[`plugins/sentence_stream.py`](agent/plugins/sentence_stream.py)）。水やりの判定は LLM を呼ばず正規表現で行い、返事を遅らせません（[`watering.py`](agent/plant/watering.py)）
+- **テストしやすい作り。** 植物のロジック（[`agent/plant/`](agent/plant/)）は LiveKit に依存させず、時計や LLM は引数で受け取ります。テストでは偽物に差し替えて、起きてから眠って振り返るまでの会話の流れをまるごと確かめています（[`tests/plant/test_conversation.py`](tests/plant/test_conversation.py)）
+- **鉢と PC のつなぎ方。** 鉢は Cloudflare Tunnel 越しに PC の中継へ WebSocket でつなぐので、鉢と PC が別のネットワークにあっても、PC 側でポートを開けずに話せます。音は μ-law で圧縮して、やりとりする量を半分にしています（[`agent/relay/`](agent/relay/)・[`firmware/`](firmware/README.md)、[手順](docs/deploy.md)）
 
 ## 今どこまでできているか（2026-11-20）
 
