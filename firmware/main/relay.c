@@ -58,7 +58,7 @@ static const char *TAG = "relay";
 #define SEND_TIMEOUT_MS 5000     // 1 回の送信で待つ最長の時間（テザリングで一瞬詰まっても切らないよう長め）
 #define BACKOFF_FIRST_MS 5000    // つなぎ直す前の最初の待ち時間
 #define BACKOFF_MAX_MS 60000     // つなぎ直す前の最長の待ち時間
-#define STATS_INTERVAL_MS 30000  // 送り受けした量をログに出す間隔
+#define STATS_INTERVAL_MS 10000  // 送り受けした量をログに出す間隔
 
 // WebSocket のフレームの種類（RFC 6455 の opcode）
 #define WS_OP_CONTINUATION 0x0
@@ -80,6 +80,10 @@ static volatile bool s_streaming; // mic_task は s_lock を持たずに読む�
 
 // 送り受けした量（ログ用）
 static volatile uint32_t s_mic_frames_sent;
+// マイクの音のいちばん大きかった振幅（前回のログから今まで）。0〜32767。
+// 配線の確認用: 周りが静かでも 50 以上はあるのがふつう。0〜2 のままなら、マイクの音の線（G7 → D3）が
+// つながっていない（2026-11-20、メスのジャンパー線に替えたあとに無音になったときに足した）
+static volatile int32_t s_mic_peak;
 static volatile uint32_t s_voice_bytes_received;
 
 // 受信の処理だけが使う変数（1 つのタスクからしか触らない）
@@ -290,6 +294,14 @@ static void mic_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
+        // 1.5 いちばん大きかった振幅を覚えておく（ログ用）
+        const int16_t *samples = (const int16_t *)frame;
+        for (size_t i = 0; i < MEDIA_FRAME_BYTES / sizeof(int16_t); i++) {
+            int32_t v = samples[i] < 0 ? -(int32_t)samples[i] : samples[i];
+            if (v > s_mic_peak) {
+                s_mic_peak = v;
+            }
+        }
         // 2. ready のあとなら、送る形にして（μ-law なら圧縮して）待ち行列へ。
         //    いっぱい（送信が 2 秒以上詰まっている）なら、この 20ms は捨てる
         if (s_streaming) {
@@ -426,8 +438,9 @@ static bool run_session(void)
         }
         if (xTaskGetTickCount() - last_stats >= pdMS_TO_TICKS(STATS_INTERVAL_MS)) {
             last_stats = xTaskGetTickCount();
-            ESP_LOGI(TAG, "Mic frames sent: %lu, voice received: %lu bytes", (unsigned long)s_mic_frames_sent,
-                     (unsigned long)s_voice_bytes_received);
+            ESP_LOGI(TAG, "Mic frames sent: %lu, mic peak: %ld, voice received: %lu bytes",
+                     (unsigned long)s_mic_frames_sent, (long)s_mic_peak, (unsigned long)s_voice_bytes_received);
+            s_mic_peak = 0;
         }
     }
     ESP_LOGW(TAG, "Disconnected from the relay");
