@@ -374,6 +374,30 @@ async def test_no_water_for_three_days_is_thirsty(store):
     assert "最後に水をもらってから4日（のどが渇いて元気がない" in fake.calls[0][0][-1]["content"]
 
 
+# --- 話しかけた時間帯（2026-11-20、ショーンさんの FB） ---
+async def _care_text(store, start):
+    """start に始まった会話を振り返り、LLM に渡した文を返す。"""
+    sid = _session(store, start)
+    fake = FakeCompleter([VALID])
+    await reflect_session(store, "a", sid, fake, NOW)
+    return fake.calls[0][0][-1]["content"]
+
+
+async def test_late_night_talk_lowers_energy(store):
+    user = await _care_text(store, datetime(2026, 11, 14, 23, 0, tzinfo=JST))
+    assert "- 夜おそく（深夜）に話しかけてもらった（energy を少し下げる）。" in user
+
+
+async def test_morning_talk_raises_energy(store):
+    user = await _care_text(store, datetime(2026, 11, 15, 7, 30, tzinfo=JST))
+    assert "- 朝に話しかけてもらった（energy を少し上げてよい）。" in user
+
+
+async def test_daytime_talk_does_not_move_energy(store):
+    user = await _care_text(store, datetime(2026, 11, 15, 14, 0, tzinfo=JST))
+    assert "- 昼に話しかけてもらった（時間帯では energy を動かさない）。" in user
+
+
 def test_system_message_explains_care_for_affection_and_energy():
     from agent.plant.reflection import SYSTEM_MESSAGE
 
