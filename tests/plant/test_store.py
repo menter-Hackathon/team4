@@ -143,3 +143,242 @@ def test_count_user_utterances_since(store):
     other = store.start_session("b", T0)
     store.add_utterance(other, "user", "b", T0)
     assert store.count_user_utterances_since("a", T0 - timedelta(days=7)) == 2
+
+
+# --- 人ごとの性格・記憶・方言（people-and-dialect） ---
+
+# この機能より前のスキーマ（people も person_id / owner_dialect も無い）
+OLD_SCHEMA = """
+CREATE TABLE plants (
+  plant_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'ふたまる', created_at TEXT NOT NULL,
+  talkativeness REAL NOT NULL DEFAULT 0.5, affection REAL NOT NULL DEFAULT 0.5,
+  energy REAL NOT NULL DEFAULT 0.5, curiosity REAL NOT NULL DEFAULT 0.5
+);
+CREATE TABLE memories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, plant_id TEXT NOT NULL REFERENCES plants(plant_id),
+  content TEXT NOT NULL, kind TEXT NOT NULL, importance REAL NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, plant_id TEXT NOT NULL REFERENCES plants(plant_id),
+  started_at TEXT NOT NULL, ended_at TEXT, user_turns INTEGER NOT NULL DEFAULT 0,
+  summary TEXT, reflected INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE utterances (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL REFERENCES sessions(id),
+  role TEXT NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE trait_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, plant_id TEXT NOT NULL REFERENCES plants(plant_id),
+  session_id INTEGER REFERENCES sessions(id), talkativeness REAL NOT NULL,
+  affection REAL NOT NULL, energy REAL NOT NULL, curiosity REAL NOT NULL, recorded_at TEXT NOT NULL
+);
+"""
+
+
+def test_migrates_an_old_database(tmp_path):
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(OLD_SCHEMA)
+    ts = iso(T0)
+    conn.execute(
+        "INSERT INTO plants (plant_id, created_at, affection) VALUES ('a1', ?, 0.6)", (ts,)
+    )
+    conn.execute(
+        "INSERT INTO memories (plant_id, content, kind, importance, created_at, updated_at)"
+        " VALUES ('a1', 'カレーが好き', 'preference', 0.6, ?, ?)",
+        (ts, ts),
+    )
+    conn.execute(
+        "INSERT INTO sessions (plant_id, started_at, ended_at, summary, reflected)"
+        " VALUES ('a1', ?, ?, 'むかしの話', 1)",
+        (ts, ts),
+    )
+    conn.commit()
+    conn.close()
+
+    s = PlantStore(path)  # 開き直すと migration が走る
+    try:
+        assert s.get_plant("a1").traits.affection == pytest.approx(0.6)
+        mems = s.get_memories("a1")
+        assert [m.content for m in mems] == ["カレーが好き"]
+        assert s._conn.execute("SELECT person_id FROM memories").fetchone()[0] is None
+        assert s.latest_summary("a1") == "むかしの話"
+        sess = s.get_session(1)
+        assert sess.person_id is None and sess.owner_dialect is None
+        # 2 回目に開いても壊れない（列が既にあっても ALTER しない）
+    finally:
+        s.close()
+    PlantStore(path).close()
+
+
+def _two_people(store):
+    store.get_or_create_plant("a1", T0)
+    taro = store.add_person("a1", "たろう", T0)
+    hanako = store.add_person("a1", "はなこ", T0)
+    return taro, hanako
+
+
+def _reflect(store, person_id, new=(), updates=(), traits=None, dialect="unknown", at=T0):
+    """人（None ならお客さん）のセッションを作って振り返りを反映し、セッション id を返す。"""
+    sid = store.start_session("a1", at)
+    if person_id is not None:
+        store.set_session_person(sid, person_id)
+    store.end_session(sid, at)
+    store.apply_reflection(
+        "a1",
+        sid,
+        f"summary-{person_id}",
+        list(new),
+        list(updates),
+        traits or Traits(),
+        at,
+        person_id=person_id,
+        owner_dialect=dialect,
+    )
+    return sid
+
+
+def test_people_have_their_own_traits_and_memories(store):
+    taro, hanako = _two_people(store)
+    assert [p.name for p in store.get_people("a1")] == ["たろう", "はなこ"]
+    _reflect(store, taro.id, traits=Traits(affection=0.55))
+    assert store.get_person(taro.id).traits.affection > 0.5
+    assert store.get_person(hanako.id).traits == Traits()
+    assert store.get_plant("a1").traits == Traits()
+    # 履歴も人ごとに分かれる（初期の 1 行＋振り返りの 1 行）
+    assert len(store.trait_history("a1", taro.id)) == 2
+    assert len(store.trait_history("a1", hanako.id)) == 1
+    assert len(store.trait_history("a1")) == 1
+
+
+def test_memories_are_private_per_person(store):
+    taro, hanako = _two_people(store)
+    _reflect(store, taro.id, [NewMemory("たろうはカレー好き", "preference", 0.6)])
+    _reflect(store, hanako.id, [NewMemory("はなこは犬好き", "preference", 0.6)])
+    _reflect(store, None, [NewMemory("お客さんの話", "event", 0.5)])
+    # 名乗った人にはその人の記憶だけ。お客さんの記憶も混ぜない（#70）
+    assert [m.content for m in store.get_memories("a1", taro.id)] == ["たろうはカレー好き"]
+    assert [m.content for m in store.get_memories("a1", hanako.id)] == ["はなこは犬好き"]
+    # お客さんにはお客さんの記憶だけ
+    assert [m.content for m in store.get_memories("a1")] == ["お客さんの話"]
+
+
+def test_reflection_cannot_update_another_persons_memory(store):
+    taro, hanako = _two_people(store)
+    _reflect(store, hanako.id, [NewMemory("はなこは犬好き", "preference", 0.6)])
+    _reflect(store, None, [NewMemory("お客さんの話", "event", 0.5)])
+    hanako_mem = store.get_memories("a1", hanako.id)[0]
+    guest_mem = store.get_memories("a1")[0]
+    later = T0 + timedelta(hours=1)
+    _reflect(
+        store,
+        taro.id,
+        updates=[
+            MemoryUpdate(hanako_mem.id, "乗っ取り", 0.9),
+            MemoryUpdate(guest_mem.id, "お客さんの話（更新）", 0.7),
+        ],
+        at=later,
+    )
+    # ほかの人の記憶も、お客さんの記憶も、たろうとの振り返りでは書き換えられない（#70）
+    assert store.get_memories("a1", hanako.id)[0].content == "はなこは犬好き"
+    assert store.get_memories("a1")[0].content == "お客さんの話"
+
+
+def test_latest_summary_is_per_person_and_guest(store):
+    taro, _ = _two_people(store)
+    _reflect(store, taro.id, at=T0)
+    _reflect(store, None, at=T0 + timedelta(hours=1))
+    assert store.latest_summary("a1", taro.id) == f"summary-{taro.id}"
+    assert store.latest_summary("a1") == "summary-None"
+
+
+def test_count_user_utterances_is_per_person(store):
+    taro, _ = _two_people(store)
+    s_taro = store.start_session("a1", T0)
+    store.set_session_person(s_taro, taro.id)
+    store.add_utterance(s_taro, "user", "x", T0)
+    s_guest = store.start_session("a1", T0)
+    store.add_utterance(s_guest, "user", "y", T0)
+    store.add_utterance(s_guest, "user", "z", T0)
+    since = T0 - timedelta(days=1)
+    assert store.count_user_utterances_since("a1", since, taro.id) == 1
+    assert store.count_user_utterances_since("a1", since) == 2
+
+
+def test_recent_dialects_newest_first_without_unknown(store):
+    taro, hanako = _two_people(store)
+    for i, d in enumerate(["kansai", "unknown", "hakata", "standard"]):
+        _reflect(store, taro.id, dialect=d, at=T0 + timedelta(hours=i))
+    _reflect(store, hanako.id, dialect="hiroshima", at=T0 + timedelta(hours=9))
+    assert store.recent_dialects(taro.id) == ["standard", "hakata", "kansai"]
+    assert store.recent_dialects(taro.id, limit=2) == ["standard", "hakata"]
+    assert store.recent_dialects(hanako.id) == ["hiroshima"]
+
+
+def test_dialect_override_can_be_set_and_cleared(store):
+    taro, _ = _two_people(store)
+    assert taro.dialect_override is None
+    store.set_dialect_override(taro.id, "hakata")
+    assert store.get_person(taro.id).dialect_override == "hakata"
+    store.set_dialect_override(taro.id, None)
+    assert store.get_person(taro.id).dialect_override is None
+
+
+# --- 育った日数・前回からの日数（#82） ---
+def test_plant_created_at_is_the_first_creation_time(store):
+    store.get_or_create_plant("a", T0)
+    store.get_or_create_plant("a", T0 + timedelta(days=3))  # 2 回目は作り直さない
+    assert store.plant_created_at("a") == T0
+
+
+def test_last_talk_at_is_per_person_and_skips_unfinished(store):
+    taro, hanako = _two_people(store)
+    s1 = store.start_session("a1", T0)
+    store.set_session_person(s1, taro.id)
+    store.end_session(s1, T0 + timedelta(minutes=5))
+    s2 = store.start_session("a1", T0 + timedelta(days=2))
+    store.end_session(s2, T0 + timedelta(days=2, minutes=1))  # お客さん
+    store.start_session("a1", T0 + timedelta(days=3))  # 今のセッション（まだ終わっていない）
+    assert store.last_talk_at("a1", taro.id) == T0 + timedelta(minutes=5)
+    assert store.last_talk_at("a1", hanako.id) is None
+    assert store.last_talk_at("a1") == T0 + timedelta(days=2, minutes=1)  # 誰とでも、一番最近
+
+
+# --- 水やり（#81） ---
+def test_watering_is_recorded_once_per_session(store):
+    store.get_or_create_plant("a", T0)
+    sid = store.start_session("a", T0)
+    assert store.last_watered_at("a") is None and not store.watered_in_session(sid)
+    assert store.add_watering("a", None, sid, T0 + timedelta(minutes=1)) is True
+    assert (
+        store.add_watering("a", None, sid, T0 + timedelta(minutes=2)) is False
+    )  # 同じ会話では 1 回
+    assert store.watered_in_session(sid)
+    assert store.last_watered_at("a") == T0 + timedelta(minutes=1)
+
+
+def test_last_watered_at_is_per_plant_and_latest(store):
+    store.get_or_create_plant("a", T0)
+    store.get_or_create_plant("b", T0)
+    s1 = store.start_session("a", T0)
+    store.add_watering("a", None, s1, T0)
+    s2 = store.start_session("a", T0 + timedelta(days=2))
+    store.add_watering("a", None, s2, T0 + timedelta(days=2))
+    assert store.last_watered_at("a") == T0 + timedelta(days=2)
+    assert store.last_watered_at("b") is None
+
+
+# --- 世話の間隔（#83）。振り返りでは「この会話より前」の時刻を見る ---
+def test_last_talk_and_watering_before_a_time(store):
+    store.get_or_create_plant("a", T0)
+    s1 = store.start_session("a", T0)
+    store.add_watering("a", None, s1, T0)
+    store.end_session(s1, T0 + timedelta(minutes=5))
+    s2 = store.start_session("a", T0 + timedelta(days=3))
+    store.add_watering("a", None, s2, T0 + timedelta(days=3))
+    store.end_session(s2, T0 + timedelta(days=3, minutes=5))
+    before = T0 + timedelta(days=3)  # 2 回目の会話が始まった時刻
+    assert store.last_talk_at("a", before=before) == T0 + timedelta(minutes=5)
+    assert store.last_watered_at("a", before=before) == T0
+    assert store.last_talk_at("a", before=T0) is None

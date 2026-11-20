@@ -1,0 +1,13 @@
+# イメージに入れないもの。キーや会話ログが入らないよう、.env と data/ は必ず除く
+.env
+data/
+.venv/
+.git/
+.github/
+.superpowers/
+.pytest_cache/
+.ruff_cache/
+**/__pycache__/
+docs/
+tests/
+*.md

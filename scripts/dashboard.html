@@ -1,0 +1,315 @@
+<!doctype html>
+<!--
+  ふたまるのダッシュボード（仕様 §6.6、#59）。scripts/dashboard.py が返す HTML 1 枚。
+  しくみ:
+    1. 数秒ごとに /api/state（JSON）を読みに行く
+    2. 株ごとにカードを作り、タイプ（「〇〇ふたまる」、#64）・レーダーチャート（今の性格）・
+       折れ線（成長曲線）・覚えていることを描く
+    3. 2 回目からは、グラフを作り直さずに数字だけ入れ替える（ちらつかせないため）
+  記憶や要約は LLM が作った文なので、HTML としてではなく必ず textContent で入れる（タグを実行させない）。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ふたまる ダッシュボード</title>
+<!-- グラフ描画ライブラリ（外部の技術。README に記載）。版を固定する -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f7f2; --card: #ffffff; --ink: #1f2a1f; --sub: #5d6b5d; --line: #dfe5da;
+    --leaf: #3f8f4f; --plant0: #2f7d4a; --plant1: #b5651d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding: 16px 24px 4px;
+  }
+  header h1 { margin: 0; font-size: 24px; color: var(--leaf); }
+  header .status { color: var(--sub); font-size: 13px; }
+  header .status.error { color: #b3261e; font-weight: bold; }
+  main {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    gap: 16px; padding: 12px 24px 24px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 18px; border-top: 6px solid var(--accent); min-width: 0;
+  }
+  .card h2 { margin: 0; font-size: 20px; }
+  .card h2 small { color: var(--sub); font-weight: normal; font-size: 13px; margin-left: 6px; }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+  .tabs button {
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer;
+  }
+  .tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* グラフ 2 つは横に並べ、カードが狭いときは縦に積む */
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+  .charts > div { position: relative; height: 260px; min-width: 0; }
+  .values { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 14px; }
+  .values b { font-variant-numeric: tabular-nums; }
+  .values i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+  h3 { font-size: 14px; color: var(--sub); margin: 14px 0 6px; }
+  .meta { font-size: 14px; line-height: 1.6; }
+  .meta .k { color: var(--sub); margin-right: 6px; }
+  ol.mem { margin: 0; padding-left: 22px; font-size: 14px; line-height: 1.55; }
+  ol.mem .tag { font-size: 11px; color: var(--sub); margin-left: 6px; white-space: nowrap; }
+  .empty { color: var(--sub); font-size: 14px; }
+  /* 性格の 16 タイプ（#64）。イラストが届くまでは絵文字を大きく出す */
+  .ptype {
+    display: flex; align-items: center; gap: 14px; margin: 8px 0 6px;
+    padding: 10px 14px; background: #f3f7ef; border-radius: 12px;
+  }
+  .ptype .pic {
+    flex: none; width: 96px; height: 96px; display: flex; align-items: center;
+    justify-content: center; font-size: 64px; line-height: 1;
+  }
+  .ptype .pic img { width: 96px; height: 96px; object-fit: contain; }
+  .ptype .pname { font-size: 22px; font-weight: bold; }
+  .ptype .pdesc { font-size: 14px; color: var(--sub); margin-top: 4px; }
+  .notfound { color: var(--sub); padding: 24px 0; }
+  @media (max-width: 720px) {
+    main { grid-template-columns: 1fr; padding: 12px 16px; }
+    .charts { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🌱 ふたまる ダッシュボード</h1>
+  <span id="status" class="status">読み込み中…</span>
+</header>
+<main id="plants"></main>
+
+<script>
+// 何秒ごとに読み直すか。デモで会話して眠らせた直後にグラフが動くのを見せるため短めにする
+const REFRESH_MS = 3000;
+// 性格 4 軸（DB の列名 → 表示名・色）。色は色覚の違いでも見分けやすい組み合わせ
+const TRAITS = [
+  { key: "talkativeness", label: "おしゃべり度", color: "#0072B2" },
+  { key: "affection", label: "甘え度", color: "#CC79A7" },
+  { key: "energy", label: "元気度", color: "#E69F00" },
+  { key: "curiosity", label: "好奇心", color: "#009E73" },
+];
+const KIND = { preference: "好み", event: "出来事", habit: "習慣" };
+const DIALECT = { standard: "標準語", kansai: "関西弁", hakata: "博多弁", hiroshima: "広島弁" };
+// 株ごとのカードの色（左・右）
+const ACCENTS = ["var(--plant0)", "var(--plant1)"];
+const RADAR_COLORS = ["#2f7d4a", "#b5651d"];
+
+// 株ごとの画面の部品と、選んでいる人（タブ）を覚えておく。{ plant_id: { el, radar, line, selected } }
+const cards = {};
+
+// 小さな要素を作る関数。文字は textContent で入れる（HTML として解釈させない）
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// 1 株ぶんのカードを最初に 1 回だけ作る
+function createCard(plant, index) {
+  const card = el("section", "card");
+  card.style.setProperty("--accent", ACCENTS[index % ACCENTS.length]);
+  const title = el("h2");
+  card.append(title);
+  const tabs = el("div", "tabs");
+  card.append(tabs);
+  // タイプ（イラスト・名前・ひとこと）。タブで選んでいる人の性格のタイプを出す
+  const ptype = el("div", "ptype");
+  const pic = el("div", "pic");
+  const ptext = el("div");
+  const pname = el("div", "pname"), pdesc = el("div", "pdesc");
+  ptext.append(pname, pdesc);
+  ptype.append(pic, ptext);
+  card.append(ptype);
+  const charts = el("div", "charts");
+  const radarBox = el("div"), lineBox = el("div");
+  const radarCanvas = el("canvas"), lineCanvas = el("canvas");
+  radarBox.append(radarCanvas); lineBox.append(lineCanvas);
+  charts.append(radarBox, lineBox);
+  card.append(charts);
+  const values = el("div", "values");
+  card.append(values);
+  card.append(el("h3", null, "覚えていること（大事で新しい順・上位10件）"));
+  const mem = el("div");
+  card.append(mem);
+  card.append(el("h3", null, "前回の会話・話し方"));
+  const meta = el("div", "meta");
+  card.append(meta);
+  const notfound = el("div", "notfound");
+  card.append(notfound);
+  document.getElementById("plants").append(card);
+
+  const color = RADAR_COLORS[index % RADAR_COLORS.length];
+  // レーダーチャート: 今の性格（4 軸、0〜1）
+  const radar = new Chart(radarCanvas, {
+    type: "radar",
+    data: {
+      labels: TRAITS.map(t => t.label),
+      datasets: [{ data: [0, 0, 0, 0], borderColor: color, backgroundColor: color + "33",
+                   pointBackgroundColor: color, borderWidth: 2 }],
+    },
+    options: {
+      maintainAspectRatio: false, animation: { duration: 600 },
+      plugins: { legend: { display: false } },
+      // 目盛りの数字は重なって読みにくいので出さない（値は下に数字で出す）
+      scales: { r: { min: 0, max: 1, ticks: { stepSize: 0.25, display: false },
+                     pointLabels: { font: { size: 13 } } } },
+    },
+  });
+  // 折れ線: 会話（振り返り）ごとの 4 軸の値 = 成長曲線
+  const line = new Chart(lineCanvas, {
+    type: "line",
+    data: { labels: [], datasets: TRAITS.map(t => ({
+      label: t.label, data: [], borderColor: t.color, backgroundColor: t.color,
+      borderWidth: 2, pointRadius: 2, tension: 0.25 })) },
+    options: {
+      maintainAspectRatio: false, animation: { duration: 600 },
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 12 } } },
+                 tooltip: { callbacks: { title: items => items[0] && items[0].label } } },
+      scales: { y: { min: 0, max: 1, ticks: { stepSize: 0.25 } },
+                x: { title: { display: true, text: "会話の回数" } } },
+    },
+  });
+  return { card, title, tabs, ptype, pic, pname, pdesc, charts, values, mem, meta, notfound,
+           radar, line, selected: "guest" };
+}
+
+// タイプを出す。イラストがあれば画像、無ければ絵文字。
+// 3 秒ごとに画像を作り直すとちらつくので、表示する中身が変わったときだけ入れ替える
+function renderType(c, type) {
+  const shown = type.image || type.emoji;
+  if (c.pic.dataset.shown !== shown) {
+    c.pic.dataset.shown = shown;
+    if (type.image) {
+      const img = el("img");
+      img.src = type.image;  // サーバーが返した /types/<英語名>.png だけを使う
+      img.alt = type.name;
+      c.pic.replaceChildren(img);
+    } else {
+      c.pic.textContent = type.emoji;
+    }
+  }
+  c.pname.textContent = type.name;
+  c.pdesc.textContent = type.description;
+}
+
+// 選んでいる人の内容をカードに入れる
+function renderView(c, view) {
+  // 0. タイプ（「〇〇ふたまる」）
+  renderType(c, view.type);
+  // 1. レーダーチャート
+  c.radar.data.datasets[0].data = TRAITS.map(t => view.traits[t.key]);
+  c.radar.update();
+  // 今の値を数字でも出す（例: おしゃべり度 0.55）
+  c.values.replaceChildren(...TRAITS.map(t => {
+    const span = el("span");
+    const mark = el("i");
+    mark.style.background = t.color;
+    span.append(mark, `${t.label} `, el("b", null, view.traits[t.key].toFixed(2)));
+    return span;
+  }));
+  // 2. 成長曲線。横軸は「初期」「1回目」「2回目」…（振り返りのたびに 1 点増える）
+  c.line.data.labels = view.history.map((h, i) => (i === 0 ? "初期" : `${i}回目`));
+  TRAITS.forEach((t, i) => { c.line.data.datasets[i].data = view.history.map(h => h.traits[t.key]); });
+  c.line.update();
+  // 3. 覚えていること
+  c.mem.replaceChildren();
+  if (view.memories.length === 0) {
+    c.mem.append(el("div", "empty", "まだ何も覚えていません"));
+  } else {
+    const ol = el("ol", "mem");
+    for (const m of view.memories) {
+      const li = el("li", null, m.content);
+      li.append(el("span", "tag", `${KIND[m.kind] || m.kind}・重要度 ${m.importance}`));
+      ol.append(li);
+    }
+    c.mem.append(ol);
+  }
+  // 4. 前回の会話・方言
+  c.meta.replaceChildren();
+  const summary = el("div");
+  summary.append(el("span", "k", "前回の会話:"), document.createTextNode(view.last_summary || "（まだありません）"));
+  const dialect = el("div");
+  dialect.append(el("span", "k", "話し方:"), document.createTextNode(DIALECT[view.dialect] || view.dialect));
+  const count = el("div");
+  count.append(el("span", "k", "振り返った会話:"), document.createTextNode(`${view.history.length - 1} 回`));
+  c.meta.append(summary, dialect, count);
+}
+
+// 最初に開くタブを決める。views は先頭がお客さん、続いて登録された人（dashboard.py の plant_state）。
+// 例: [お客さん, ショーン] → ショーンのタブ、[お客さん] や [お客さん, たろう, はなこ] → お客さんのタブ
+function defaultView(views) {
+  return views.length === 2 ? views[1].key : "guest";
+}
+
+// 株 1 つぶんを描く（タブ = お客さんと、知っている人）
+function renderPlant(plant, index) {
+  const c = cards[plant.plant_id] || (cards[plant.plant_id] = createCard(plant, index));
+  if (!plant.found) {
+    c.title.textContent = plant.plant_id;
+    c.notfound.textContent = "この株はまだ DB にありません（一度起こすと作られます）";
+    c.charts.style.display = "none";
+    c.ptype.style.display = "none";
+    c.values.replaceChildren();
+    return;
+  }
+  c.notfound.textContent = "";
+  c.charts.style.display = "";
+  c.ptype.style.display = "";
+  c.title.replaceChildren(document.createTextNode(plant.name), el("small", null, plant.plant_id));
+  const views = plant.views;
+  // 最初に開くタブ。まだ誰もタブを押していない間は、登録されている人が 1 人だけの株なら
+  // その人のタブ、それ以外はお客さん（株の性格）のタブにする。
+  // デモでは「a1 はショーンさん、b1 はちゃむさんのふたまる」と 1 株に 1 人が育てるので、
+  // 開いた直後からその人が育てた結果（タイプ・成長曲線）を見せるため。
+  // 開いたあとに人が登録されたときも、タブを押していなければ自動で切り替える
+  if (!c.picked) c.selected = defaultView(views);
+  // 選んでいた人がいなくなっていたら（DB を替えたなど）、最初のタブに戻す
+  if (!views.some(v => v.key === c.selected)) c.selected = defaultView(views);
+  c.plant = plant;  // タブを押したときは、最後に読んだ内容で描き直す
+  // タブのボタンは、人の顔ぶれが変わったときだけ作り直す（毎回作り直すと押した瞬間に消えることがある）
+  const keys = views.map(v => v.key + ":" + v.label).join("|");
+  if (c.tabKeys !== keys) {
+    c.tabKeys = keys;
+    c.tabs.replaceChildren(...views.map(v => {
+      const b = el("button", null, v.label);
+      b.dataset.key = v.key;
+      // 押したら、それ以降は自動で切り替えない（見たいタブを勝手に変えないため）
+      b.onclick = () => { c.selected = v.key; c.picked = true; renderPlant(c.plant, index); };
+      return b;
+    }));
+  }
+  for (const b of c.tabs.children) b.classList.toggle("on", b.dataset.key === c.selected);
+  renderView(c, views.find(v => v.key === c.selected));
+}
+
+// /api/state を読んで画面を描き直す。失敗しても次の回にまた試す
+async function refresh() {
+  const status = document.getElementById("status");
+  try {
+    const res = await fetch("/api/state", { cache: "no-store" });
+    const state = await res.json();
+    if (state.error) throw new Error(state.error);
+    state.plants.forEach(renderPlant);
+    status.className = "status";
+    status.textContent = `最終更新 ${new Date().toLocaleTimeString("ja-JP")}（${REFRESH_MS / 1000} 秒ごとに更新）`;
+  } catch (e) {
+    status.className = "status error";
+    status.textContent = `読み込めません: ${e.message}`;
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
