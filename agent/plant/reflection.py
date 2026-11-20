@@ -24,7 +24,7 @@ from .dialect import DIALECTS, UNKNOWN
 from .personality import TRAIT_NAMES, apply_deltas, clamp
 from .prompt import days_between, rank_memories
 from .store import MemoryUpdate, NewMemory, PlantStore
-from .timeutil import parse_iso
+from .timeutil import parse_iso, time_band
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +289,7 @@ def _care_lines(
 
     植物の性格は、話し方だけでなく世話のしかたでも変わるようにする。
     放っておかれるとすねる（affection が下がる）、こまめに水をもらうと元気（energy が上がる）。
+    朝に話しかけてもらうと元気（energy が上がる）、深夜だとまったり（energy が下がる）。
 
     なぜ日数だけでなく、判断まで書くのか:
         最初は「前にこの相手と話してから1日」「この会話では水をもらっていない」と事実だけを渡していた。
@@ -299,9 +300,10 @@ def _care_lines(
     日数は「この会話が始まった時刻」から数える。振り返りは会話が終わったあと（ときには
     エージェントの再起動後に何日も遅れて）行われるので、振り返った時刻から数えるとずれるため。
 
-    戻り値の例:
+    戻り値の例（夜 23 時に始まった会話）:
         ["- 前にこの相手と話してから1日（毎日のように話しかけてもらえている。affection を少し上げてよい）。",
-         "- この会話では水をもらっていない。最後に水をもらってから2日（水は足りている。energy を下げる理由にはならない）。"]
+         "- この会話では水をもらっていない。最後に水をもらってから2日（水は足りている。energy を下げる理由にはならない）。",
+         "- 夜おそく（深夜）に話しかけてもらった（energy を少し下げる）。"]
     """
     session = store.get_session(session_id)
     started = parse_iso(session.started_at)
@@ -336,7 +338,18 @@ def _care_lines(
         else:
             judge = "水は足りている。energy を下げる理由にはならない"
         water = f"- この会話では水をもらっていない。{fact}（{judge}）。"
-    return [talk, water]
+
+    # 3. 話しかけた時間帯（2026-11-20、ショーンさんの FB）。育てた人の生活リズムを元気さに出す:
+    #    朝型の人の子は元気に、夜ふかしの人の子はまったりした夜型に育つ。
+    #    動かすのは energy だけ（affection は間隔、talkativeness は話しかけた回数で、すでに動いている）
+    band = time_band(started)
+    if band == "朝":
+        hour = "- 朝に話しかけてもらった（energy を少し上げてよい）。"
+    elif band == "深夜":
+        hour = "- 夜おそく（深夜）に話しかけてもらった（energy を少し下げる）。"
+    else:
+        hour = f"- {band}に話しかけてもらった（時間帯では energy を動かさない）。"
+    return [talk, water, hour]
 
 
 async def reflect_session(
