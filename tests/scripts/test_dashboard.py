@@ -314,3 +314,11 @@ def test_days_is_at_least_one_when_the_plant_is_dated_in_the_future(db):
     plant = plant_state(store, "a1", T0 - timedelta(days=3))
     store.close()
     assert plant["views"][0]["days"] == 1
+
+
+def test_html_uses_a_pinned_alpine_without_raw_html():
+    # 画面は Alpine.js（ビルドなし、CDN）で組み立てる。版を固定する
+    html = dashboard.HTML_PATH.read_text(encoding="utf-8")
+    assert "alpinejs@3.14.1/dist/cdn.min.js" in html
+    # x-html は文字を HTML として入れてしまう。LLM の文（記憶・要約）が入るので使わない（x-text だけ）
+    assert "x-html=" not in html
