@@ -5,21 +5,25 @@ Fusion の［スクリプトとアドイン］から実行すると、新しい�
 （顔のふた・腕・足と差し込み穴は実行時に本体の形から作るので、パラメータを変えたら再実行する）。
 
 - 本体: 3号のプラ鉢ごと落とし込む、樽のようにふくらんだ鉢カバー。前面に丸い電子部品の部屋
-  （植物の水とは壁で仕切る）。右の腕のうしろに給電用の USB-C の差し込み口（中のトンネルで部屋までつながる）。
-  底には書き込み用に XIAO の USB へ届く穴
+  （植物の水とは壁で仕切る）。部屋の中に、Voice Base を載せる台と XIAO を差し込む枠がある。
+  給電と書き込みの USB-C ケーブルは、XIAO の真下の縦の穴から本体の底の溝を通して背面へ出す
 - 顔のふた: 本体と同じ曲面を丸く切り出したふた。磁石で付き、はめると継ぎ目の円しか見えない。
-  スピーカー・マイクは後ろから掘ったポケットに入れて、表面のすぐ裏に出す。
-  表には、目を貼る平らな座面と、スピーカーとマイクの穴をにっこりした口の形にならべた点がある
+  電子部品は付けない。裏に浅い音の部屋を掘り、表には目を貼る平らな座面と、にっこりした弧にならべた
+  口の穴がある。口の穴の奥には Voice Base のスピーカーの面が当たる
 - 目: 黒く刷って顔のふたの座面に貼る、楕円の立体の目（2 個）
-- 腕: 下がふっくらした卵形。本体の側面を卵形に掘り下げたくぼみに、平らな面をはめてピン 2 本で留める
-- 足: 正面から見てアーチ形の、背の高い足。本体の穴に差し込み、根元は本体の曲面に沿わせてある
-- 参照部品: 干渉チェック用の部品の外形（印刷しない）
+- 腕: 下がふっくらした卵形。本体の側面を卵形に掘り下げたくぼみに、平らな面をはめてダボピン 2 本で留める
+- 足: 正面から見てアーチ形の、背の高い足。ダボピン 1 本で本体に差し込み、根元は本体の曲面に沿わせてある
+- ダボピン: 腕と足を留める丸い棒（6 本）。腕・足と本体の両方に穴をあけ、別に立てて刷る。
+  ピンを腕や足と一体にすると、平らな面を下にして刷れないため
+- 参照部品: 干渉チェック用の部品の外形（印刷しない）。Voice Base・XIAO・ジャンパー線のコネクタ・
+  USB-C のプラグとケーブルを、組み立てたときの位置に置く
 
 目・腕・足・口の形は、チャムさんのデザイン案（futamaru_3d_v2）を参考にした。
 ディスプレイは実装の手間を考えて今回は付けない（2026-11-16 にチームで決定）。表情は立体の目で固定になる。
+電子部品は、パーツ選定で決めた XIAO ESP32S3（Sense なし）と M5Stack Atomic Voice Base（A149）の 2 つ
+（2026-11-16）。2 つはジャンパー線（メス）でつなぐ。
 
-座標: Z が上、-Y が正面（顔の向き）。電子部品の配置は Muse の v6（データシートと公式 CAD の実測）を基にする。
-v6 の「頭部座標」(x, y, 基準面からの奥行き z) は、本体では (X, Z, Y) = (x, comp_zc + y, -face_y + z) になる。
+座標: Z が上、-Y が正面（顔の向き）。部品の高さは comp_zc から、奥行きは顔の基準面（Y = -face_y）から測る。
 """
 
 from __future__ import annotations
@@ -44,9 +48,6 @@ OUT_DIR = (
     if _here.replace(os.sep, "/").endswith("hardware/enclosure/futamaru_pot")
     else _DEFAULT_OUT
 )
-# メーカー公式の 3D データ（再配布できないのでリポジトリには入れない）。なければ参照部品は読み込まない
-REF_DIR = os.path.expanduser("~/Desktop/Lit/team4/hardware_refs")
-XIAO_STEP = os.path.join(REF_DIR, "seeed_xiao_esp32s3_sense.step")
 
 # (名前, 値[mm], 説明)。順番は［パラメータを変更］の表示順になる
 PARAMS = [
@@ -60,7 +61,11 @@ PARAMS = [
     ("r_sh", 73.5, "肩の半径"),
     ("z_sh", 82.0, "肩の高さ"),
     ("r_top", 70.0, "上の縁の半径（鉢の穴の後ろの壁が薄くなりすぎない大きさ）"),
-    ("body_fillet_bot", 8.0, "底の角の丸み"),
+    (
+        "body_chamfer_bot",
+        4.0,
+        "底の角の面取り（45°。丸めると台のすぐ上が張り出してサポートが要るため面取りにする）",
+    ),
     ("body_fillet_top", 2.0, "上の縁の丸み（背面の壁が薄いので大きくできない）"),
     ("face_y", 60.5, "本体の中心から顔の基準面までの距離（部品の奥行きはここから測る）"),
     # --- 植物の鉢が入る穴（3号のプラ鉢: 上の直径 約90、下 約65、高さ 約80） ---
@@ -72,7 +77,7 @@ PARAMS = [
     ("rib_h", 3.0, "鉢を浮かせる突起の高さ（受け皿の水から鉢底を離す）"),
     ("rib_r", 22.0, "突起を置く半径"),
     # --- 電子部品の部屋と顔（丸） ---
-    ("comp_zc", 57.0, "v6 の頭部の中心の高さ（電子部品と顔の位置の基準）"),
+    ("comp_zc", 57.0, "電子部品と顔の位置の基準の高さ"),
     ("face_dz", -3.0, "丸い部屋・顔の中心の高さ（comp_zc から）"),
     ("comp_d", 78.0, "部屋の内側の直径"),
     ("comp_depth", 30.0, "顔の面から部屋の奥の壁までの深さ"),
@@ -94,48 +99,42 @@ PARAMS = [
     ("eye_round", 4.0, "目のふちの丸み"),
     ("eye_seat", 1.0, "目を貼る平らな座面の、ふたの表面からの深さ（目の中心で）"),
     ("eye_gap", 0.25, "目の座面のすき間（片側）"),
-    # --- スピーカー（PUI AS02008MR, Φ20×3.8）とマイク ---
-    ("spk_dx", 4.0, "スピーカーの中心・横（v6 の頭部座標）"),
-    ("spk_dz", -20.5, "スピーカーの中心・縦"),
-    ("spk_front", -9.8, "基準面からスピーカーの前面まで（マイナスは前）"),
-    ("spk_t", 4.0, "スピーカーの厚さ（設計包絡）"),
-    ("ring_id", 20.6, "スピーカーのポケットの直径"),
-    ("mic_dx", -13.6, "マイクの穴・横（推定。実物で確認する）"),
-    ("mic_dz", -19.3, "マイクの縦の位置（推定。実物で確認する）"),
-    ("mic_front", -10.0, "基準面からマイクのポケットの底まで（マイナスは前）"),
-    ("mic_pocket", 10.0, "マイクのポケットの一辺（口の溝の左の端をこの中に通す）"),
-    # --- 口（スピーカーとマイクの音の通り道を兼ねる、にっこりした弧の溝） ---
-    ("mouth_w", 26.0, "口の幅（両端の丸の中心どうし）。左の端をマイクの前に置く"),
-    ("mouth_drop", 7.0, "口の両端から、いちばん下までの深さ（大きいほど笑う）"),
-    ("mouth_dz", -19.3, "口の両端の高さ（comp_zc から）。マイクの高さにそろえる"),
-    ("mouth_t", 3.0, "口の溝の太さ"),
-    # --- XIAO ESP32S3 Sense とアンプ（MAX98357A） ---
-    ("xiao_cx", -13.0, "XIAO の中心・横（USB は下向き）"),
-    ("xiao_cz", -19.8, "XIAO の中心・縦"),
-    ("xiao_front", 14.7, "顔の面から XIAO の前面までの距離"),
-    ("xiao_back", 28.7, "顔の面から XIAO の背面までの距離"),
-    ("amp_cx", 14.0, "アンプの中心・横"),
-    ("amp_cz", 16.0, "アンプの中心・縦"),
-    # --- 書き込み用の USB（XIAO の USB に底から挿す。ふだんは使わない） ---
-    ("usb_yc", 26.0, "USB の穴の中心（顔の面からの奥行き）"),
-    ("usb_hole_w", 13.0, "USB の穴の幅"),
-    ("usb_hole_d", 8.0, "USB の穴の奥行き"),
-    ("usb_pocket", 22.0, "底の下のプラグ逃げの大きさ"),
-    ("usb_pocket_h", 7.0, "プラグ逃げの深さ"),
-    # --- 給電用の USB-C の差し込み口（右の側面。USB-C の受け口の小基板を接着して入れる） ---
-    ("port_z", 29.0, "差し込み口の中心の高さ（線のトンネルが部屋の下の端に出る高さ）"),
-    ("port_y", 31.0, "差し込み口の中心・前後（プラスは後ろ。右の腕のうしろに出す）"),
-    ("port_w", 17.0, "差し込み口の幅（小基板が入る大きさ）"),
-    ("port_h", 14.0, "差し込み口の高さ"),
-    ("port_x0", 52.0, "差し込み口の奥の端（本体の中心から）。小基板をここに貼る"),
-    ("tunnel_w", 5.0, "線を通すトンネルの太さ"),
-    ("tunnel_y", -42.5, "トンネルが部屋へ曲がる位置（前後）"),
-    ("tunnel_x_end", 25.0, "トンネルが部屋に出る位置（横）"),
+    # --- 口（にっこりした弧にならべた丸い穴。奥にふたの裏の音の部屋があり、Voice Base のスピーカーが当たる） ---
+    ("mouth_w", 21.0, "口の幅（両端の穴の中心どうし）。穴がみな Voice Base の前に来る幅にする"),
+    ("mouth_drop", 6.0, "口の両端から、いちばん下までの深さ（大きいほど笑う）"),
+    ("mouth_dz", -19.3, "口の両端の高さ（comp_zc から）"),
+    ("mouth_hole_d", 2.4, "口の穴の直径（奥の部品が見えにくい細さ）"),
+    ("mouth_front", -8.5, "ふたの裏の音の部屋の前の面（基準面から。マイナスは前）"),
+    # --- M5Stack Atomic Voice Base（24 × 24 × 10mm、上にピンが 4.14mm。公式の寸法は 24 × 24 × 14.1）---
+    # スピーカーのスリットがある側面を前（口の裏）に、ピンを上に向けて、部屋の台に載せる
+    ("vb_size", 24.0, "Voice Base の幅・奥行き"),
+    ("vb_h", 10.0, "Voice Base の箱の高さ（ピンを除く）"),
+    ("vb_z0", -28.0, "Voice Base の底の高さ（comp_zc から）。スピーカーの面を口の穴の奥に合わせる"),
+    ("vb_gap", 0.3, "Voice Base の台のすき間（片側）"),
+    # --- XIAO ESP32S3（Sense なし。21 × 17.8mm）。部屋の右、奥の壁の枠に差し込む。USB は下向き ---
+    # ピンヘッダはふつうに（部品のない面へピンが出る向きに）付け、ピンを前に向ける。部品の面は奥の壁を向く
+    ("xiao_cx", 22.5, "XIAO の中心・横"),
+    ("xiao_z0", -20.0, "XIAO の下の端（USB の口）の高さ（comp_zc から）"),
+    (
+        "xiao_standoff",
+        3.0,
+        "奥の壁から基板の部品の面まで（部品とアンテナのコネクタの高さ。両面テープで貼る）",
+    ),
+    ("xiao_gap", 0.3, "XIAO の枠のすき間（片側）"),
+    # --- 給電と書き込みの USB-C ケーブル（XIAO に直接挿し、底の溝から背面へ出す） ---
+    ("plug_w", 12.5, "USB-C のプラグの根元（太いところ）の幅（ふつうのケーブルは 11〜12.5）"),
+    ("plug_t", 7.5, "プラグの根元の厚さ"),
+    ("plug_len", 20.0, "プラグの根元の長さ（これより長いとケーブルが溝へ曲がれない）"),
+    ("usb_ch_w", 14.0, "プラグを通す縦の穴の幅"),
+    ("usb_ch_d", 10.0, "プラグを通す縦の穴の奥行き"),
+    ("cable_d", 4.5, "ケーブルの太さ"),
+    ("groove_w", 7.0, "底の溝の幅"),
+    ("groove_h", 7.0, "底の溝の深さ（屋根のてっぺんまで。屋根は 45°）"),
     # --- 腕・足の差し込み ---
-    ("peg_d", 6.0, "差し込みピンの直径"),
-    ("peg_len", 7.0, "差し込みピンの長さ"),
-    ("peg_hole_d", 6.3, "差し込み穴の直径"),
-    ("peg_hole_depth", 8.0, "差し込み穴の深さ"),
+    ("peg_d", 6.0, "ダボピンの直径"),
+    ("peg_len", 15.0, "ダボピンの長さ（本体と腕・足の穴の深さの合計より 1mm 短く）"),
+    ("peg_hole_d", 6.3, "ダボピンの穴の直径"),
+    ("peg_hole_depth", 8.0, "ダボピンの穴の深さ（本体側と、腕・足の側のそれぞれ）"),
     ("arm_z", 40.0, "腕のいちばん太いところの高さ（低めにして、ぶら下がった手に見せる）"),
     ("arm_r", 19.0, "腕の前後の半径"),
     ("arm_top", 32.0, "いちばん太いところから腕の上の端まで（上は細くとがる）"),
@@ -154,8 +153,19 @@ PARAMS = [
 FOOT_ANGLE = 32.0
 # 腕のピンの高さ（arm_z から、mm）。2 本にして腕が回らないようにする
 ARM_PEGS_DZ = (-6.0, 10.0)
-# 磁石の位置（丸い顔の中心から、mm）。スピーカーのリング・マイクのポケット・顔のくぼみの縁を避けた場所
+# 磁石の位置（丸い顔の中心から、mm）。Voice Base の台・XIAO の枠・口の奥の音の部屋を避けた場所
 MAG_POINTS = [(34.0, 0.0), (-34.0, 0.0), (24.0, -24.0), (-24.0, -24.0)]
+# 口の穴の数。弧の上に等間隔にならべる（穴と穴のすき間が 1.5mm 以上になる数）
+MOUTH_HOLES = 7
+# 部品の決まった寸法（mm）。XIAO は基板 21 × 17.8 × 1.2、USB-C の受け口は幅 9 × 厚さ 3.2 × 長さ 7.3 で
+# 基板の端から 1mm 出る。ピンヘッダは樹脂の厚さ 2.5、ジャンパー線のメスのコネクタは 2.54 角 × 長さ 14
+XIAO_L, XIAO_W, XIAO_PCB = 21.0, 17.8, 1.2
+USB_W, USB_T, USB_L, USB_OVER = 9.0, 3.2, 7.3, 1.0
+HEADER_T, DUPONT_L = 2.5, 14.0
+# Voice Base のピンの列（M5Stack の公式図面 model size.jpg から読んだ値）。列は前後のふちから 4.35mm 内側、
+# 間隔 15.24mm、ピッチ 2.54mm。5 本と 4 本の列は、どちらも MIC の面と反対の端（右）のふちから 4.35mm に
+# そろっている。MIC の面を左（XIAO と反対）に向けて置く
+VB_PIN_INSET, VB_PINS = 4.35, (5, 4)
 # 色（R, G, B）。チャムさんの案に合わせて、体はクリーム色、目は黒
 BODY_RGB = (237, 230, 214)
 EYE_RGB = (25, 25, 25)
@@ -354,6 +364,20 @@ def fillet(comp: adsk.fusion.Component, edges, r: str, name: str = ""):
     return f
 
 
+def chamfer(comp: adsk.fusion.Component, edges, d: str, name: str = ""):
+    coll = adsk.core.ObjectCollection.create()
+    for e in edges:
+        coll.add(e)
+    if coll.count == 0:
+        raise RuntimeError("面取りする辺が見つからない")
+    ci = comp.features.chamferFeatures.createInput2()
+    ci.chamferEdgeSets.addEqualDistanceChamferEdgeSet(coll, vi(d), True)
+    f = comp.features.chamferFeatures.add(ci)
+    if name:
+        f.name = name
+    return f
+
+
 def edges_along(faces, axis: str) -> list:
     """faces の辺のうち、axis 方向の直線の辺（ポケットや箱の角）。"""
     vec = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}[axis]
@@ -502,8 +526,11 @@ def make_barrel(comp: adsk.fusion.Component, parametric: bool, name: str) -> ads
     body = revolve(s, axis, NEW, name).bodies.item(0)
     body.name = name
     edges = circle_edges_at(body, 0.0)
-    fillet(
-        comp, [e for e in edges if e.geometry.radius > 1.0], "body_fillet_bot", f"{name}_底の丸み"
+    chamfer(
+        comp,
+        [e for e in edges if e.geometry.radius > 1.0],
+        "body_chamfer_bot",
+        f"{name}_底の面取り",
     )
     edges = circle_edges_at(body, ev("body_h"))
     fillet(comp, edges, "body_fillet_top", f"{name}_上の丸み")
@@ -669,79 +696,97 @@ def build_body(comp: adsk.fusion.Component) -> adsk.fusion.BRepBody | None:
     step("磁石のボス", magnets)
 
     back = "-face_y + comp_depth"
+    vb_front = "-face_y + plate_t + 0.2 mm"
+    vb_bot = "comp_zc + vb_z0"
 
-    def xiao_holder():
-        # レールは奥の壁から XIAO の前面の 2mm 手前まで
-        rail_lo = "comp_zc - 31 mm"
-        rail_hi = "comp_zc + xiao_cz + 10.5 mm"
-        rails = [
-            (
-                {"x": f"xiao_cx {sx} 9.85 mm", "z": f"(({rail_lo}) + ({rail_hi})) / 2"},
-                {"x": "1.4 mm", "z": f"({rail_hi}) - ({rail_lo})"},
+    def vb_stand():
+        # 部屋の底から台を立てて Voice Base を載せる。前はふたの裏に 0.2mm 手前まで、後ろは奥の壁まで
+        s = Sk(comp, "z", vb_bot, "Voice Baseの台")
+        s.rect(
+            {"x": "0 mm", "y": f"(({vb_front}) + ({back})) / 2"},
+            {"x": "vb_size + 2 * vb_gap + 2.4 mm", "y": "comp_depth - plate_t - 0.2 mm"},
+        )
+        extrude(s, "20 mm", "-z", JOIN, [body], "Voice Baseの台")
+        # 左右の縁と後ろの止めで位置を決める。前はふたが押さえる
+        s2 = Sk(comp, "z", vb_bot, "Voice Baseの縁")
+        for sx in ("-", ""):
+            s2.rect(
+                {
+                    "x": f"{sx}(vb_size / 2 + vb_gap + 0.6 mm)",
+                    "y": f"(({vb_front}) + ({back})) / 2",
+                },
+                {"x": "1.2 mm", "y": "comp_depth - plate_t - 0.2 mm"},
             )
-            for sx in ("-", "+")
-        ]
-        s = Sk(comp, "y", back, "XIAOの背面パッド")
-        s.rect({"x": "xiao_cx", "z": "comp_zc + xiao_cz"}, {"x": "18 mm", "z": "21 mm"})
-        extrude(s, "comp_depth - xiao_back", "-y", JOIN, [body], "XIAOの背面パッド")
-        s2 = Sk(comp, "y", back, "XIAOのレール")
-        for c, sz in rails:
-            s2.rect(c, sz)
-        extrude(s2, "comp_depth - xiao_front + 2 mm", "-y", JOIN, [body], "XIAOのレール")
-        s3 = Sk(comp, "y", "-face_y + 28 mm", "XIAOの突起")
+        stop_y0 = f"({vb_front}) + vb_size + vb_gap"
+        s2.rect(
+            {"x": "0 mm", "y": f"(({stop_y0}) + ({back})) / 2"},
+            {"x": "12 mm", "y": f"({back}) - ({stop_y0})"},
+        )
+        extrude(s2, "4 mm", "+z", JOIN, [body], "Voice Baseの縁")
+
+    step("Voice Base の台", vb_stand)
+
+    z0 = "comp_zc + xiao_z0"
+    half = f"{XIAO_W / 2} mm"
+
+    def xiao_frame():
+        # 奥の壁から生やした枠に、XIAO を部品の面を奥にして差し込む（USB は下）。下は USB のプラグを
+        # 通すので、角だけの小さな棚にする。前へ抜けないように、部品の面と壁の間に両面テープを貼る
+        s = Sk(comp, "y", back, "XIAOの枠")
+        h_all = f"{XIAO_L} mm + 2 * xiao_gap + 2.4 mm"
+        zc = f"{z0} + {XIAO_L / 2} mm"
         for sx in ("-", "+"):
-            for dz in ("15.3 mm", "24.3 mm"):
-                s3.rect(
-                    {"x": f"xiao_cx {sx} 9.0 mm", "z": f"comp_zc - {dz}"},
-                    {"x": "0.7 mm", "z": "3 mm"},
-                )
-        extrude(s3, "3 mm", "-y", JOIN, [body], "XIAOの突起")
-
-    step("XIAO のレール", xiao_holder)
-
-    def amp_holder():
-        s = Sk(comp, "y", back, "アンプの枠")
-        for sz in ("-", "+"):
             s.rect(
-                {"x": "amp_cx", "z": f"comp_zc + amp_cz {sz} 10.3 mm"},
-                {"x": "18 mm", "z": "1.2 mm"},
+                {"x": f"xiao_cx {sx} ({half} + xiao_gap + 0.6 mm)", "z": zc},
+                {"x": "1.2 mm", "z": h_all},
             )
+        s.rect(
+            {"x": "xiao_cx", "z": f"{z0} + {XIAO_L} mm + xiao_gap + 0.6 mm"},
+            {"x": f"2 * ({half} + xiao_gap + 1.2 mm)", "z": "1.2 mm"},
+        )
+        ledge = f"({half} + xiao_gap + 1.2 mm - plug_w / 2 - 0.5 mm)"
         for sx in ("-", "+"):
             s.rect(
-                {"x": f"amp_cx {sx} 9.5 mm", "z": "comp_zc + amp_cz"},
-                {"x": "1.2 mm", "z": "18 mm"},
+                {
+                    "x": f"xiao_cx {sx} (plug_w / 2 + 0.5 mm + {ledge} / 2)",
+                    "z": f"{z0} - xiao_gap - 0.6 mm",
+                },
+                {"x": ledge, "z": "1.2 mm"},
             )
-        extrude(s, "2 mm", "-y", JOIN, [body], "アンプの枠")
+        extrude(s, f"xiao_standoff + {XIAO_PCB + 1.0} mm", "-y", JOIN, [body], "XIAOの枠")
 
-    step("アンプの枠", amp_holder)
+    step("XIAO の枠", xiao_frame)
 
-    def usb_prog():
-        yc = "-face_y + usb_yc"
-        s = Sk(comp, "z", "-1 mm", "書き込み用USBの穴")
-        s.rect({"x": "xiao_cx", "y": yc}, {"x": "usb_hole_w", "y": "usb_hole_d"})
-        extrude(s, "comp_zc - 35 mm", "+z", CUT, [body], "書き込み用USBの穴")
-        s2 = Sk(comp, "z", "-1 mm", "書き込み用USBのプラグ逃げ")
-        s2.rect({"x": "xiao_cx", "y": yc}, {"x": "usb_pocket", "y": "usb_pocket"})
-        extrude(s2, "usb_pocket_h + 1 mm", "+z", CUT, [body], "書き込み用USBのプラグ逃げ")
+    def usb_cable():
+        # プラグは底から縦の穴に通して XIAO に挿す。穴は USB の受け口の高さまで掘り、受け口と
+        # プラグの根元が奥の壁に当たらないようにする。ケーブルは底の溝を通って背面へ出る
+        yc = usb_center_y()
+        s = Sk(comp, "z", "-1 mm", "USBケーブルの縦の穴")
+        s.rect({"x": "xiao_cx", "y": yc}, {"x": "usb_ch_w", "y": "usb_ch_d"})
+        extrude(
+            s, f"comp_zc + xiao_z0 + {USB_L + 2.0} mm", "+z", CUT, [body], "USBケーブルの縦の穴"
+        )
+        # 溝の天井は 45° の屋根にする。平らな天井だと、スライサーが細長い溝の中にサポートを立て、取り出せない
+        s2 = Sk(comp, "y", yc, "USBケーブルの底の溝")
+        cx, w, h = ev("xiao_cx"), ev("groove_w") / 2, ev("groove_h")
+        eave = h - w + 0.1
+        pts = [(cx - w, -0.1), (cx + w, -0.1), (cx + w, eave), (cx, eave + w), (cx - w, eave)]
+        lines = s2.sk.sketchCurves.sketchLines
+        first = prev = lines.addByTwoPoints(
+            s2.sp({"x": pts[0][0], "z": pts[0][1]}), s2.sp({"x": pts[1][0], "z": pts[1][1]})
+        )
+        for x, z in pts[2:]:
+            prev = lines.addByTwoPoints(prev.endSketchPoint, s2.sp({"x": x, "z": z}))
+        lines.addByTwoPoints(prev.endSketchPoint, first.startSketchPoint)
+        extrude(s2, f"80 mm - ({yc})", "+y", CUT, [body], "USBケーブルの底の溝")
 
-    step("書き込み用 USB の穴", usb_prog)
-
-    def power_port():
-        s = Sk(comp, "x", "port_x0", "給電USB-Cの差し込み口")
-        s.rect({"y": "port_y", "z": "port_z"}, {"y": "port_w", "z": "port_h"})
-        extrude(s, "40 mm", "+x", CUT, [body], "給電USB-Cの差し込み口")
-        # トンネルは差し込み口の奥の壁に 1mm 食い込ませてつなぐ。差し込み口より外を通すと、
-        # 前のほうで本体の表面に近づきすぎる
-        tx = "port_x0 + 1 mm - tunnel_w / 2"
-        s2 = Sk(comp, "y", "port_y", "線のトンネル_前後")
-        s2.rect({"x": tx, "z": "port_z"}, {"x": "tunnel_w", "z": "tunnel_w"})
-        extrude(s2, "port_y - tunnel_y + tunnel_w / 2", "-y", CUT, [body], "線のトンネル_前後")
-        s3 = Sk(comp, "x", "port_x0 + 1 mm", "線のトンネル_横")
-        s3.rect({"y": "tunnel_y", "z": "port_z"}, {"y": "tunnel_w", "z": "tunnel_w"})
-        extrude(s3, "port_x0 + 1 mm - tunnel_x_end", "-x", CUT, [body], "線のトンネル_横")
-
-    step("給電 USB-C の差し込み口と線のトンネル", power_port)
+    step("USB ケーブルの縦の穴と底の溝", usb_cable)
     return body
+
+
+def usb_center_y() -> str:
+    """XIAO の USB の受け口の中心の前後の位置（式）。受け口は部品の面から奥の壁の側へ出ている。"""
+    return f"-face_y + comp_depth - xiao_standoff + {USB_T / 2} mm"
 
 
 def arm_egg(grow: float) -> tuple[float, float, float]:
@@ -776,17 +821,15 @@ def build_peg_holes(comp: adsk.fusion.Component, body: adsk.fusion.BRepBody) -> 
         )
 
 
-# ---------------------------------------------------------------- 顔のふた・押さえ板
+# ---------------------------------------------------------------- 顔のふた
 
 
 def build_plate(comp: adsk.fusion.Component) -> adsk.fusion.BRepBody | None:
     """顔のふた。本体と同じ樽の曲面を丸く切り出したもので、はめると継ぎ目の円しか見えない。
 
-    スピーカー・マイクは、ふたの後ろから掘ったポケットに入れて、表面のすぐ裏まで出す。
-    表には目を貼る座面（build_eye_seats）と、口の点だけが出る。
+    電子部品は付けない。表には目を貼る座面（build_eye_seats）と、口の穴だけが出る。
     """
     st = {}
-    spk = {"x": "spk_dx", "z": "comp_zc + spk_dz"}
     back = "-face_y + plate_t"
 
     def base():
@@ -808,68 +851,27 @@ def build_plate(comp: adsk.fusion.Component) -> adsk.fusion.BRepBody | None:
     if body is None:
         return None
 
-    def speaker():
-        s = Sk(comp, "y", back, "スピーカーのポケット")
-        s.circle(spk, "ring_id")
-        extrude(s, "plate_t - spk_front", "-y", CUT, [body], "スピーカーのポケット")
-        # 抜け止めの爪（ポケットの壁から 0.5mm 張り出す。スピーカーを押し込むと乗り越える）
-        s3 = Sk(comp, "y", "-face_y + spk_front + spk_t", "スピーカーの爪")
-        r = "ring_id / 2 + 0.05 mm"
-        s3.rect({"x": "spk_dx", "z": f"comp_zc + spk_dz + {r}"}, {"x": "3 mm", "z": "1.1 mm"})
-        s3.rect({"x": "spk_dx", "z": f"comp_zc + spk_dz - {r}"}, {"x": "3 mm", "z": "1.1 mm"})
-        s3.rect({"x": f"spk_dx - {r}", "z": "comp_zc + spk_dz"}, {"x": "1.1 mm", "z": "3 mm"})
-        s3.rect({"x": f"spk_dx + {r}", "z": "comp_zc + spk_dz"}, {"x": "1.1 mm", "z": "3 mm"})
-        extrude(s3, "1.2 mm", "+y", JOIN, [body], "スピーカーの爪")
-
-    step("スピーカーのポケット", speaker)
-
-    def mic():
-        s = Sk(comp, "y", back, "マイクのポケット")
-        s.rect({"x": "mic_dx", "z": "comp_zc + mic_dz"}, {"x": "mic_pocket", "z": "mic_pocket"})
-        extrude(s, "plate_t - mic_front", "-y", CUT, [body], "マイクのポケット")
-
-    step("マイクのポケット", mic)
-
-    # スピーカーとマイクの音は、にっこりした弧の溝 1 本（口）から出入りさせる。溝はスピーカーの前面の
-    # 少し奥から表まで掘るので、スピーカーとマイクのポケットの前では抜け、ほかのところは深い溝になる
-    # （背面から抜くと、スピーカーの抜け止めの爪まで切ってしまう）
-    def mouth():
-        s = Sk(comp, "y", "-face_y + spk_front + 0.5 mm", "口")
-        zc, r, phi0, t = mouth_geometry()
-
-        def p(rr: float, ph: float) -> adsk.core.Point3D:
-            return s.sp({"x": rr * math.sin(ph), "z": zc - rr * math.cos(ph)})
-
-        arcs = s.sk.sketchCurves.sketchArcs
-        sides = [
-            arcs.addByThreePoints(p(rr, -phi0), p(rr, 0.0), p(rr, phi0))
-            for rr in (r + t / 2, r - t / 2)
-        ]
-        ends = []
-        for sg in (1, -1):
-            ex, ez = r * math.sin(sg * phi0), zc - r * math.cos(phi0)
-            tip = s.sp({"x": ex + t / 2 * sg * math.cos(phi0), "z": ez + t / 2 * math.sin(phi0)})
-            ends.append(
-                arcs.addByThreePoints(p(r - t / 2, sg * phi0), tip, p(r + t / 2, sg * phi0))
-            )
-        gc = s.sk.geometricConstraints
-        side_pts = [q for a in sides for q in (a.startSketchPoint, a.endSketchPoint)]
-        for a in ends:
-            for q in (a.startSketchPoint, a.endSketchPoint):
-                gc.addCoincident(
-                    q, min(side_pts, key=lambda o, q=q: o.geometry.distanceTo(q.geometry))
-                )
-        extrude(s, "20 mm", "-y", CUT, [body], "口")
-        mx, mz = ev("mic_dx"), ev("comp_zc + mic_dz")
-        if mouth_dist(mx, mz) > ev("mic_pocket") / 2 - t:
-            log("WARN 口の溝がマイクのポケットを通っていない（mic_dx・mic_dz・mouth_* を確認）")
-        sx, sz, sr = ev("spk_dx"), ev("comp_zc + spk_dz"), ev("ring_id") / 2 - t / 2
-        n = 400
-        over = sum(
-            math.hypot(r * math.sin(ph) - sx, zc - r * math.cos(ph) - sz) < sr
-            for ph in (-phi0 + 2 * phi0 * k / n for k in range(n + 1))
+    # 口の奥には、ふたの裏から浅い音の部屋を掘る。部屋の真後ろに Voice Base のスピーカーの面が当たり、
+    # 音は部屋から口の穴を通って外へ出る。部屋は Voice Base より左右に広く、はみ出したところから
+    # 本体の部屋（Voice Base のマイクがある）へも外の音が入る
+    def chamber():
+        s = Sk(comp, "y", back, "口の奥の音の部屋")
+        s.rect(
+            {"x": "0 mm", "z": "comp_zc + mouth_dz - mouth_drop / 2"},
+            {"x": "mouth_w + mouth_hole_d + 4.8 mm", "z": "mouth_drop + mouth_hole_d + 1.2 mm"},
         )
-        log(f"MOUTH スピーカーの前で抜けている口の長さ {over / n * 2 * phi0 * r * 10:.1f} mm")
+        extrude(s, "plate_t - mouth_front", "-y", CUT, [body], "口の奥の音の部屋")
+
+    step("口の奥の音の部屋", chamber)
+
+    def mouth():
+        s = Sk(comp, "y", "-face_y + mouth_front + 0.5 mm", "口")
+        for x, z in mouth_holes():
+            s.circle({"x": f"{x * 10:.4f} mm", "z": f"{z * 10:.4f} mm"}, "mouth_hole_d")
+        extrude(s, "20 mm", "-y", CUT, [body], "口")
+        pts = mouth_holes()
+        gap = math.dist(pts[0], pts[1]) * 10 - ev("mouth_hole_d") * 10
+        log(f"MOUTH 口の穴 {len(pts)} 個、穴と穴のすき間 {gap:.2f} mm")
 
     step("口", mouth)
 
@@ -973,50 +975,41 @@ def front_wall(body: adsk.fusion.BRepBody, x_cm: float, z_cm: float, y_start: fl
     return (y_start - y) * 10
 
 
-def mouth_geometry() -> tuple[float, float, float, float]:
-    """口の溝の中心線（円弧）の、円の中心の高さ・半径・両端の角度（真下から）・溝の太さ。長さは cm。"""
+def mouth_geometry() -> tuple[float, float, float]:
+    """口の穴をならべる円弧の、円の中心の高さ・半径・両端の角度（真下から）。長さは cm。"""
     half, drop = ev("mouth_w") / 2, ev("mouth_drop")
     r = (half**2 + drop**2) / (2 * drop)
     zc = ev("comp_zc + mouth_dz") - drop + r
-    return zc, r, math.asin(half / r), ev("mouth_t")
+    return zc, r, math.asin(half / r)
 
 
-def mouth_dist(x_cm: float, z_cm: float) -> float:
-    """点 (x, z) から口の溝の中心線までの距離（cm）。"""
-    zc, r, phi0, _ = mouth_geometry()
-    if abs(math.atan2(x_cm, zc - z_cm)) <= phi0:
-        return abs(math.hypot(x_cm, z_cm - zc) - r)
-    return min(
-        math.hypot(x_cm - r * math.sin(sg * phi0), z_cm - (zc - r * math.cos(phi0)))
-        for sg in (1, -1)
-    )
-
-
-def on_mouth(x_cm: float, z_cm: float) -> bool:
-    """口の溝（とそのまわり 0.2mm）の上なら True。溝の上で測ると厚さが 0 に見えるので外す。"""
-    return mouth_dist(x_cm, z_cm) < ev("mouth_t") / 2 + 0.02
+def mouth_holes() -> list[tuple[float, float]]:
+    """口の穴の中心 (x, z)（cm）。円弧の上に等間隔にならべる。"""
+    zc, r, phi0 = mouth_geometry()
+    out = []
+    for k in range(MOUTH_HOLES):
+        ph = -phi0 + 2 * phi0 * k / (MOUTH_HOLES - 1)
+        out.append((r * math.sin(ph), zc - r * math.cos(ph)))
+    return out
 
 
 def check_front_walls(cap: adsk.fusion.BRepBody) -> None:
-    """スピーカー・マイクの前に残るふたの厚さを、ふちの何点かで測ってログに書く。"""
-    for label, cx, cz, r, front in (
-        ("スピーカーの前", ev("spk_dx"), ev("comp_zc + spk_dz"), ev("ring_id") / 2, "spk_front"),
-    ):
-        y0 = ev(f"-face_y + {front}")
-        vals = []
-        for k in range(12):
-            a = 2 * math.pi * k / 12
-            # ふちから 1mm 内側（ポケットの底が残っているところ）で測る
-            px, pz = cx + (r - 0.1) * math.cos(a), cz + (r - 0.1) * math.sin(a)
-            if not on_mouth(px, pz):
-                vals.append(front_wall(cap, px, pz, y0))
-        log(f"WALL {label}: 最小 {min(vals):.2f} mm / 最大 {max(vals):.2f} mm")
-    # マイクの前は、ポケットの中の口の溝にかからないところで測る
-    y0 = ev("-face_y + mic_front")
-    mx, mz = ev("mic_dx"), ev("comp_zc + mic_dz")
-    pts = [(mx + dx, mz + dz) for dx in (-0.3, 0.0, 0.3) for dz in (-0.3, 0.0, 0.3)]
-    mic = [front_wall(cap, x, z, y0) for x, z in pts if not on_mouth(x, z)]
-    log(f"WALL マイクの前: 最小 {min(mic):.2f} mm / 最大 {max(mic):.2f} mm")
+    """口の奥の音の部屋の前に残るふたの厚さを、穴にかからない点で測ってログに書く。"""
+    y0 = ev("-face_y + mouth_front")
+    half_x = ev("mouth_w + mouth_hole_d + 4.8 mm") / 2
+    zc = ev("comp_zc + mouth_dz - mouth_drop / 2")
+    half_z = ev("mouth_drop + mouth_hole_d + 1.2 mm") / 2
+    holes = mouth_holes()
+    keep = ev("mouth_hole_d") / 2 + 0.03
+    vals = []
+    for i in range(13):
+        for j in range(5):
+            # 部屋の縁から 0.3mm 内側までの格子
+            x = -half_x + 0.03 + (2 * half_x - 0.06) * i / 12
+            z = zc - half_z + 0.03 + (2 * half_z - 0.06) * j / 4
+            if all(math.hypot(x - hx, z - hz) > keep for hx, hz in holes):
+                vals.append(front_wall(cap, x, z, y0))
+    log(f"WALL 口の奥の部屋の前: 最小 {min(vals):.2f} mm / 最大 {max(vals):.2f} mm")
 
 
 # ---------------------------------------------------------------- 腕・足
@@ -1035,19 +1028,20 @@ def fit_to_barrel(comp: adsk.fusion.Component, part: adsk.fusion.BRepBody, name:
     comp.features.combineFeatures.add(inp).name = f"{name}_根元を本体に沿わせる"
 
 
-def add_peg(
+def add_peg_hole(
     comp: adsk.fusion.Component, part: adsk.fusion.BRepBody, r_s: float, z_cm: float, name: str
 ) -> None:
-    s = Sk(comp, "x", f"{r_s * 10 + 3} mm", f"{name}のピン")
-    s.circle({"y": "0 mm", "z": f"{z_cm * 10} mm"}, "peg_d")
-    extrude(s, "peg_len + 3 mm", "-x", JOIN, [part], f"{name}のピン")
+    # 根元は本体の曲面に沿っているので、曲面より 3mm 内側から掘り始めて、足の中へ peg_hole_depth 入れる
+    s = Sk(comp, "x", f"{r_s * 10 - 3} mm", f"{name}のピンの穴")
+    s.circle({"y": "0 mm", "z": f"{z_cm * 10} mm"}, "peg_hole_d")
+    extrude(s, "peg_hole_depth + 3 mm", "+x", CUT, [part], f"{name}のピンの穴")
 
 
 def build_arm(comp: adsk.fusion.Component) -> None:
     """下がふっくらした卵形の腕。卵の立体を外へ引き伸ばし、取り付け面から外の半分だけを使う。
 
-    右の腕として +X に作る（左はこの部品を Z 軸まわりに 180° 回して置く）。取り付け面は平らなので、
-    印刷は取り付け面を下にすればサポートがいらない。
+    右の腕として +X に作る（左はこの部品を Z 軸まわりに 180° 回して置く）。取り付け面は平らで、ピンは
+    別の部品なので、印刷は取り付け面を下にすればサポートがいらない。
     """
     st = {}
     x0, z0 = ev("arm_x0"), ev("arm_z")
@@ -1080,13 +1074,13 @@ def build_arm(comp: adsk.fusion.Component) -> None:
     if "body" not in st:
         return
 
-    def pegs():
-        s = Sk(comp, "x", "arm_x0", "腕のピン")
+    def peg_holes():
+        s = Sk(comp, "x", "arm_x0", "腕のピンの穴")
         for dz in ARM_PEGS_DZ:
-            s.circle({"y": "0 mm", "z": f"arm_z + ({dz} mm)"}, "peg_d")
-        extrude(s, "peg_len", "-x", JOIN, [st["body"]], "腕のピン")
+            s.circle({"y": "0 mm", "z": f"arm_z + ({dz} mm)"}, "peg_hole_d")
+        extrude(s, "peg_hole_depth", "+x", CUT, [st["body"]], "腕のピンの穴")
 
-    step("腕のピン", pegs)
+    step("腕のピンの穴", peg_holes)
 
 
 def build_foot(comp: adsk.fusion.Component, r_s: float) -> None:
@@ -1124,7 +1118,7 @@ def build_foot(comp: adsk.fusion.Component, r_s: float) -> None:
         if step(f"足のつま先 {r}", lambda r=r: toe(r)):
             break
     step("足の根元", lambda: fit_to_barrel(comp, st["body"], "足"))
-    step("足のピン", lambda: add_peg(comp, st["body"], r_s, zc, "足"))
+    step("足のピンの穴", lambda: add_peg_hole(comp, st["body"], r_s, zc, "足"))
 
 
 def rotation_for(angle: float) -> adsk.core.Matrix3D:
@@ -1140,24 +1134,8 @@ def rotation_for(angle: float) -> adsk.core.Matrix3D:
 # ---------------------------------------------------------------- 参照部品（印刷しない）
 
 
-def import_step(
-    root: adsk.fusion.Component, path: str, name: str, place
-) -> adsk.fusion.Occurrence | None:
-    """メーカー公式の STEP を参照部品として読み込み、place(読み込んだ部品の外形) で決めた位置に置く。"""
-    if not os.path.exists(path):
-        log(f"SKIP {name}: {path} がない")
-        return None
-    occ = new_component(root, name)
-    im = _app.importManager
-    im.importToTarget(im.createSTEPImportOptions(path), occ.component)
-    # XIAO の公式 STEP には microSD カード本体が入っている。カードは使わないので消す（スロットは残す）
-    for child in list(occ.component.allOccurrences):
-        if child.isValid and child.name.startswith("MicroSD"):
-            child.deleteMe()
-    occ.transform2 = place(occ)
-    # パラメトリックのデザインでは、位置の変更をスナップショットで確定しないと元に戻る
-    _design.snapshots.add()
-    return occ
+# 組み立てたときの部品の外形を箱で置き、干渉チェックで本体・ふたにぶつからないかを見る。
+# ジャンパー線のコネクタと USB-C のプラグも入れて、線を挿す場所まで確かめる。
 
 
 def all_bodies(occ: adsk.fusion.Occurrence) -> list:
@@ -1167,43 +1145,132 @@ def all_bodies(occ: adsk.fusion.Occurrence) -> list:
     return out
 
 
-def matrix(rows: list[list[float]]) -> adsk.core.Matrix3D:
-    m = adsk.core.Matrix3D.create()
-    m.setWithArray([v for row in rows for v in row])
-    return m
-
-
-def place_xiao(occ: adsk.fusion.Occurrence) -> adsk.core.Matrix3D:
-    # 公式 STEP: 基板の長手が x（USB は +x 端）、厚みが y（部品面が +y）、幅が z。
-    # USB を下・部品面を正面へ向ける回転 (x, y, z) -> (-z, -y, -x)。基板の中心を XIAO の位置に、
-    # いちばん背面の点を xiao_back に合わせる（Muse の v6 の変換は鏡像になっていたので使わない）
-    bodies = all_bodies(occ)
-    board = max(bodies, key=lambda b: b.volume)
-    bb = board.boundingBox
-    sy_min = min(b.boundingBox.minPoint.y for b in bodies)
-    cx = (bb.minPoint.x + bb.maxPoint.x) / 2
-    cz = (bb.minPoint.z + bb.maxPoint.z) / 2
-    tx = ev("xiao_cx") + cz
-    ty = ev("-face_y + xiao_back") + sy_min
-    tz = ev("comp_zc + xiao_cz") + cx
-    return matrix([[0, 0, -1, tx], [0, -1, 0, ty], [-1, 0, 0, tz], [0, 0, 0, 1]])
+def ref_box(comp, axis: str, at: str, center: dict, size: dict, dist: str, toward: str, name: str):
+    s = Sk(comp, axis, at, name)
+    s.rect(center, size)
+    extrude(s, dist, toward, NEW, name=name).bodies.item(0).name = name
 
 
 def build_refs(comp: adsk.fusion.Component) -> None:
-    def speaker():
-        s = Sk(comp, "y", "-face_y + spk_front", "参照_スピーカー")
-        s.circle({"x": "spk_dx", "z": "comp_zc + spk_dz"}, "20 mm")
-        extrude(s, "spk_t", "+y", NEW, name="参照_スピーカー").bodies.item(
+    vb_front = "-face_y + plate_t + 0.2 mm"
+    vb_bot = "comp_zc + vb_z0"
+    wall = "-face_y + comp_depth"
+    z0 = "comp_zc + xiao_z0"
+    parts = []
+
+    # Voice Base の箱と、上のピンに挿したジャンパー線のコネクタ（前と後ろの 2 列）
+    parts.append(
+        lambda: ref_box(
+            comp,
+            "y",
+            vb_front,
+            {"x": "0 mm", "z": f"{vb_bot} + vb_h / 2"},
+            {"x": "vb_size", "z": "vb_h"},
+            "vb_size",
+            "+y",
+            "参照_Voice Base",
+        )
+    )
+    for n, y in zip(
+        VB_PINS,
+        (f"{vb_front} + {VB_PIN_INSET} mm", f"{vb_front} + vb_size - {VB_PIN_INSET} mm"),
+        strict=True,
+    ):
+        parts.append(
+            lambda n=n, y=y: ref_box(
+                comp,
+                "z",
+                f"{vb_bot} + vb_h",
+                {"x": f"vb_size / 2 - {VB_PIN_INSET + (n - 1) * 2.54 / 2} mm", "y": y},
+                {"x": f"{n * 2.54} mm", "y": "2.54 mm"},
+                f"{DUPONT_L} mm",
+                "+z",
+                "参照_Voice Baseのコネクタ",
+            )
+        )
+    # XIAO: 基板（前へ）、シールドと USB の受け口（奥の壁の側へ）
+    comp_face = f"{wall} - xiao_standoff"
+    parts.append(
+        lambda: ref_box(
+            comp,
+            "y",
+            comp_face,
+            {"x": "xiao_cx", "z": f"{z0} + {XIAO_L / 2} mm"},
+            {"x": f"{XIAO_W} mm", "z": f"{XIAO_L} mm"},
+            f"{XIAO_PCB} mm",
+            "-y",
+            "参照_XIAO",
+        )
+    )
+    parts.append(
+        lambda: ref_box(
+            comp,
+            "y",
+            comp_face,
+            {"x": "xiao_cx", "z": f"{z0} + 14 mm"},
+            {"x": "13 mm", "z": "12 mm"},
+            "2.3 mm",
+            "+y",
+            "参照_XIAOのシールド",
+        )
+    )
+    parts.append(
+        lambda: ref_box(
+            comp,
+            "y",
+            comp_face,
+            {"x": "xiao_cx", "z": f"{z0} + {USB_L / 2 - USB_OVER} mm"},
+            {"x": f"{USB_W} mm", "z": f"{USB_L} mm"},
+            f"{USB_T} mm",
+            "+y",
+            "参照_XIAOのUSB",
+        )
+    )
+    # XIAO のピンヘッダとジャンパー線のコネクタ（両側に 7 本ずつ、列の間隔 15.24mm）
+    for sx in ("-", "+"):
+        parts.append(
+            lambda sx=sx: ref_box(
+                comp,
+                "y",
+                f"{comp_face} - {XIAO_PCB} mm",
+                {"x": f"xiao_cx {sx} 7.62 mm", "z": f"{z0} + {XIAO_L / 2} mm"},
+                {"x": "2.54 mm", "z": f"{7 * 2.54} mm"},
+                f"{HEADER_T + DUPONT_L} mm",
+                "-y",
+                "参照_XIAOのコネクタ",
+            )
+        )
+    # USB-C のプラグの根元と、ケーブル（縦の部分と底の溝の部分。曲がるところは描かない）
+    yc = usb_center_y()
+    plug_bot = f"{z0} - {USB_OVER} mm - plug_len"
+    parts.append(
+        lambda: ref_box(
+            comp,
+            "z",
+            f"{z0} - {USB_OVER} mm",
+            {"x": "xiao_cx", "y": yc},
+            {"x": "plug_w", "y": "plug_t"},
+            "plug_len",
+            "-z",
+            "参照_USBプラグ",
+        )
+    )
+
+    def cable():
+        s = Sk(comp, "z", plug_bot, "参照_ケーブル_縦")
+        s.circle({"x": "xiao_cx", "y": yc}, "cable_d")
+        extrude(
+            s, f"({plug_bot}) - groove_h / 2 - 5 mm", "-z", NEW, name="参照_ケーブル"
+        ).bodies.item(0).name = "参照_ケーブル"
+        s2 = Sk(comp, "y", f"{yc} + 5 mm", "参照_ケーブル_溝")
+        s2.circle({"x": "xiao_cx", "z": "groove_h / 2"}, "cable_d")
+        extrude(s2, f"75 mm - ({yc})", "+y", NEW, name="参照_ケーブル").bodies.item(
             0
-        ).name = "参照_スピーカー"
+        ).name = "参照_ケーブル"
 
-    def amp():
-        s = Sk(comp, "y", "-face_y + comp_depth - 3 mm", "参照_アンプ")
-        s.rect({"x": "amp_cx", "z": "comp_zc + amp_cz"}, {"x": "17.8 mm", "z": "19.4 mm"})
-        extrude(s, "3 mm", "+y", NEW, name="参照_アンプ").bodies.item(0).name = "参照_アンプ"
-
-    for n, fn in (("参照 スピーカー", speaker), ("参照 アンプ", amp)):
-        step(n, fn)
+    parts.append(cable)
+    for k, fn in enumerate(parts):
+        step(f"参照部品 {k + 1}", fn)
 
 
 # ---------------------------------------------------------------- 確認と書き出し
@@ -1309,6 +1376,88 @@ def save_view(name: str, eye, target, up=(0, 0, 1)) -> None:
     vp.saveAsImageFile(os.path.join(OUT_DIR, f"{name}.png"), 1600, 1200)
 
 
+# 印刷する向き。部品の中の座標（Fusion の部品の原点）からの回転（軸, 角度）。平らな面を下へ向ける
+PRINT_PARTS = [
+    # (書き出す名前, 刷る数, 回転)
+    ("body", 1, None),
+    ("face_cap", 1, ("x", -90.0)),  # 平らな背面（+Y 向き）を下に
+    ("arm", 2, ("y", -90.0)),  # 平らな取り付け面（-X 向き）を下に
+    ("foot", 2, None),  # 底はもとから下
+    ("eye", 2, None),  # 平らな面はもとから下（部品の XY 平面）
+]
+PEG_COUNT = 2 * len(ARM_PEGS_DZ) + 2
+
+
+def export_print_stls(bodies: dict[str, adsk.fusion.BRepBody]) -> None:
+    """印刷する向きに回し、底を Z = 0・中心を原点に置いた STL を out/print に書き出す。
+
+    回した形を Fusion の部品として作り直すとタイムラインが崩れるので、一時的な形にコピーし、
+    別の（履歴を取らない）ドキュメントに入れて書き出す。
+    """
+    out = os.path.join(OUT_DIR, "print")
+    os.makedirs(out, exist_ok=True)
+    tbm = adsk.fusion.TemporaryBRepManager.get()
+    shapes = []
+    for name, count, rot in PRINT_PARTS:
+        if name not in bodies:
+            continue
+        t = tbm.copy(bodies[name])
+        if rot is not None:
+            m = adsk.core.Matrix3D.create()
+            axis = {"x": (1, 0, 0), "y": (0, 1, 0)}[rot[0]]
+            m.setToRotation(
+                math.radians(rot[1]),
+                adsk.core.Vector3D.create(*axis),
+                adsk.core.Point3D.create(0, 0, 0),
+            )
+            tbm.transform(t, m)
+        shapes.append((name, count, t))
+    pin = tbm.createCylinderOrCone(
+        adsk.core.Point3D.create(0, 0, 0),
+        ev("peg_d / 2"),
+        adsk.core.Point3D.create(0, 0, ev("peg_len")),
+        ev("peg_d / 2"),
+    )
+    shapes.append(("peg", PEG_COUNT, pin))
+
+    src = _app.activeDocument
+    doc = _app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+    try:
+        des = adsk.fusion.Design.cast(doc.products.itemByProductType("DesignProductType"))
+        des.designType = adsk.fusion.DesignTypes.DirectDesignType
+        root = des.rootComponent
+        for name, count, t in shapes:
+            b = t.boundingBox
+            m = adsk.core.Matrix3D.create()
+            m.translation = adsk.core.Vector3D.create(
+                -(b.minPoint.x + b.maxPoint.x) / 2,
+                -(b.minPoint.y + b.maxPoint.y) / 2,
+                -b.minPoint.z,
+            )
+            tbm.transform(t, m)
+            body = root.bRepBodies.add(t)
+            bottom = sum(
+                f.area
+                for f in body.faces
+                if isinstance(f.geometry, adsk.core.Plane)
+                and f.boundingBox.maxPoint.z < 1e-3
+                and abs(f.geometry.normal.z) > 0.99
+            )
+            log(
+                f"PRINT {name} x{count}: {bbox_mm(body)}  台に付く面 {bottom * 100:.0f} mm2"
+                f"  vol {body.volume * 1000:.0f} mm3"
+            )
+            opts = des.exportManager.createSTLExportOptions(
+                body, os.path.join(out, f"futamaru_{name}_x{count}.stl")
+            )
+            opts.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementMedium
+            opts.sendToPrintUtility = False
+            des.exportManager.execute(opts)
+    finally:
+        doc.close(False)
+        src.activate()
+
+
 def run(context) -> None:
     global _app, _design
     _log.clear()
@@ -1365,7 +1514,6 @@ def run(context) -> None:
         if cap is not None:
             step("ふたの厚さ", lambda: check_front_walls(cap))
 
-        # f3d はメーカーの 3D データを読み込む前に書き出す（再配布できないデータを含めないため）
         step(
             "f3d の書き出し",
             lambda: _design.exportManager.execute(
@@ -1376,49 +1524,11 @@ def run(context) -> None:
         )
 
         refs = [ref_occ]
-        for path, name, place in ((XIAO_STEP, "参照_XIAO（印刷しない）", place_xiao),):
-            got = {}
-
-            def do_import(path=path, name=name, place=place, got=got):
-                got["occ"] = import_step(root, path, name, place)
-
-            step(name, do_import)
-            if got.get("occ"):
-                refs.append(got["occ"])
-
-        for occ in printable + [ref_occ]:
+        for occ in printable + refs:
             for b in occ.bRepBodies:
                 if b.isVisible:
                     log(f"BBOX {occ.name} / {b.name}: {bbox_mm(b)}  vol {b.volume * 1000:.0f} mm3")
-        for occ in refs[1:]:
-            bs = all_bodies(occ)
-            lo = [min(getattr(b.boundingBox.minPoint, a) for b in bs) * 10 for a in "xyz"]
-            hi = [max(getattr(b.boundingBox.maxPoint, a) for b in bs) * 10 for a in "xyz"]
-            log(
-                f"BBOX {occ.name}: X {lo[0]:.1f}..{hi[0]:.1f}  Y {lo[1]:.1f}..{hi[1]:.1f}  Z {lo[2]:.1f}..{hi[2]:.1f}"
-            )
         step("干渉チェック", lambda: check_interference(printable, refs))
-
-        def export():
-            em = _design.exportManager
-            for occ, fname in (
-                (body_occ, "futamaru_pot_body"),
-                (plate_occ, "futamaru_pot_face_cap"),
-                (arm_occ, "futamaru_pot_arm"),
-                *[(o, "futamaru_pot_eye") for o in eye_occs[:1]],
-                (foot_occ, "futamaru_pot_foot"),
-            ):
-                bodies = occ.component.bRepBodies
-                if bodies.count == 0:
-                    continue
-                opts = em.createSTLExportOptions(
-                    bodies.item(0), os.path.join(OUT_DIR, fname + ".stl")
-                )
-                opts.meshRefinement = adsk.fusion.MeshRefinementSettings.MeshRefinementMedium
-                opts.sendToPrintUtility = False
-                em.execute(opts)
-
-        step("STL の書き出し", export)
 
         step("色", lambda: apply_colors(printable, eye_occs))
 
@@ -1431,7 +1541,8 @@ def run(context) -> None:
             _app.activeViewport.visualStyle = adsk.core.VisualStyles.ShadedVisualStyle
             save_view("view_iso", (-30, -45, 25), (0, 0, 4.8))
             save_view("view_front", (0, -60, 4.8), (0, 0, 4.8))
-            save_view("view_side_port", (45, 50, 6), (0, 0, 4.8))
+            save_view("view_side", (45, 50, 6), (0, 0, 4.8))
+            save_view("view_bottom", (0, 0, -60), (0, 0, 4.8), (0, 1, 0))
             save_view("view_top", (0, 0, 60), (0, 0, 4.8), (0, 1, 0))
             save_view("view_back_low", (25, 45, -10), (0, 0, 4.8))
             plate_occ.isLightBulbOn = False
@@ -1445,6 +1556,24 @@ def run(context) -> None:
             save_view("view_iso", (-30, -45, 25), (0, 0, 4.8))
 
         step("画像の保存", views)
+
+        def print_stls():
+            first = {
+                "body": body_occ,
+                "face_cap": plate_occ,
+                "arm": arm_occ,
+                "foot": foot_occ,
+                "eye": eye_occs[0] if eye_occs else None,
+            }
+            export_print_stls(
+                {
+                    k: o.component.bRepBodies.item(0)
+                    for k, o in first.items()
+                    if o is not None and o.component.bRepBodies.count
+                }
+            )
+
+        step("印刷用の STL の書き出し", print_stls)
     except Exception:
         log("FATAL\n" + traceback.format_exc())
     finally:
