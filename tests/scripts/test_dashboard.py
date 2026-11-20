@@ -15,6 +15,8 @@ from agent.plant.timeutil import JST
 from scripts import dashboard
 from scripts.dashboard import (
     HOST,
+    LoginBusyError,
+    LoginGuard,
     check_login,
     dashboard_state,
     make_server,
@@ -300,6 +302,12 @@ def test_parse_basic_auth_reads_name_and_password():
         assert parse_basic_auth(header) is None, header
 
 
+def test_parse_basic_auth_rejects_non_ascii_headers():
+    # http.server はヘッダーを latin-1 で読むので、ASCII 以外の文字が届くことがある（#117 のレビュー）
+    assert parse_basic_auth("Basic é") is None
+    assert parse_basic_auth("Basic c2hpb246cGFzcw==あ") is None
+
+
 def test_check_login_accepts_only_the_right_password(db_with_account):
     assert check_login(db_with_account, basic("shion", PASSWORD)) == "shion"
     assert check_login(db_with_account, basic("shion", PASSWORD + "x")) is None
@@ -325,6 +333,131 @@ def test_login_server_returns_401_for_every_path_without_login(login_server):
             assert status == 401, (path, auth)
             assert headers["WWW-Authenticate"].startswith("Basic ")  # ブラウザがログイン画面を出す
             assert "カレー" not in body.decode("utf-8")  # 記憶は返さない
+
+
+def test_login_server_returns_401_for_a_non_ascii_header(login_server):
+    # 前は例外で接続が切れていた（Cloudflare 越しでは 502）。ログインしていないのと同じく 401 にする
+    status, headers, _ = get(login_server + "/api/state", "Basic é")
+    assert status == 401
+    assert headers["WWW-Authenticate"].startswith("Basic ")
+
+
+class FakeClock:
+    """LoginGuard に渡す、進め方を決められる時計（秒）。"""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_login_guard_remembers_a_successful_login_for_a_while(db_with_account, monkeypatch):
+    calls = []
+    real_check = dashboard.check_login
+
+    def counting_check(db_path, header):
+        calls.append(header)
+        return real_check(db_path, header)
+
+    monkeypatch.setattr(dashboard, "check_login", counting_check)
+    clock = FakeClock()
+    guard = LoginGuard(db_with_account, clock=clock)
+    auth = basic("shion", PASSWORD)
+
+    # 1. 最初は計算する。60 秒の間は、同じヘッダーなら計算し直さない
+    assert guard.check(auth) == "shion"
+    clock.now += 59
+    assert guard.check(auth) == "shion"
+    assert len(calls) == 1
+    # 2. 60 秒たったら、もう一度計算する
+    clock.now += 2
+    assert guard.check(auth) == "shion"
+    assert len(calls) == 2
+    # 3. 失敗は覚えない（毎回計算して、毎回 None）
+    wrong = basic("shion", "wrong password")
+    assert guard.check(wrong) is None
+    assert guard.check(wrong) is None
+    assert len(calls) == 4
+
+
+def test_login_guard_limits_concurrent_password_checks(monkeypatch):
+    # 外から大量に試されても、scrypt を同時に max_concurrent 個までしか計算しない（#117 のレビュー）
+    lock = threading.Lock()
+    running = 0
+    peak = 0
+
+    def slow_check(db_path, header):
+        nonlocal running, peak
+        with lock:
+            running += 1
+            peak = max(peak, running)
+        threading.Event().wait(0.05)
+        with lock:
+            running -= 1
+        return None
+
+    monkeypatch.setattr(dashboard, "check_login", slow_check)
+    guard = LoginGuard("unused.db", max_concurrent=2, wait_seconds=5)
+    threads = [
+        threading.Thread(target=guard.check, args=(basic(f"user{i}", "x" * 12),)) for i in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak == 2
+
+
+def test_login_guard_reports_busy_when_no_slot_frees_up(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_check(db_path, header):
+        started.set()
+        release.wait(5)
+        return None
+
+    monkeypatch.setattr(dashboard, "check_login", blocking_check)
+    guard = LoginGuard("unused.db", max_concurrent=1, wait_seconds=0.05)
+    holder = threading.Thread(target=guard.check, args=(basic("a", "x" * 12),))
+    holder.start()
+    started.wait(5)
+    try:
+        with pytest.raises(LoginBusyError):
+            guard.check(basic("b", "x" * 12))
+    finally:
+        release.set()
+        holder.join()
+
+
+def test_login_server_returns_503_while_busy(db_with_account, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_check(db_path, header):
+        started.set()
+        release.wait(5)
+        return None
+
+    monkeypatch.setattr(dashboard, "check_login", blocking_check)
+    guard = LoginGuard(db_with_account, max_concurrent=1, wait_seconds=0.05)
+    server = make_server(db_with_account, ["a1"], 0, require_login=True, login_guard=guard)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://{HOST}:{server.server_address[1]}"
+    holder = threading.Thread(target=get, args=(base + "/api/state", basic("a", "x" * 12)))
+    holder.start()
+    started.wait(5)
+    try:
+        status, headers, body = get(base + "/api/state", basic("b", "x" * 12))
+        assert status == 503
+        assert headers["Retry-After"] == "1"
+        assert "カレー" not in body.decode("utf-8")  # 記憶は返さない
+    finally:
+        release.set()
+        holder.join()
+        server.shutdown()
+        server.server_close()
 
 
 def test_login_server_serves_pages_after_login(login_server):

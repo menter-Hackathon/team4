@@ -24,11 +24,16 @@ from __future__ import annotations
 
 import argparse
 import base64
-import binascii
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
+import secrets
 import sqlite3
+import threading
+import time
+from collections.abc import Callable
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -48,6 +53,15 @@ HOST = "127.0.0.1"
 # ログインを求めるときに返すヘッダー。ブラウザはこれを見て、アカウント名とパスワードを聞く画面を出す。
 # realm はその画面に出る名前。charset="UTF-8" は、パスワードを UTF-8 で送ってほしいという合図
 LOGIN_CHALLENGE = 'Basic realm="futamaru dashboard", charset="UTF-8"'
+# パスワードの計算（scrypt、1 回 16MB・約 30ms）を同時にいくつまでするか（仕様 §6.6「ログイン」）。
+# 外から大量にログインを試されても、同じ PC の LLM・STT を重くしないため（#117 のレビュー）
+LOGIN_MAX_CONCURRENT = 2
+# 計算の空きを待つ最長の秒数。これを過ぎたら 503（混み合っています）を返す
+LOGIN_WAIT_SECONDS = 5.0
+# ログインに成功したヘッダーを覚えておく秒数。ページは 3 秒ごとに読みに来るので、毎回計算しないため
+LOGIN_REMEMBER_SECONDS = 60.0
+# 覚えておくヘッダーの数の上限（メモリを使いすぎないため。ふつうはログインする人の数だけ）
+LOGIN_REMEMBER_MAX = 64
 DEFAULT_PORT = 8765
 # ブラウザに返す HTML。このファイルと同じフォルダに置いてある
 HTML_PATH = Path(__file__).with_name("dashboard.html")
@@ -187,7 +201,7 @@ def parse_basic_auth(header: str | None) -> tuple[str, str] | None:
 
     ブラウザは「Basic <"名前:パスワード" を base64 にしたもの>」を送ってくる。
     例: "Basic c2hpb246cGFzcw==" → ("shion", "pass")
-    ヘッダーが無い・Basic でない・形がおかしいときは None。
+    ヘッダーが無い・Basic でない・形がおかしい（base64 でない・ASCII 以外の文字を含む）ときは None。
     """
     if not header:
         return None
@@ -196,7 +210,11 @@ def parse_basic_auth(header: str | None) -> tuple[str, str] | None:
         return None
     try:
         decoded = base64.b64decode(encoded.strip(), validate=True).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError):
+    except ValueError:
+        # ValueError でまとめて受ける。base64 の形の間違い（binascii.Error）と、
+        # UTF-8 として読めないもの（UnicodeDecodeError）は、どちらも ValueError の仲間。
+        # http.server はヘッダーを latin-1 で読むので、「é」などの ASCII 以外の文字が届くと、
+        # b64decode は素の ValueError を出す（前はこれを受けておらず、接続が切れていた。#117 のレビュー）
         return None
     # パスワードには「:」が入っていてもよいので、最初の「:」だけで分ける
     name, sep, password = decoded.partition(":")
@@ -240,28 +258,121 @@ def check_login(db_path: str, header: str | None) -> str | None:
     return None
 
 
+class LoginBusyError(Exception):
+    """パスワードの計算の空きを待ちきれなかった（外から大量にログインを試されているときなど）。"""
+
+
+class LoginGuard:
+    """check_login() を、同時に計算する数の制限と、成功したログインの記憶で包む（仕様 §6.6「ログイン」）。
+
+    なぜ要るか（#117 のレビュー）:
+        - check_login() は 1 回ごとに scrypt（16MB・約 30ms）を計算する。http.server は
+          リクエストごとにスレッドを作るので、そのままだと外から大量に試されたとき、
+          いくつでも同時に計算して、同じ PC の LLM・STT を重くしてしまう
+        - ページは 3 秒ごとに /api/state を読みに来るので、ログインした人の分も毎回計算することになる
+
+    やること:
+        1. 成功したヘッダーを LOGIN_REMEMBER_SECONDS（60 秒）だけ覚えておき、その間は計算しない。
+           ヘッダーそのもの（パスワード入り）ではなく、起動ごとに作る鍵で HMAC にしたものを覚える
+        2. 覚えていなければ、同時に max_concurrent 個までに絞って check_login() を呼ぶ。
+           wait_seconds 待っても空かなければ LoginBusyError（ハンドラが 503 にする）
+        3. 失敗は覚えない（毎回計算する。総当たりを速くしないため）
+
+    例:
+        guard = LoginGuard("data/futamaru.db")
+        guard.check("Basic c2hpb246...")  # → "shion"（合っていれば）か None
+    """
+
+    def __init__(
+        self,
+        db_path: str,
+        *,
+        max_concurrent: int = LOGIN_MAX_CONCURRENT,
+        wait_seconds: float = LOGIN_WAIT_SECONDS,
+        remember_seconds: float = LOGIN_REMEMBER_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        """引数:
+        db_path: アカウントを探す DB
+        max_concurrent: 同時に計算する数の上限
+        wait_seconds: 計算の空きを待つ最長の秒数
+        remember_seconds: 成功したログインを覚えておく秒数
+        clock: 今の時刻（秒）を返す関数。テストで偽物に差し替える
+        """
+        self._db_path = db_path
+        self._slots = threading.BoundedSemaphore(max_concurrent)
+        self._wait_seconds = wait_seconds
+        self._remember_seconds = remember_seconds
+        self._clock = clock
+        # 覚えておく鍵。起動ごとに作り直すので、再起動すると覚えたログインは消える
+        self._key = secrets.token_bytes(32)
+        # ヘッダーの HMAC → (アカウント名, 覚えておく期限)
+        self._remembered: dict[bytes, tuple[str, float]] = {}
+        self._lock = threading.Lock()  # _remembered を複数のスレッドから触るため
+
+    def check(self, header: str | None) -> str | None:
+        """ヘッダーのログインが合っていればアカウント名、合っていなければ None を返す。
+
+        計算の空きを wait_seconds 待っても空かなければ LoginBusyError を出す。
+        """
+        if not header:
+            return None
+        # 1. 覚えている成功のログインなら、計算せずに返す
+        digest = hmac.new(
+            self._key, header.encode("utf-8", "surrogatepass"), hashlib.sha256
+        ).digest()
+        now = self._clock()
+        with self._lock:
+            remembered = self._remembered.get(digest)
+        if remembered is not None and remembered[1] > now:
+            return remembered[0]
+        # 2. 同時に計算する数を絞って確かめる
+        if not self._slots.acquire(timeout=self._wait_seconds):
+            raise LoginBusyError
+        try:
+            name = check_login(self._db_path, header)
+        finally:
+            self._slots.release()
+        # 3. 成功だけを覚える
+        if name is not None:
+            self._remember(digest, name, now + self._remember_seconds)
+        return name
+
+    def _remember(self, digest: bytes, name: str, expires_at: float) -> None:
+        """成功したログインを覚える。上限を超えそうなら、期限切れを捨て、それでも多ければ全部忘れる。"""
+        with self._lock:
+            if len(self._remembered) >= LOGIN_REMEMBER_MAX:
+                now = self._clock()
+                self._remembered = {k: v for k, v in self._remembered.items() if v[1] > now}
+                if len(self._remembered) >= LOGIN_REMEMBER_MAX:
+                    # 忘れても、次のリクエストで計算し直すだけ（ログインし直しにはならない）
+                    self._remembered.clear()
+            self._remembered[digest] = (name, expires_at)
+
+
 def make_handler(
-    db_path: str, plant_ids: list[str], require_login: bool = False
+    db_path: str,
+    plant_ids: list[str],
+    require_login: bool = False,
+    login_guard: LoginGuard | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """DB のパスと株を覚えた、リクエストの受け付け役（ハンドラ）のクラスを作る。
 
     require_login=True なら、どのページでも先にログインを確かめ、ログインしていなければ 401 を返す。
+    login_guard: ログインの確かめ役。None なら db_path で作る（テストでは設定を変えたものを渡す）
     http.server はクラスを渡す決まりなので、引数を閉じ込めたクラスをその場で作って返す。
     """
+    # サーバー 1 つに 1 つの確かめ役を作り、全部のリクエスト（スレッド）で使い回す
+    guard = login_guard or LoginGuard(db_path)
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # 名前は http.server の決まり（GET を受けると呼ばれる）
             """GET を受け付ける。/ → HTML、/api/state → JSON、/types/<名前>.png → イラスト、それ以外 → 404。
 
             require_login なら、どのパスでも中身を返す前にログインを確かめる（404 かどうかも教えない）。
+            パスワードの計算が混み合っているときは 503 を返す（中身は返さない）。
             """
-            if require_login and check_login(db_path, self.headers.get("Authorization")) is None:
-                self._send(
-                    401,
-                    "text/plain; charset=utf-8",
-                    "ログインが必要です".encode(),
-                    {"WWW-Authenticate": LOGIN_CHALLENGE},
-                )
+            if require_login and not self._logged_in():
                 return
             path = self.path.split("?", 1)[0]
             if path.startswith("/types/"):
@@ -274,6 +385,32 @@ def make_handler(
                 self._send(200, "application/json; charset=utf-8", body)
             else:
                 self._send(404, "text/plain; charset=utf-8", b"not found")
+
+        def _logged_in(self) -> bool:
+            """ログインを確かめる。だめなら、ここで 401 か 503 を返して False。
+
+            401: ログインしていない・パスワードが違う・ヘッダーの形がおかしい（ブラウザがログイン画面を出す）
+            503: パスワードの計算が混み合っている（ブラウザは 1 秒後にまた読みに来る。ログイン画面は出さない）
+            """
+            try:
+                name = guard.check(self.headers.get("Authorization"))
+            except LoginBusyError:
+                self._send(
+                    503,
+                    "text/plain; charset=utf-8",
+                    "混み合っています。少し待ってから開き直してください".encode(),
+                    {"Retry-After": "1"},
+                )
+                return False
+            if name is None:
+                self._send(
+                    401,
+                    "text/plain; charset=utf-8",
+                    "ログインが必要です".encode(),
+                    {"WWW-Authenticate": LOGIN_CHALLENGE},
+                )
+                return False
+            return True
 
         def _send_type_image(self, name: str) -> None:
             """タイプのイラストを返す。17 タイプの英語名以外・まだ描かれていないものは 404。"""
@@ -314,16 +451,19 @@ def make_server(
     port: int,
     host: str = HOST,
     require_login: bool | None = None,
+    login_guard: LoginGuard | None = None,
 ) -> ThreadingHTTPServer:
     """host の port で待ち受けるサーバーを作る（port=0 なら空いている番号。テスト用）。
 
     host は既定の 127.0.0.1（この PC からだけ開ける）のままにする。
     0.0.0.0 にするのは Docker のコンテナの中だけ（compose.yaml。トンネルからも届く）。
     require_login: ログインを求めるか。None なら host で決める（127.0.0.1 以外なら求める、needs_login）
+    login_guard: ログインの確かめ役（LoginGuard）。None なら既定の設定で作る
     """
     if require_login is None:
         require_login = needs_login(host)
-    return ThreadingHTTPServer((host, port), make_handler(db_path, plant_ids, require_login))
+    handler = make_handler(db_path, plant_ids, require_login, login_guard)
+    return ThreadingHTTPServer((host, port), handler)
 
 
 def _warn_if_no_accounts(db_path: str) -> None:
